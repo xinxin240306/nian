@@ -645,6 +645,10 @@ async function initDB() {
     `ALTER TABLE messages ADD COLUMN recall_seen INTEGER DEFAULT 0`,
     `ALTER TABLE characters ADD COLUMN chat_model TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN group_talkativeness TEXT DEFAULT 'normal'`,
+    `ALTER TABLE group_chats ADD COLUMN announcement TEXT DEFAULT ''`,
+    `ALTER TABLE group_chats ADD COLUMN remark TEXT DEFAULT ''`,
+    `ALTER TABLE group_chats ADD COLUMN muted INTEGER DEFAULT 0`,
+    `ALTER TABLE group_chats ADD COLUMN show_member_names INTEGER DEFAULT 1`,
     `ALTER TABLE characters ADD COLUMN music_preference TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN circle_npc_id INTEGER DEFAULT NULL`,
     `CREATE TABLE IF NOT EXISTS char_monitor_outfit_snapshots (

@@ -18702,6 +18702,171 @@ html[data-color-scheme="dark"] .group-create-actions {
   border-top-color: rgba(255,255,255,0.08);
 }
 
+.group-npc-tag,
+.group-settings-member-name em {
+  font-style: normal;
+  font-size: 11px;
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme) 14%, transparent);
+  color: var(--theme-dark);
+}
+.contacts-status-tag.is-muted {
+  background: rgba(120,120,120,0.14);
+  color: var(--text-secondary);
+}
+.group-mute-tag {
+  font-size: 13px;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+.group-announcement-banner {
+  flex-shrink: 0;
+  margin: 0 12px 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--theme) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.group-composer.chat-composer {
+  align-items: flex-end;
+}
+.group-composer .group-at-btn {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 2px;
+}
+.group-toolbar-panel {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  padding: 12px 8px max(12px, var(--sab));
+  background: var(--chrome-white);
+}
+html[data-color-scheme="dark"] .group-toolbar-panel {
+  background: #1e1824;
+  border-top-color: rgba(255,255,255,0.08);
+}
+#group-emoji-panel {
+  flex-shrink: 0;
+}
+.group-settings-overlay {
+  z-index: 8500;
+}
+.group-settings-body {
+  padding-bottom: max(24px, var(--sab));
+}
+.group-settings-members {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px 8px;
+  padding: 16px 14px 8px;
+}
+.group-settings-member {
+  text-align: center;
+  min-width: 0;
+}
+.group-settings-member-av {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 6px;
+  border-radius: 10px;
+  overflow: visible;
+  background: color-mix(in srgb, var(--theme) 12%, #e8e8e8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.group-settings-member-av img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+}
+.group-settings-member-av.add {
+  font-size: 28px;
+  color: var(--text-secondary);
+  border: 1px dashed color-mix(in srgb, var(--theme) 40%, #bbb);
+  background: transparent;
+}
+.group-settings-member-rm {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: #e74c3c;
+  color: #fff;
+  font-size: 14px;
+  line-height: 18px;
+  padding: 0;
+  cursor: pointer;
+}
+.group-settings-member-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-settings-block {
+  margin: 10px 12px;
+}
+.group-settings-block .settings-row {
+  justify-content: space-between;
+  gap: 12px;
+}
+.group-settings-block .settings-row-value {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-settings-block .chev {
+  color: var(--text-secondary);
+  opacity: 0.6;
+  font-size: 16px;
+}
+.group-settings-danger {
+  padding: 20px 16px 8px;
+}
+.group-settings-danger .btn {
+  width: 100%;
+}
+.group-search-results {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 120px;
+  max-height: 45vh;
+  padding: 4px 8px;
+}
+.group-search-item {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+html[data-color-scheme="dark"] .group-search-item {
+  border-bottom-color: rgba(255,255,255,0.08);
+}
+
 /* ===== 写真馆 ===== */
 #photostudio-page {
   color: var(--text-primary);

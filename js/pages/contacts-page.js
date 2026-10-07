@@ -281,13 +281,15 @@ async function renderInbox() {
             preview = sn ? `${sn}: ${body}` : body;
           }
         }
-        const unread = window.getGroupUnreadCount?.(g.id) || 0;
+        if (g.muted) window.setGroupMuted?.(g.id, true);
+        const unread = g.muted ? 0 : (window.getGroupUnreadCount?.(g.id) || 0);
+        const title = g.remark || g.title || '群聊';
         return `
       <div class="inbox-conv-row" onclick="openGroupChat(${g.id})">
         <div class="inbox-conv-avatar group-inbox-avatar">${avatars || '<div class="avatar" style="font-size:20px">👥</div>'}</div>
         <div class="inbox-conv-main">
           <div class="inbox-conv-top">
-            <div class="inbox-conv-name">${escapeHtml(g.title || '群聊')}<span class="contacts-status-tag is-group">群</span></div>
+            <div class="inbox-conv-name">${escapeHtml(title)}<span class="contacts-status-tag is-group">群</span>${g.muted ? '<span class="contacts-status-tag is-muted" title="免打扰">静音</span>' : ''}</div>
             <div class="inbox-conv-meta">
               <span class="inbox-conv-time">${m ? fmtTime(m.timestamp) : ''}</span>
             </div>
@@ -1519,12 +1521,10 @@ window.openMeLegal = function() {
     <div class="me-page me-page--detail">
       <article class="me-legal">
         <h1>念 · 使用声明与免责协议</h1>
-        <p class="me-legal-meta">适用于「念」（NIAN）项目及基于本项目自托管部署、使用的全部情形。</p>
+        <p class="me-legal-meta">适用于「念」（NIAN）开源项目及基于本项目二次分发、部署、使用的全部情形。</p>
 
         <h2>1. 开源与授权</h2>
-        <p>本项目以源码形式发布。允许个人非商业自托管部署，亦允许为个人使用而修改代码。</p>
-        <p><strong>禁止</strong>：将修改后再分发（禁止二改公开分发）；禁止商业使用。</p>
-        <p>完整条款以仓库内 LICENSE 文件为准。若尚未附带许可证，并不构成对你生成内容的任何担保或背书。</p>
+        <p>本项目计划以开源形式发布于 GitHub。你可在遵守对应开源许可证的前提下使用、修改、部署与分发本软件。许可证全文以仓库内 LICENSE 文件为准；若尚未附带许可证，并不构成对你生成内容的任何担保或背书。</p>
 
         <h2>2. 生成内容与责任</h2>
         <p>「念」会通过大模型、语音合成、图像等能力生成文本、语音、图片及其他内容。这些内容由你（或你所部署环境的使用者）触发与配置，其结果<strong>完全由使用者自行负责</strong>。</p>

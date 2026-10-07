@@ -234,18 +234,24 @@ function typingDelayForText(text) {
 
 function insertGroupMessage(db, {
   groupId, role, speakerId = null, content, type = 'text', deliveryMode = '', replyToId = null,
+  mediaMeta = '',
 }) {
+  let meta = '';
+  if (mediaMeta != null && mediaMeta !== '') {
+    meta = typeof mediaMeta === 'string' ? mediaMeta : JSON.stringify(mediaMeta);
+  }
   const r = db.prepare(`
-    INSERT INTO group_messages (group_id, role, speaker_character_id, content, type, reply_to_id, delivery_mode, timestamp)
-    VALUES (?,?,?,?,?,?,?,datetime('now'))
+    INSERT INTO group_messages (group_id, role, speaker_character_id, content, type, reply_to_id, delivery_mode, media_meta, timestamp)
+    VALUES (?,?,?,?,?,?,?,?,datetime('now'))
   `).run(
     groupId,
     role,
     speakerId,
     String(content || ''),
-    type,
+    type || 'text',
     replyToId,
     deliveryMode || '',
+    meta,
   );
   db.prepare(`UPDATE group_chats SET updated_at=datetime('now') WHERE id=?`).run(groupId);
   return db.prepare('SELECT * FROM group_messages WHERE id=?').get(r.lastInsertRowid);

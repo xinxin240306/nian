@@ -88,6 +88,18 @@ export const saveChatSettings = (v, charId) => {
   else lsSet('chat_settings', v);
 };
 
+/** 群聊外观（按群 id，与单聊通讯设置外观字段同形） */
+export const getGroupChatSettings = (groupId) => {
+  if (groupId == null) return { ...CHAT_SETTINGS_DEFAULTS };
+  const own = lsGet(`group_chat_settings_${groupId}`, null);
+  if (own && typeof own === 'object') return { ...CHAT_SETTINGS_DEFAULTS, ...own };
+  return { ...CHAT_SETTINGS_DEFAULTS };
+};
+export const saveGroupChatSettings = (v, groupId) => {
+  if (groupId == null) return;
+  lsSet(`group_chat_settings_${groupId}`, v);
+};
+
 // 主题色缓存
 export const getThemeColor = () => lsGet('theme_color', '#c9a0dc');
 export const saveThemeColor = (c) => lsSet('theme_color', c);

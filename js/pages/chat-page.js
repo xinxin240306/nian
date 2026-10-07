@@ -8562,7 +8562,9 @@ function onVoiceDocPointerCancel(e) {
 
 async function beginVoiceRecording(e) {
   if (_callLiveOn) return;
-  if (_voiceSending || _voiceRec || _voiceStarting || !charId) return;
+  const holdIdHint = e?.currentTarget?.id || _activeVoiceHoldId || '';
+  const forGroupVoice = holdIdHint === 'group-hold-talk' || !!window._groupChatVoiceTarget;
+  if (_voiceSending || _voiceRec || _voiceStarting || (!charId && !forGroupVoice)) return;
   if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
     window.showToast?.('录音需要 HTTPS 或 localhost');
     return;
@@ -8748,6 +8750,20 @@ async function finishVoiceRecording({ cancel = false, force = false } = {}) {
       duration: uploaded.duration || durationSec,
       voiceprint: uploaded.voiceprint || null,
     });
+    const fromGroup = _activeVoiceHoldId === 'group-hold-talk'
+      || (window._groupChatVoiceTarget && document.getElementById('group-chat-page')?.classList?.contains('active'));
+    if (fromGroup && window._groupChatVoiceTarget && window.sendGroupVoiceMessage) {
+      await window.sendGroupVoiceMessage(content, { duration: uploaded.duration || durationSec });
+      const vpResultG = uploaded.voiceprint?.result;
+      const vpHintG = vpResultG === 'match' ? '声纹：听着是你'
+        : vpResultG === 'mismatch' ? '声纹：不像本人'
+          : vpResultG === 'uncertain' ? '声纹：不够确定'
+            : vpResultG === 'music' ? '声纹：像歌曲，不当你'
+              : vpResultG === 'noise' ? '声纹：像环境声'
+                : '';
+      if (vpHintG) window.showToast?.(vpHintG);
+      return;
+    }
     const targetId = _activeVoiceHoldId === 'call-hold-talk' ? callCharId : charId;
     const fromCall = _activeVoiceHoldId === 'call-hold-talk';
     // 聊天页语音：先入库攒着（同表情包），点 ↑ 再统一让角色回；通话里仍即时回复
@@ -8787,6 +8803,7 @@ function ensureVoiceHoldBound(holdId = 'chat-hold-talk') {
   _voiceHoldBoundIds.add(holdId);
   bindVoiceDocListeners();
 }
+window.ensureVoiceHoldBound = ensureVoiceHoldBound;
 
 window.openCamera = function() {
   const el = document.getElementById('cam-input');
@@ -9764,6 +9781,8 @@ window.openChatSettings = async function() {
 
     const voiceIdEl = document.getElementById('cs-voice-id');
     if (voiceIdEl) voiceIdEl.value = char.voice_id || '';
+    const voiceIdNsfwEl = document.getElementById('cs-voice-id-nsfw');
+    if (voiceIdNsfwEl) voiceIdNsfwEl.value = char.voice_id_nsfw || '';
     const voiceMsgEl = document.getElementById('cs-voice-messages');
     if (voiceMsgEl) voiceMsgEl.checked = !!char.voice_messages;
     const musicScoreEl = document.getElementById('cs-music-score');
@@ -9940,6 +9959,7 @@ window.saveChatSettingsUI = async function() {
     try {
       const timezone = document.getElementById('cs-timezone')?.value || 'Asia/Shanghai';
       const voiceId = document.getElementById('cs-voice-id')?.value?.trim() || '';
+      const voiceIdNsfw = document.getElementById('cs-voice-id-nsfw')?.value?.trim() || '';
       const voiceMessages = document.getElementById('cs-voice-messages')?.checked ? 1 : 0;
       const musicScoreEnabled = document.getElementById('cs-music-score')?.checked ? 1 : 0;
       const mood = document.getElementById('cs-mood')?.value?.trim() || '';
@@ -9964,6 +9984,7 @@ window.saveChatSettingsUI = async function() {
         ...currentChar,
         timezone,
         voice_id: voiceId,
+        voice_id_nsfw: voiceIdNsfw,
         voice_messages: voiceMessages,
         music_score_enabled: musicScoreEnabled,
         mood,
@@ -10233,6 +10254,7 @@ function applyBubbleStyle(s) {
   applyBubbleStyleToEl(document.getElementById('cs-custom-bubble-preview-stage'), s);
   applyCustomBubbleCss(normalizeBubbleShape(s.bubbleShape || 'default') === 'custom' ? (s.customBubbleCss || '') : '');
 }
+window.applyBubbleStyleToEl = applyBubbleStyleToEl;
 
 // 自定义气泡注入后追加：只锁语音条横排，不写死宽高（与文字气泡同一套尺寸规则）
 const VOICE_BUBBLE_LAYOUT_LOCK = `

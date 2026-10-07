@@ -135,6 +135,8 @@ async function showPage(name) {
   const leavingGroup = name !== 'group-chat' && document.getElementById('group-chat-page')?.classList.contains('active');
   if (leavingGroup) {
     window._activeGroupId = null;
+    window._groupChatVoiceTarget = null;
+    try { window.closeGroupInfo?.(); } catch {}
   }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   clearInactivePageKeyboardLayout();
@@ -514,9 +516,23 @@ window.formatMomentNotifyText = function(data) {
 // ===== 消息通知横幅（AI 后台回复时用）=====
 const _unreadCounts = {}; // charId → count
 const _groupUnreadCounts = {}; // groupId → count
+const _mutedGroupIds = new Set(); // 免打扰群：不累计打扰角标
 
 window.getUnreadCount = (charId) => _unreadCounts[String(charId)] || 0;
 window.getGroupUnreadCount = (groupId) => _groupUnreadCounts[String(groupId)] || 0;
+window.setGroupMuted = (groupId, muted) => {
+  const key = String(groupId);
+  if (muted) {
+    _mutedGroupIds.add(key);
+    _groupUnreadCounts[key] = 0;
+    updateInboxBadges();
+    updateHomeChatBadge();
+    window.updateContactsTabBadge?.();
+  } else {
+    _mutedGroupIds.delete(key);
+  }
+};
+window.isGroupMuted = (groupId) => _mutedGroupIds.has(String(groupId));
 window.getTotalUnreadCount = () => {
   const chars = Object.values(_unreadCounts).reduce((s, n) => s + (Number(n) || 0), 0);
   const groups = Object.values(_groupUnreadCounts).reduce((s, n) => s + (Number(n) || 0), 0);
@@ -532,6 +548,7 @@ window.incrementUnread = (charId, count = 1) => {
 };
 window.bumpGroupUnread = (groupId, count = 1) => {
   const key = String(groupId);
+  if (_mutedGroupIds.has(key)) return;
   const n = Math.max(1, parseInt(count, 10) || 1);
   _groupUnreadCounts[key] = (_groupUnreadCounts[key] || 0) + n;
   updateInboxBadges();
