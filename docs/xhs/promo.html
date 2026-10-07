@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>念 · 小红书宣传图</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --theme: #c9a0dc;
+    --theme-light: #e8d5f5;
+    --theme-dark: #9b6db4;
+    --ink: #2d1b3d;
+    --muted: #6b4d7f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: #1a1520;
+    color: var(--ink);
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    padding: 24px 16px 80px;
+  }
+  .toolbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    margin: 0 auto 20px; max-width: 1080px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.92);
+    border-radius: 16px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+  }
+  .toolbar h1 { font-size: 15px; font-weight: 600; flex: 1; min-width: 160px; }
+  .toolbar button, .toolbar a {
+    border: 0; cursor: pointer;
+    background: var(--theme-dark); color: #fff;
+    padding: 8px 12px; border-radius: 999px;
+    font-size: 13px; text-decoration: none;
+    font-family: inherit;
+  }
+  .toolbar button.ghost { background: var(--theme-light); color: var(--ink); }
+  .hint { width: 100%; font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+  .deck {
+    display: flex; flex-direction: column; gap: 28px;
+    align-items: center;
+  }
+
+  /* 小红书常见 3:4 */
+  .slide {
+    width: min(1080px, 100%);
+    aspect-ratio: 3 / 4;
+    position: relative;
+    overflow: hidden;
+    border-radius: 28px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+    background:
+      radial-gradient(ellipse 80% 55% at 20% 15%, rgba(255,255,255,0.65), transparent 55%),
+      radial-gradient(ellipse 70% 50% at 85% 20%, rgba(232,213,245,0.9), transparent 50%),
+      radial-gradient(ellipse 90% 70% at 50% 100%, rgba(201,160,220,0.45), transparent 60%),
+      linear-gradient(165deg, #f7f0fc 0%, #efe4f8 38%, #e5d4f2 72%, #d8c0e8 100%);
+  }
+  .slide::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 70% 75%, rgba(255,255,255,0.35), transparent 40%),
+      url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+  }
+  .slide-inner {
+    position: relative; z-index: 1;
+    height: 100%;
+    padding: clamp(28px, 5.5vw, 64px);
+    display: flex; flex-direction: column;
+  }
+  .eyebrow {
+    font-size: clamp(13px, 2vw, 20px);
+    letter-spacing: 0.28em;
+    color: var(--theme-dark);
+    text-transform: uppercase;
+    opacity: 0.85;
+  }
+  .brand {
+    font-family: "ZCOOL XiaoWei", "Noto Serif SC", serif;
+    font-size: clamp(64px, 12vw, 128px);
+    line-height: 1;
+    color: var(--ink);
+    margin-top: 10px;
+    text-shadow: 0 2px 0 rgba(255,255,255,0.4);
+  }
+  .tagline {
+    margin-top: 18px;
+    font-size: clamp(18px, 3.2vw, 32px);
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: 16em;
+  }
+  .footer-note {
+    margin-top: auto;
+    font-size: clamp(13px, 1.8vw, 18px);
+    color: var(--theme-dark);
+    opacity: 0.9;
+  }
+  .slide-num {
+    position: absolute; right: clamp(20px, 4vw, 40px); bottom: clamp(20px, 4vw, 40px);
+    font-size: 13px; letter-spacing: 0.2em; color: var(--muted); opacity: 0.7;
+  }
+
+  h2.slide-title {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 700;
+    line-height: 1.25;
+    margin: 12px 0 20px;
+  }
+  .lead {
+    font-size: clamp(16px, 2.4vw, 24px);
+    line-height: 1.65;
+    color: var(--muted);
+    margin-bottom: 22px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(10px, 1.8vw, 18px);
+    margin-top: 8px;
+  }
+  .tile {
+    background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.7);
+    backdrop-filter: blur(10px);
+    border-radius: 20px;
+    padding: clamp(14px, 2.2vw, 22px);
+    box-shadow: 0 8px 24px rgba(148,92,184,0.12);
+  }
+  .tile b {
+    display: block;
+    font-size: clamp(16px, 2.3vw, 22px);
+    margin-bottom: 6px;
+  }
+  .tile span {
+    display: block;
+    font-size: clamp(13px, 1.9vw, 17px);
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .steps {
+    display: flex; flex-direction: column; gap: 14px;
+    margin-top: 8px;
+  }
+  .step {
+    display: flex; gap: 14px; align-items: flex-start;
+    background: rgba(255,255,255,0.5);
+    border-radius: 18px;
+    padding: 14px 16px;
+  }
+  .step i {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--theme-dark); color: #fff;
+    display: grid; place-items: center;
+    font-style: normal; font-size: 14px; flex-shrink: 0;
+  }
+  .step p {
+    font-size: clamp(15px, 2.2vw, 20px);
+    line-height: 1.45;
+    color: var(--ink);
+  }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill {
+    background: rgba(255,255,255,0.65);
+    border: 1px solid rgba(201,160,220,0.45);
+    color: var(--theme-dark);
+    padding: 8px 14px; border-radius: 999px;
+    font-size: clamp(13px, 1.9vw, 17px);
+  }
+  .quote {
+    margin-top: 18px;
+    padding: 18px 20px;
+    border-left: 3px solid var(--theme);
+    background: rgba(255,255,255,0.4);
+    border-radius: 0 16px 16px 0;
+    font-size: clamp(16px, 2.4vw, 24px);
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .soft-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(2px);
+    pointer-events: none;
+  }
+  .orb-a { width: 42%; height: 28%; right: -8%; top: -6%; background: rgba(255,255,255,0.45); }
+  .orb-b { width: 50%; height: 34%; left: -16%; bottom: -8%; background: rgba(201,160,220,0.35); }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .toolbar { display: none; }
+    .deck { gap: 0; }
+    .slide {
+      border-radius: 0; box-shadow: none;
+      page-break-after: always;
+      width: 1080px; height: 1440px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>念 · 小红书宣传图（3:4）</h1>
+    <button type="button" class="ghost" onclick="window.print()">打印 / 另存为 PDF</button>
+    <a href="../部署指南-小白版.md">打开部署文档</a>
+    <p class="hint">用法：浏览器全屏打开本页 → 对每张卡片截图（推荐宽度约 1080）→ 按顺序发小红书九图。文案可直接复制下方「配文建议」。</p>
+  </div>
+
+  <div class="deck">
+    <!-- 1 封面 -->
+    <section class="slide" id="s1">
+      <div class="soft-orb orb-a"></div>
+      <div class="soft-orb orb-b"></div>
+      <div class="slide-inner">
+        <div class="eyebrow">CROSS-WORLD COMM</div>
+        <div class="brand">念</div>
+        <p class="tagline">你们分别身处不同的世界，<br />「念」是唯一连接你们的方式。</p>
+        <p class="footer-note">开源自托管 · 一个人的跨世界通讯软件</p>
+      </div>
+      <span class="slide-num">01 / 06</span>
+    </section>
+
+    <!-- 2 是什么 -->
+    <section class="slide" id="s2">
+      <div class="slide-inner">
+        <div class="eyebrow">WHAT IS NIAN</div>
+        <h2 class="slide-title">不是普通聊天机器人</h2>
+        <p class="lead">角色有自己的生活、时间和节奏。你用「念」联络对方——像跨世界通讯，而不是线下见面的社交 App。</p>
+        <div class="quote">写人设、养记忆、看朋友圈、读日记、进梦境……像在和一个真实存在于另一边的人慢慢相处。</div>
+        <div class="pill-row">
+          <span class="pill">单机自托管</span>
+          <span class="pill">自备 API Key</span>
+          <span class="pill">手机网页 / Android 壳</span>
+        </div>
+        <p class="footer-note">数据在你自己的电脑或服务器上</p>
+      </div>
+      <span class="slide-num">02 / 06</span>
+    </section>
+
+    <!-- 3 日常怎么玩 -->
+    <section class="slide" id="s3">
+      <div class="slide-inner">
+        <div class="eyebrow">HOW TO PLAY</div>
+        <h2 class="slide-title">日常可以这样玩</h2>
+        <div class="grid">
+          <div class="tile"><b>💬 通讯</b><span>文字 / 语音 / 图片，像真的在聊天</span></div>
+          <div class="tile"><b>🌙 梦境</b><span>独立空间，适合沉浸式描写与叙事</span></div>
+          <div class="tile"><b>📔 日记</b><span>你写日记，角色也会写自己的一天</span></div>
+          <div class="tile"><b>📅 日历</b><span>看行程与心情，生活线慢慢堆起来</span></div>
+          <div class="tile"><b>🌿 朋友圈</b><span>动态、评论，像隔空刷到对方日常</span></div>
+          <div class="tile"><b>🧠 记忆</b><span>自动总结，角色会记得你们经历过什么</span></div>
+        </div>
+      </div>
+      <span class="slide-num">03 / 06</span>
+    </section>
+
+    <!-- 4 更多玩法 -->
+    <section class="slide" id="s4">
+      <div class="slide-inner">
+        <div class="eyebrow">MORE WORLDS</div>
+        <h2 class="slide-title">还想更沉浸？</h2>
+        <div class="grid">
+          <div class="tile"><b>👥 圈子</b><span>NPC 人际关系、朋友圈与通讯录</span></div>
+          <div class="tile"><b>📖 世界书</b><span>写好世界观，角色说话更贴设定</span></div>
+          <div class="tile"><b>🎭 预设</b><span>注入风格与规则，调出你喜欢的语气</span></div>
+          <div class="tile"><b>🕹️ 游戏</b><span>真心话、默契翻牌、五子棋等一起玩</span></div>
+          <div class="tile"><b>⏳ 时空</b><span>穿越 / 平行线式长篇互动叙事</span></div>
+          <div class="tile"><b>📹 监控</b><span>文字实况，像偷看对方世界的一角</span></div>
+        </div>
+        <p class="footer-note">喜欢养角色、写故事、过日子的人会很上瘾</p>
+      </div>
+      <span class="slide-num">04 / 06</span>
+    </section>
+
+    <!-- 5 怎么开始 -->
+    <section class="slide" id="s5">
+      <div class="slide-inner">
+        <div class="eyebrow">GET STARTED</div>
+        <h2 class="slide-title">小白也能搭起来</h2>
+        <p class="lead">不需要会写代码。准备一台电脑（或一台云服务器）+ 自己的模型 API Key。</p>
+        <div class="steps">
+          <div class="step"><i>1</i><p>打开 GitHub 仓库 <b>xinxin240306/nian</b>，下载或克隆源码</p></div>
+          <div class="step"><i>2</i><p>按《部署指南 · 小白版》一步步复制命令（Windows 可直接双击 start.bat）</p></div>
+          <div class="step"><i>3</i><p>浏览器打开 localhost:3000 → 设置里填 API → 创建角色 → 开聊</p></div>
+          <div class="step"><i>4</i><p>进阶：挂到 VPS + 域名；再进阶：接 Stack-chan 小机</p></div>
+        </div>
+      </div>
+      <span class="slide-num">05 / 06</span>
+    </section>
+
+    <!-- 6 许可与注意 -->
+    <section class="slide" id="s6">
+      <div class="slide-inner">
+        <div class="eyebrow">PLEASE NOTE</div>
+        <h2 class="slide-title">使用前请看清</h2>
+        <div class="steps">
+          <div class="step"><i>✓</i><p>允许个人非商业自托管，数据在你自己环境里</p></div>
+          <div class="step"><i>✓</i><p>API 费用、内容与后果由使用者自行承担</p></div>
+          <div class="step"><i>!</i><p>禁止商业使用；禁止把修改版再公开分发（禁止二改）</p></div>
+          <div class="step"><i>!</i><p>Stack-chan 对接仍在完善，公开版请降低预期</p></div>
+        </div>
+        <p class="quote" style="margin-top:auto">仓库与说明见 GitHub：xinxin240306/nian<br />部署文档在仓库 docs 文件夹</p>
+      </div>
+      <span class="slide-num">06 / 06</span>
+    </section>
+  </div>
+
+  <div class="toolbar" style="margin-top:28px; position:static">
+    <h1>小红书配文建议（可直接复制）</h1>
+    <button type="button" class="ghost" onclick="copyCaption()">复制配文</button>
+    <pre id="caption" class="hint" style="white-space:pre-wrap; margin-top:8px; font-family:inherit">念 · 跨世界通讯软件开源啦
+
+不是普通 AI 聊天框——
+角色有自己的时间、日记、朋友圈和记忆，
+你们像隔着世界用「念」联络。
+
+可以：聊天 / 梦境 / 日记日历 / 朋友圈圈子 / 时空叙事 / 小游戏…
+自己电脑或服务器部署，数据在自己手里。
+
+小白也能跟文档一步步搭（Windows 有一键脚本）
+进阶还能挂 VPS，再进阶接小机（仍在完善）
+
+GitHub：xinxin240306/nian
+个人非商业自用 · 禁止商用 · 禁止二改公开分发
+
+#AI角色 #开源项目 #自托管 #赛博伴侣 #异世界</pre>
+  </div>
+
+<script>
+function copyCaption() {
+  const t = document.getElementById('caption').innerText;
+  navigator.clipboard.writeText(t).then(() => alert('配文已复制'));
+}
+</script>
+</body>
+</html>
