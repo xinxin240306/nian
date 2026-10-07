@@ -60,11 +60,12 @@ export async function requestNativeLocation() {
   return null;
 }
 
-export async function getNativeCurrentLocation() {
+export async function getNativeCurrentLocation(opts = {}) {
   const p = plugin();
   if (!p?.getCurrentLocation) return null;
   try {
-    return await p.getCurrentLocation();
+    // 原生插件若支持 fresh，则强制重新取点；不支持时忽略多余参数
+    return await p.getCurrentLocation(opts?.fresh ? { fresh: true } : {});
   } catch (e) {
     return { ok: false, error: String(e?.message || e || '') };
   }
@@ -89,7 +90,9 @@ export function formatLocationError(err) {
   return '获取位置失败：' + (msg || '未知错误');
 }
 
-export async function getDeviceCoordinates() {
+/** @param {{ fresh?: boolean }} [opts] fresh=true 时不要用缓存坐标（聊天发实时位置） */
+export async function getDeviceCoordinates(opts = {}) {
+  const fresh = !!opts.fresh;
   if (window.isNativeShell?.() && plugin()?.requestLocation && plugin()?.getCurrentLocation) {
     try {
       const s = await getAppPermissionStatus();
@@ -101,7 +104,7 @@ export async function getDeviceCoordinates() {
           throw err;
         }
       }
-      const native = await getNativeCurrentLocation();
+      const native = await getNativeCurrentLocation(fresh ? { fresh: true } : undefined);
       if (native?.ok !== false && native?.latitude != null && native?.longitude != null) {
         return { latitude: Number(native.latitude), longitude: Number(native.longitude) };
       }
@@ -138,7 +141,7 @@ export async function getDeviceCoordinates() {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
       (err) => reject(err),
-      { timeout: 20000, maximumAge: 60000, enableHighAccuracy: true }
+      { timeout: 20000, maximumAge: fresh ? 0 : 60000, enableHighAccuracy: true }
     );
   });
 }

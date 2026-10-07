@@ -14651,10 +14651,13 @@ app.get('/api/geocode/reverse', async (req, res) => {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return res.status(400).json({ error: '缺少有效坐标' });
   }
+  // live=1：聊天发位置等，保留实时地名，不用「家/公司」锚点改写
+  const live = req.query.live === '1' || req.query.live === 'true'
+    || req.query.skipStanding === '1' || req.query.skipStanding === 'true';
   const coordFallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   try {
     const locHelper = require('./location-weather-helper');
-    const geo = await locHelper.reverseGeocodeCoords(lat, lng);
+    const geo = await locHelper.reverseGeocodeCoords(lat, lng, { skipStanding: live });
     if (!geo) return res.json({ placeName: coordFallback, title: coordFallback, detail: '', lat, lng });
     return res.json({
       placeName: geo.placeName || coordFallback,
@@ -14664,7 +14667,7 @@ app.get('/api/geocode/reverse', async (req, res) => {
       city: geo.city || '',
       district: geo.district || '',
       poi: geo.poi || '',
-      anchor: geo.anchor || '',
+      anchor: live ? '' : (geo.anchor || ''),
       lat,
       lng,
     });

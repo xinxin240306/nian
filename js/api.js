@@ -358,8 +358,15 @@ export const getStorePolicy = () => apiFetch('/api/store-policy', { timeoutMs: 2
 export const greetCharacter = (characterId, isDream = false) =>
   apiFetch('/api/messages/greet', { method: 'POST', body: JSON.stringify({ characterId, isDream }) });
 export const sendMessage = (data) => apiFetch('/api/messages/send', { method: 'POST', body: JSON.stringify(data) });
-export const reverseGeocode = (lat, lng) =>
-  apiFetch(`/api/geocode/reverse?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`);
+/** live:true = 聊天发实时位置等：不要用已存的「家/公司」锚点改写地名 */
+export const reverseGeocode = (lat, lng, opts = {}) => {
+  const q = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+  });
+  if (opts.live || opts.skipStanding) q.set('live', '1');
+  return apiFetch(`/api/geocode/reverse?${q}`);
+};
 export const ensureMapPreview = ({ lat, lng, q } = {}) => {
   const params = new URLSearchParams();
   if (Number.isFinite(Number(lat))) params.set('lat', String(lat));

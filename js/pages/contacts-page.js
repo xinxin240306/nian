@@ -1066,7 +1066,7 @@ window.openMeProfile = async function() {
             <div class="settings-row-label">地区</div>
             <input class="input" id="me-user-location" value="${escapeHtml(settings.user_location || '')}" placeholder="如：上海">
           </div>
-          ${meCell('我的地址', home ? escapeHtml(home) : '获取定位或手动填写', { onclick: 'openMeHomeAddress()' })}
+          ${meCell('家定位', home ? escapeHtml(home) : '获取定位或手动填写', { onclick: 'openMeHomeAddress()' })}
           ${meCell('公司定位', String(settings.user_work_address || '').trim() ? escapeHtml(String(settings.user_work_address).trim()) : '获取定位或手动填写', { onclick: 'openMeWorkAddress()' })}
           <div class="settings-row">
             <div class="settings-row-label">性别</div>
@@ -1193,7 +1193,7 @@ window.saveMeProfile = async function() {
 };
 
 window.openMeHomeAddress = async function() {
-  setMeTopbar('我的地址', { back: () => window.openMeProfile() });
+  setMeTopbar('家定位', { back: () => window.openMeProfile() });
   const content = document.getElementById('ct-content');
   if (!content) return;
   let settings = {};
@@ -1203,13 +1203,13 @@ window.openMeHomeAddress = async function() {
       <div class="settings-section">
         ${meGroup(`
           <div class="settings-row settings-row--stack">
-            <div class="settings-row-label">家的定位</div>
-            <textarea class="input me-textarea" id="me-home-address" placeholder="详细住址，用于「我家」相关对话与定位">${escapeHtml(settings.user_home_address || '')}</textarea>
+            <div class="settings-row-label">家定位</div>
+            <textarea class="input me-textarea" id="me-home-address" placeholder="家里的详细住址，用于「我家」相关对话">${escapeHtml(settings.user_home_address || '')}</textarea>
             <div class="me-addr-actions">
-              <button type="button" class="btn btn-primary btn-sm" onclick="locateMeHomeAddress()">获取当前位置</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="locateMeHomeAddress()">用当前位置设为家</button>
               <button type="button" class="btn btn-ghost btn-sm" onclick="saveMeHomeAddress()">保存</button>
             </div>
-            <div class="me-hint">可一键定位并填入地址，也可手动改写。地区（城市）仍在名片里单独设置。</div>
+            <div class="me-hint">这里保存的是「家」的固定位置。聊天里点「位置」发送的是实时定位，不会用这里的地址。地区（城市）仍在名片里单独设置。</div>
           </div>
         `)}
       </div>
@@ -1221,8 +1221,9 @@ window.locateMeHomeAddress = async function() {
   const ta = document.getElementById('me-home-address');
   try {
     window.showToast?.('定位中…');
-    const { latitude: lat, longitude: lng } = await getDeviceCoordinates();
-    const data = await api.reverseGeocode(lat, lng);
+    const { latitude: lat, longitude: lng } = await getDeviceCoordinates({ fresh: true });
+    // live：不要用已存的「家」锚点盖掉真实地名
+    const data = await api.reverseGeocode(lat, lng, { live: true });
     let place = String(data?.placeName || data?.detail || data?.title || '').trim();
     if (place.includes('|')) {
       const [t, d] = place.split('|');
@@ -1243,7 +1244,7 @@ window.locateMeHomeAddress = async function() {
         await patchSettings({ user_location: city });
       }
     }
-    window.showToast?.('已填入当前位置');
+    window.showToast?.('已设为家定位');
   } catch (e) {
     window.showToast?.(formatLocationError(e) || e.message || '定位失败');
   }
@@ -1253,7 +1254,7 @@ window.saveMeHomeAddress = async function() {
   try {
     const addr = document.getElementById('me-home-address')?.value?.trim() || '';
     await patchSettings({ user_home_address: addr });
-    window.showToast?.('地址已保存');
+    window.showToast?.('家定位已保存');
     await window.openMeProfile();
   } catch (e) {
     window.showToast?.(e.message || '保存失败');
@@ -1289,8 +1290,8 @@ window.locateMeWorkAddress = async function() {
   const ta = document.getElementById('me-work-address');
   try {
     window.showToast?.('定位中…');
-    const { latitude: lat, longitude: lng } = await getDeviceCoordinates();
-    const data = await api.reverseGeocode(lat, lng);
+    const { latitude: lat, longitude: lng } = await getDeviceCoordinates({ fresh: true });
+    const data = await api.reverseGeocode(lat, lng, { live: true });
     let place = String(data?.placeName || data?.detail || data?.title || '').trim();
     if (place.includes('|')) {
       const [t, d] = place.split('|');

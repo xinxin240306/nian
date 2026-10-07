@@ -813,6 +813,8 @@ function decorateStanding(payload, la, ln, opts = {}) {
   delete out.anchor;
   delete out.anchorLabel;
   delete out.anchorAddress;
+  // 聊天发实时位置 / 设家定位：不要把地名改写成「家|已存地址」
+  if (opts.skipStanding || opts.live) return out;
   const settings = opts.settings || (() => {
     try {
       const db = require('./db');

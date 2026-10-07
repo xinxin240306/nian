@@ -9043,11 +9043,12 @@ window.sendShareToChat = async function({ text = '', files = [], subject = '' } 
 
 window.sendLocation = async function() {
   if (!charId) { window.showToast?.('请先选择聊天对象'); return; }
-  window.showToast?.('正在获取位置…');
+  window.showToast?.('正在获取实时位置…');
   let lat;
   let lng;
   try {
-    const coords = await getDeviceCoordinates();
+    // 实时定位：不用缓存点，也不要用名片里的「家定位」
+    const coords = await getDeviceCoordinates({ fresh: true });
     lat = coords.latitude;
     lng = coords.longitude;
   } catch (e) {
@@ -9058,7 +9059,8 @@ window.sendLocation = async function() {
     let placeName = '';
     let title = '';
     try {
-      const data = await api.reverseGeocode(lat, lng);
+      // live：反查地名时不要把坐标改写成「家|已存住址」
+      const data = await api.reverseGeocode(lat, lng, { live: true });
       placeName = (data.placeName || '').trim();
       title = (data.title || '').trim();
       // 统一成「短标题|详细地址」，卡片主副标题分开显示
@@ -9077,7 +9079,7 @@ window.sendLocation = async function() {
     // content / location 都带「标题|详情」，卡片才能显示副标题；经纬度留给地图预览和点开
     await doSend(placeName, 'location', { location: placeName, lat, lng }, true);
     if (_pendingAiCount > 0) {
-      window.showToast?.(`位置已发送（${locLabel}），点 ↑ 让对方回复`);
+      window.showToast?.(`实时位置已发送（${locLabel}），点 ↑ 让对方回复`);
     }
   } catch (e) {
     window.showToast?.('发送失败：' + (e.message || '未知错误'));
