@@ -1467,6 +1467,25 @@ public class AppPermissionsPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void playNativeCallBed(PluginCall call) {
+    String url = call.getString("url", "");
+    Double v = call.getDouble("volume");
+    float gain = v != null && v > 0 ? Math.max(0.02f, Math.min(1f, v.floatValue())) : 0.35f;
+    NativeCallEngine.playBed(url, gain);
+    JSObject o = new JSObject();
+    o.put("ok", true);
+    call.resolve(o);
+  }
+
+  @PluginMethod
+  public void stopNativeCallBed(PluginCall call) {
+    NativeCallEngine.stopBed();
+    JSObject o = new JSObject();
+    o.put("ok", true);
+    call.resolve(o);
+  }
+
+  @PluginMethod
   public void setCallPreviewFrame(PluginCall call) {
     ScreenShareOverlay.setCallPreviewDataUrl(call.getString("imageDataUrl", ""));
     call.resolve(statusObject());

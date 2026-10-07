@@ -49,6 +49,12 @@ final class NativeCallEngine {
   private static PlayCallback playDone;
   private static File playFile;
   private static int playGen;
+  /** 通话现场循环垫音：与角色 TTS 分轨，走同一通话声道，角色开口时不停 */
+  private static MediaPlayer bedPlayer;
+  private static File bedFile;
+  private static int bedGen;
+  private static String bedUrl = "";
+  private static float bedGain = 0.35f;
   private static volatile boolean running;
   private static volatile boolean listen;
   private static volatile boolean capturing;
@@ -160,7 +166,10 @@ final class NativeCallEngine {
     pendingAmbientWallMs = 0;
     inCallMode = false; // stop() = 退出通话模式
     resumeGen++;
-    MAIN.post(() -> stopPlayLocked(true, true, false));
+    MAIN.post(() -> {
+      stopPlayLocked(true, true, false);
+      stopBedLocked();
+    });
     synchronized (NativeCallEngine.class) {
       stopRecordLocked();
     }
@@ -431,6 +440,83 @@ final class NativeCallEngine {
       playGen++;
       stopPlayLocked(true, true, true);
     });
+  }
+
+  /** 通话现场循环垫音：与角色说话同时出声，不因 TTS 启停而掐断 */
+  static void playBed(String url, float gain) {
+    MAIN.post(() -> playBedOnMain(url, gain));
+  }
+
+  static void stopBed() {
+    MAIN.post(NativeCallEngine::stopBedLocked);
+  }
+
+  private static void playBedOnMain(String url, float gain) {
+    String src = url != null ? url.trim() : "";
+    if (src.isEmpty()) {
+      stopBedLocked();
+      return;
+    }
+    bedGain = gain > 0f ? Math.max(0.02f, Math.min(1f, gain)) : 0.35f;
+    if (src.equals(bedUrl) && bedPlayer != null) {
+      try { bedPlayer.setVolume(bedGain, bedGain); } catch (Exception ignored) {}
+      try {
+        if (!bedPlayer.isPlaying()) bedPlayer.start();
+      } catch (Exception ignored) {}
+      return;
+    }
+    stopBedLocked();
+    bedUrl = src;
+    final int gen = ++bedGen;
+    MediaPlayer mp = new MediaPlayer();
+    bedPlayer = mp;
+    try {
+      if (Build.VERSION.SDK_INT >= 21) {
+        // 与角色 TTS 同属性，系统不会因「通话流 vs 媒体流」把垫音闪避掉
+        mp.setAudioAttributes(buildPlayAttrs(inCallMode || running));
+      }
+      if (src.startsWith("blob:") || src.startsWith("data:")) {
+        throw new IOException("webview blob");
+      }
+      mp.setDataSource(src);
+      mp.setLooping(true);
+      mp.setOnPreparedListener(p -> {
+        if (gen != bedGen || bedPlayer != p) return;
+        try {
+          p.setVolume(bedGain, bedGain);
+          p.start();
+          Log.i(TAG, "bed started vol=" + bedGain);
+        } catch (Exception e) {
+          Log.w(TAG, "bed start failed", e);
+          stopBedLocked();
+        }
+      });
+      mp.setOnErrorListener((p, what, extra) -> {
+        Log.w(TAG, "bed error " + what + "/" + extra);
+        if (gen == bedGen) stopBedLocked();
+        return true;
+      });
+      mp.prepareAsync();
+    } catch (Exception e) {
+      Log.w(TAG, "bed play failed", e);
+      stopBedLocked();
+    }
+  }
+
+  private static void stopBedLocked() {
+    bedGen++;
+    bedUrl = "";
+    MediaPlayer mp = bedPlayer;
+    bedPlayer = null;
+    if (mp != null) {
+      try { mp.stop(); } catch (Exception ignored) {}
+      try { mp.release(); } catch (Exception ignored) {}
+    }
+    File f = bedFile;
+    bedFile = null;
+    if (f != null) {
+      try { f.delete(); } catch (Exception ignored) {}
+    }
   }
 
   private static void playOnMain(String url, byte[] data, String mime, PlayCallback done) {

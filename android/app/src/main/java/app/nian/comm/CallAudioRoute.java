@@ -452,10 +452,15 @@ final class CallAudioRoute {
   private static void requestFocus(AudioManager am, boolean speaker) {
     if (am == null) return;
     try {
+      // 通话内播角色声时用 MAY_DUCK：不要 AUDIOFOCUS_GAIN 把 WebView/垫音整段停掉
+      // （现场环境音要和人声同时出）
+      int dur = speaker
+        ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        : AudioManager.AUDIOFOCUS_GAIN;
       am.requestAudioFocus(
         null,
         speaker ? AudioManager.STREAM_MUSIC : AudioManager.STREAM_VOICE_CALL,
-        AudioManager.AUDIOFOCUS_GAIN
+        dur
       );
     } catch (Exception ignored) {}
   }

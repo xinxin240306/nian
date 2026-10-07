@@ -2520,7 +2520,10 @@ function coalesceCallSpeechSegments(segments) {
       continue;
     }
     const t = seg.type || 'text';
-    if (t === 'text') buf.push(seg);
+    // 说话气泡合并：text/voice 都算（JSON 音效/表情等不并）
+    const isSpeech = (t === 'text' || t === 'voice')
+      && !String(seg.content || '').trim().startsWith('{');
+    if (isSpeech) buf.push(seg);
     else {
       flush();
       out.push(seg);

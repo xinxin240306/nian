@@ -5108,7 +5108,9 @@ ${selfAddrLock ? `· ${selfAddrLock}\n` : ''}· 调侃/损人/撒娇的分寸看
     (chatMediaOk ? buildVoiceMessagePromptSection(char) : ''),
     (chatMediaOk && need.music ? buildMusicScorePromptSection(char) : ''),
     (!isDream && !forGame && !forDiaryPeek && !forTheater && !forRobot
-      ? (forVoiceCall ? buildCallSceneAudioPromptSection(settings, char.id) : (need.sfx ? buildSoundFxPromptSection(settings) : ''))
+      ? (forVoiceCall
+        ? (opts.skipCallSceneAudio ? '' : buildCallSceneAudioPromptSection(settings, char.id))
+        : (need.sfx ? buildSoundFxPromptSection(settings) : ''))
       : ''),
     (chatMediaOk && need.location ? buildLocationMessagePromptSection(char) : ''),
     (chatMediaOk && need.link ? buildLinkMessagePromptSection() : ''),
@@ -6880,15 +6882,19 @@ async function checkProactiveCall() {
               ? `你想打个视频。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声，像真开了摄像头。不要播音腔、不要自我介绍。只输出这一句正文。`
               : `你想打个电话。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`);
         }
-        const systemPrompt = buildSystemPrompt(char, chatSettings, openingHint, {
+        const systemPrompt = buildSystemPrompt(char, chatSettings, `${openingHint}\n禁止写「环境：」「音效：」或任何音效指令行。`, {
           forVoiceCall: true,
           forVideoCall: isVideo,
           forVideoCallText: textVideo,
+          skipCallSceneAudio: true,
         });
         let content = await callChatAPI(chatSettings, systemPrompt, '', 'chat');
         if (!content) continue;
         try {
           content = require('./emoji-helper').scrubUserVisibleText(content, char?.mindset);
+        } catch { /* ignore */ }
+        try {
+          content = require('./sound-fx-helper').stripSoundFxDirective(content);
         } catch { /* ignore */ }
         if (textVideo) {
           content = String(content || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 420);

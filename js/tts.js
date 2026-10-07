@@ -93,6 +93,10 @@ function resetAllVoicePlayIcons() {
 let preferCallAudioSink = false;
 let nativeCallPlay = null;
 let nativeCallStopPlay = null;
+let nativeCallBedPlay = null;
+let nativeCallBedStop = null;
+/** 原生垫音已接管时，关掉 Web Audio 同轨，避免双份 */
+let nativeBedActive = false;
 
 export function setTtsPreferCallSink(on) {
   preferCallAudioSink = !!on;
@@ -101,6 +105,14 @@ export function setTtsPreferCallSink(on) {
 export function setNativeCallPlayHandlers({ play, stop } = {}) {
   nativeCallPlay = typeof play === 'function' ? play : null;
   nativeCallStopPlay = typeof stop === 'function' ? stop : null;
+}
+
+export function setNativeCallBedHandlers({ play, stop } = {}) {
+  nativeCallBedPlay = typeof play === 'function' ? play : null;
+  nativeCallBedStop = typeof stop === 'function' ? stop : null;
+  if (!nativeCallBedPlay) {
+    nativeBedActive = false;
+  }
 }
 
 async function preferMediaAudioOutput(audio) {
@@ -381,8 +393,11 @@ export async function playReadyTTS(url, onEnd, { volume } = {}) {
       onEnd?.();
       return false;
     }
-    // 角色开口不压环境音；环境只随换场景淡入淡出
+    // 角色开口不压环境音；播的时候再把垫音叫醒一次（防系统焦点闪避后静音）
+    try { duckCallAmbient(false); } catch {}
+    try { ensureCallAmbientPlaying(); } catch {}
     await playAudioUrl(url, () => {
+      try { ensureCallAmbientPlaying(); } catch {}
       onEnd?.();
     }, { volume: finalVolume });
     return true;
@@ -1092,6 +1107,20 @@ function createBreathingLayer({ defaultVol = 0.1 } = {}) {
 const hangoutBed = createBreathingLayer({ defaultVol: 0.1 });
 
 export function playCallAmbient(url, opts) {
+  const src = resolveMediaUrl(url) || url;
+  const vol = Number.isFinite(Number(opts?.volume)) ? Number(opts.volume) : undefined;
+  // App 通话：垫音走原生 MediaPlayer（与角色 TTS 同通话声道），角色开口时不会被系统停掉
+  if (nativeCallBedPlay && src) {
+    nativeBedActive = true;
+    try { roomAmbient.stop(); } catch {}
+    Promise.resolve(nativeCallBedPlay(src, vol)).catch((e) => {
+      console.warn('[tts] native bed fallback', e?.message || e);
+      nativeBedActive = false;
+      roomAmbient.play(url, opts);
+    });
+    return;
+  }
+  nativeBedActive = false;
   roomAmbient.play(url, opts);
 }
 
@@ -1116,13 +1145,17 @@ export function playHangoutBedProcedural(kind, opts) {
 }
 
 export function ensureCallAmbientPlaying() {
-  roomAmbient.revive();
+  if (!nativeBedActive) roomAmbient.revive();
   breathBed.revive();
   textureBed.revive();
   hangoutBed.revive();
 }
 
 export function stopCallAmbient() {
+  if (nativeCallBedStop) {
+    try { nativeCallBedStop(); } catch {}
+  }
+  nativeBedActive = false;
   roomAmbient.stop();
 }
 
@@ -1136,7 +1169,12 @@ export function stopHangoutBed() {
 }
 
 export function duckCallAmbient(on) {
-  roomAmbient.setDucked(on);
+  // 角色开口不再压现场垫音（含原生轨）；仅贴身/连麦垫音可按需压
+  if (!on) {
+    roomAmbient.setDucked(false);
+  } else if (!nativeBedActive) {
+    roomAmbient.setDucked(true);
+  }
   breathBed.setDucked(on);
   textureBed.setDucked(on);
   hangoutBed.setDucked(on);

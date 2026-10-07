@@ -583,10 +583,17 @@ async function saveGeneratedSfxMessage({
       ).run(characterId, 'assistant', content, 'voice', now, 0).lastInsertRowid;
       try { db.prepare(`UPDATE messages SET delivery_status=? WHERE id=?`).run(status, id); } catch {}
     }
-    if (spec.ambience || spec.texture) {
+    // 通话里音效只进听筒，不要再占聊天气泡（否则看起来像「一句一条」还夹着环境音提示）
+    const hideChat = !!(spec.ambience || spec.texture || opts.forVoiceCall);
+    if (hideChat) {
       try {
         db.prepare(`UPDATE messages SET media_meta=? WHERE id=?`)
-          .run(JSON.stringify({ hideChat: true, ambience: !!spec.ambience, texture: !!spec.texture }), id);
+          .run(JSON.stringify({
+            hideChat: true,
+            ambience: !!spec.ambience,
+            texture: !!spec.texture,
+            oneshot: !spec.ambience && !spec.texture,
+          }), id);
       } catch {}
     }
     return {
@@ -596,8 +603,13 @@ async function saveGeneratedSfxMessage({
       content,
       timestamp: now,
       voice_duration: audio.duration,
-      media_meta: (spec.ambience || spec.texture)
-        ? JSON.stringify({ hideChat: true, ambience: !!spec.ambience, texture: !!spec.texture })
+      media_meta: hideChat
+        ? JSON.stringify({
+          hideChat: true,
+          ambience: !!spec.ambience,
+          texture: !!spec.texture,
+          oneshot: !spec.ambience && !spec.texture,
+        })
         : '',
     };
   } catch (e) {

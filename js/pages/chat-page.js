@@ -50,7 +50,7 @@ function isCallLineMessage(msg) {
   } catch {}
   return false;
 }
-import { playNotifySound, playTTS, playReadyTTS, prefetchTTS, playVoiceAudio, playVoiceClipUrl, getLastTtsError, stopTTS, unlockAudioPlayback, playCallAmbient, stopCallAmbient, playCallBreathBed, playCallTextureBed, stopCallBodyBeds, playHangoutBed, playHangoutBedProcedural, stopHangoutBed, playCallOneShot, stopCallOneShot, duckCallAmbient, setHangoutBedListenQuiet } from '../tts.js';
+import { playNotifySound, playTTS, playReadyTTS, prefetchTTS, playVoiceAudio, playVoiceClipUrl, getLastTtsError, stopTTS, unlockAudioPlayback, playCallAmbient, stopCallAmbient, playCallBreathBed, playCallTextureBed, stopCallBodyBeds, playHangoutBed, playHangoutBedProcedural, stopHangoutBed, playCallOneShot, stopCallOneShot, duckCallAmbient, ensureCallAmbientPlaying, setHangoutBedListenQuiet } from '../tts.js';
 import { pickCropAndUpload } from '../media-crop.js';
 import { getGameTopics, gameTopicGameName } from '../game-topics.js';
 import {
@@ -4797,6 +4797,15 @@ function parseCallVideoTextSceneClient(text) {
   };
 }
 
+function stripCallSoundFxLines(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/(?:^|\n)\s*(?:音效[：:]\s*|SFX:\s*|SOUND:\s*|环境[：:]\s*|AMB:\s*|AMBIENCE:\s*)[^\n]+/gi, '\n')
+    .replace(/(?:音效[：:]\s*|SFX:\s*|SOUND:\s*|环境[：:]\s*|AMB:\s*|AMBIENCE:\s*)[^\n]+\s*$/gi, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
 function callSpeakText(text) {
   let t = String(text || '').replace(/^【自动回复】/, '').trim();
   if (looksLikeWebCardPayload(t)) return '';
@@ -4809,6 +4818,8 @@ function callSpeakText(text) {
   }
   if (/^\s*\[安静\]\s*$/.test(t) || /^\s*（安静）\s*$/.test(t)) return '';
   t = stripAiContextLabels(t);
+  // 来电开场/模型漏写：剥掉「环境：」「音效：」行，避免念英文提示词导致 TTS 失败
+  t = stripCallSoundFxLines(t);
   // 心里话 / 通道标签已在 stripAiContextLabels；这里再清镜头与语速
   t = t
     .replace(/\[\s*镜头\s*\][\s\S]*?\[\s*\/\s*镜头\s*\]/gi, '')
@@ -4850,7 +4861,7 @@ function fallbackSpeakFromVideoText(text) {
 }
 
 function callDisplayText(text) {
-  const tidy = (s) => stripVoiceLaneTags(stripAiContextLabels(s))
+  const tidy = (s) => stripVoiceLaneTags(stripCallSoundFxLines(stripAiContextLabels(s)))
     .replace(/[\[【［]\s*语气\s*[:：][^\]】］\n]{0,12}[\]】］]/gi, '')
     .replace(/\n{2,}/g, '\n')
     .trim();
@@ -5251,6 +5262,8 @@ async function playCallTtsSegment(text, forCharId, { msgId, clipUrl, armListen =
     }
     setCallSpeaking(true);
     await setNativeCallMediaAudio(true);
+    try { duckCallAmbient(false); } catch {}
+    try { ensureCallAmbientPlaying(); } catch {}
     let allOk = true;
     let firstErr = '';
     for (let i = 0; i < urls.length; i++) {
@@ -5273,9 +5286,12 @@ async function playCallTtsSegment(text, forCharId, { msgId, clipUrl, armListen =
         if (!firstErr) firstErr = getLastTtsError() || '';
         break;
       }
+      try { ensureCallAmbientPlaying(); } catch {}
     }
     if (playGen === _callTtsPlayGen) setCallSpeaking(false);
     setCallIdleStatus();
+    try { duckCallAmbient(false); } catch {}
+    try { ensureCallAmbientPlaying(); } catch {}
     if (allOk) markCallSpeechPlayed(msgId);
     if (!allOk && firstErr && !/自动播放|NotAllowed|interact/i.test(firstErr)) {
       window.showToast?.('语音播放失败: ' + firstErr);
@@ -5834,6 +5850,64 @@ async function renderAiMessageSequence(aiMessages, userTimestamp, forCharId = ch
     }
   }
 
+  // 通话中：同轮说话合并成一条再画气泡（音效/隐藏消息不打断）
+  const paintMsgs = (() => {
+    if (!noSplit) return aiMessages;
+    const out = [];
+    let speechBuf = [];
+    const flushSpeech = () => {
+      if (!speechBuf.length) return;
+      if (speechBuf.length === 1) {
+        out.push(speechBuf[0]);
+      } else {
+        const bits = speechBuf.map((m) => String(m.content || '').trim()).filter(Boolean);
+        const head = speechBuf[0];
+        out.push({
+          ...head,
+          type: head.type === 'voice' || speechBuf.some((m) => m.type === 'voice') ? 'voice' : 'text',
+          content: bits.join('\n'),
+          media_meta: (() => {
+            try {
+              const meta = typeof head.media_meta === 'string'
+                ? JSON.parse(head.media_meta || '{}')
+                : (head.media_meta || {});
+              return JSON.stringify({ ...meta, callLine: 1 });
+            } catch {
+              return JSON.stringify({ callLine: 1 });
+            }
+          })(),
+        });
+      }
+      speechBuf = [];
+    };
+    for (const m of aiMessages) {
+      if (!m || isHiddenChatMessage(m)) {
+        flushSpeech();
+        if (m) out.push(m);
+        continue;
+      }
+      // 音效 JSON：只播不占聊天气泡
+      if (m.type === 'voice' && String(m.content || '').trim().startsWith('{')) {
+        try {
+          const j = JSON.parse(m.content);
+          if (j?.sfx) {
+            flushSpeech();
+            out.push(m);
+            continue;
+          }
+        } catch { /* normal voice */ }
+      }
+      if (m.type === 'text' || m.type === 'voice') {
+        speechBuf.push(m);
+        continue;
+      }
+      flushSpeech();
+      out.push(m);
+    }
+    flushSpeech();
+    return out.length ? out : aiMessages;
+  })();
+
   let lastShown = null;
   let lastShownEmoji = false;
 
@@ -5855,9 +5929,22 @@ async function renderAiMessageSequence(aiMessages, userTimestamp, forCharId = ch
     lastShownEmoji = isEmoji;
   }
 
-  for (let i = 0; i < aiMessages.length; i++) {
-    const msg = aiMessages[i];
+  for (let i = 0; i < paintMsgs.length; i++) {
+    const msg = paintMsgs[i];
     if (isHiddenChatMessage(msg)) continue;
+    // 通话中音效只走听筒，不占聊天气泡（含旧数据未打 hideChat 的 oneshot）
+    if (noSplit && msg.type === 'voice' && String(msg.content || '').trim().startsWith('{')) {
+      try {
+        if (JSON.parse(msg.content)?.sfx) {
+          if (isInVoiceCallWith(forCharId) && !wasCallSpeechPlayed(msg.id)) {
+            const payload = parseCallAudioPayload(msg.content);
+            applyCallScenePayload(payload);
+            await playCallSpeechPayload(payload, forCharId, msg.id, { armListen: false });
+          }
+          continue;
+        }
+      } catch { /* normal voice */ }
+    }
     await waitBeforeNext(msg, msg.type === 'emoji');
     if (!shouldRenderForChar(forCharId) && !isInVoiceCallWith(forCharId)) {
       // 中途离页/闸门误判：已写入缓存的消息靠 sync/回页补画，勿再卡死在「seen 但无 DOM」
@@ -10560,18 +10647,21 @@ window.acceptProactiveCall = async function(call) {
     }
   }
 
-  const opening = String(call.content || '').trim();
+  const opening = stripCallSoundFxLines(String(call.content || '').trim());
   const readyUrl = String(call.readyTtsUrl || '').trim();
   const textVideoOpen = !!(call.video && isCallVideoTextMode(peer));
-  const speakOpening = textVideoOpen ? (callSpeakText(opening) || '') : opening;
+  const speakOpening = textVideoOpen ? (callSpeakText(opening) || '') : callSpeakText(opening);
   const canSpeak = !!(readyUrl || (speakOpening && charHasVoiceId(peer)));
   if (opening) {
     // 文字视频：整段画面进通话区；语音只念台词
     if (textVideoOpen) {
       pushCallSceneLine(callDisplayText(opening) || opening);
     } else {
-      callTranscript.push({ role: 'assistant', content: opening });
-      appendCallChatMsg('assistant', opening);
+      const shownOpen = callDisplayText(opening) || speakOpening || opening;
+      if (shownOpen) {
+        callTranscript.push({ role: 'assistant', content: shownOpen });
+        appendCallChatMsg('assistant', shownOpen);
+      }
     }
   }
 

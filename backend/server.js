@@ -723,22 +723,23 @@ async function generateChatIncomingOpening(char, settings, { video = false, chat
   const textVideo = video && isCharCallVideoTextMode(char);
   let hint;
   if (textVideo) {
-    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时你这边镜头里的一小段画面：先一两句旁白（你所处的环境/光线/你对着屏幕的动作表情），再跟一句开口的话，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`;
+    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时你这边镜头里的一小段画面：先一两句旁白（你所处的环境/光线/你对着屏幕的动作表情），再跟一句开口的话，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else if (video) {
-    hint = `你刚在微信跟用户说完话，现在视频电话已经打通了。写一句刚接通时对着摄像头说的开场：短、口语，可先喂一声，自然想看看对方。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。`;
+    hint = `你刚在微信跟用户说完话，现在视频电话已经打通了。写一句刚接通时对着摄像头说的开场：短、口语，可先喂一声，自然想看看对方。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else {
-    hint = `你刚在微信跟用户说完话，现在语音电话已经打通了。写一句刚接通时对着听筒说的开场：短、口语，可先喂一声再接话。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。`;
+    hint = `你刚在微信跟用户说完话，现在语音电话已经打通了。写一句刚接通时对着听筒说的开场：短、口语，可先喂一声再接话。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   }
   const context = preamble
     ? `${hint}\n（微信里你刚说了大意：「${preamble}」——接通后换电话口吻，不要照念。）`
     : hint;
   try {
     const chatSettings = withCharChatPrefs(settings, char);
-    // 文字视频开场也要带镜头格式，否则第一句只剩台词没有环境
+    // 开场只要电话口吻，不要注入「通话现场声」教写环境：——否则首句会夹英文提示词导致 TTS 失败
     const systemPrompt = buildSystemPrompt(char, chatSettings, context, {
       forVoiceCall: true,
       forVideoCall: !!video,
       forVideoCallText: !!textVideo,
+      skipCallSceneAudio: true,
     });
     const content = await callChatAPI(chatSettings, systemPrompt, '', 'chat');
     let open = '';
@@ -747,6 +748,9 @@ async function generateChatIncomingOpening(char, settings, { video = false, chat
     } catch {
       open = String(content || '');
     }
+    try {
+      open = require('./sound-fx-helper').stripSoundFxDirective(open);
+    } catch { /* ignore */ }
     if (textVideo) {
       open = String(open || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 420);
       // 漏引号时包一层，方便前端 TTS 抽台词

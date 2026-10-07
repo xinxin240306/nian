@@ -2822,7 +2822,13 @@ async function showIncomingCallUI(data) {
   const peer = characters.find((c) => Number(c.id) === Number(data.characterId));
   const textVideoOpen = !!data.video
     && String(peer?.call_video_mode || 'video').trim().toLowerCase() === 'text';
-  const scrubbedRaw = stripAiContextLabels(String(data.content || ''));
+  const scrubbedRaw = stripAiContextLabels(String(data.content || ''))
+    // 来电开场偶发夹「环境：英文…」：显示/预合成前剥掉，否则 TTS 失败
+    .replace(/\r\n/g, '\n')
+    .replace(/(?:^|\n)\s*(?:音效[：:]\s*|SFX:\s*|SOUND:\s*|环境[：:]\s*|AMB:\s*|AMBIENCE:\s*)[^\n]+/gi, '\n')
+    .replace(/(?:音效[：:]\s*|SFX:\s*|SOUND:\s*|环境[：:]\s*|AMB:\s*|AMBIENCE:\s*)[^\n]+\s*$/gi, '')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
   const scrubbed = textVideoOpen
     ? scrubbedRaw.replace(/\n{3,}/g, '\n\n').trim()
     : scrubbedRaw.replace(/\s+/g, ' ').trim();

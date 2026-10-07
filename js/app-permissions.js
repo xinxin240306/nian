@@ -1,5 +1,5 @@
 import { resolveMediaUrl } from './server-config.js';
-import { setTtsPreferCallSink, setNativeCallPlayHandlers, setNativeCallRingHandlers } from './tts.js';
+import { setTtsPreferCallSink, setNativeCallPlayHandlers, setNativeCallRingHandlers, setNativeCallBedHandlers } from './tts.js';
 
 const ASKED_KEY = 'nian_asked_basic_perms';
 
@@ -458,6 +458,10 @@ export async function startNativeCall() {
     play: (url, volume) => playNativeCallUrl(url, volume),
     stop: () => stopNativeCallPlay(),
   });
+  setNativeCallBedHandlers({
+    play: (url, volume) => playNativeCallBed(url, volume),
+    stop: () => stopNativeCallBed(),
+  });
   try {
     const r = await p.startNativeCall();
     setTtsPreferCallSink(true);
@@ -508,7 +512,9 @@ export async function stopNativeCall() {
     if (_nativeCallLevelHandle?.remove) await _nativeCallLevelHandle.remove();
   } catch {}
   _nativeCallLevelHandle = null;
+  try { await stopNativeCallBed(); } catch {}
   setNativeCallPlayHandlers({});
+  setNativeCallBedHandlers({});
   setTtsPreferCallSink(false);
   const p = plugin();
   if (!p?.stopNativeCall) return { ok: false };
@@ -639,6 +645,30 @@ export async function stopNativeCallPlay() {
   const p = plugin();
   if (!p?.stopNativeCallPlay) return;
   try { await p.stopNativeCallPlay(); } catch {}
+}
+
+/** 通话现场循环垫音（原生轨，可与角色 TTS 同时出声） */
+export async function playNativeCallBed(url, volume) {
+  const p = plugin();
+  if (!p?.playNativeCallBed) return false;
+  const src = String(url || '');
+  if (!src) return false;
+  const vol = Number.isFinite(Number(volume))
+    ? Math.max(0.02, Math.min(1, Number(volume)))
+    : 0.35;
+  const abs = resolveMediaUrl(src) || src;
+  try {
+    await p.playNativeCallBed({ url: abs, volume: vol });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function stopNativeCallBed() {
+  const p = plugin();
+  if (!p?.stopNativeCallBed) return;
+  try { await p.stopNativeCallBed(); } catch {}
 }
 
 export async function setNativeCallPreviewFrame(imageDataUrl) {
