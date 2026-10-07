@@ -1,0 +1,109 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace "app.nian.comm"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "app.nian.comm"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        def vc = 1
+        def vn = "1.0"
+        def vf = file("version.properties")
+        if (vf.exists()) {
+            def vp = new Properties()
+            vf.withInputStream { vp.load(it) }
+            if (vp.getProperty("VERSION_CODE")) vc = Integer.parseInt(vp.getProperty("VERSION_CODE").trim())
+            if (vp.getProperty("VERSION_NAME")) vn = vp.getProperty("VERSION_NAME").trim()
+        }
+        versionCode vc
+        versionName vn
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildFeatures {
+        aidl true
+        buildConfig true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    // 公开仓不附带共用 keystore：有 nian-shared.keystore 则用；否则 debug/release 回退 Android 默认 debug 签名。
+    // 正式分发请自行生成 keystore 并改这里的配置。
+    def sharedKeystore = file("nian-shared.keystore")
+    if (sharedKeystore.exists()) {
+        signingConfigs {
+            shared {
+                storeFile sharedKeystore
+                storePassword "nian-shared"
+                keyAlias "nian"
+                keyPassword "nian-shared"
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (sharedKeystore.exists()) {
+                signingConfig signingConfigs.shared
+            }
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (sharedKeystore.exists()) {
+                signingConfig signingConfigs.shared
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+    def shizukuVersion = '13.1.5'
+    implementation "dev.rikka.shizuku:api:$shizukuVersion"
+    implementation "dev.rikka.shizuku:provider:$shizukuVersion"
+    // 1.1.0 stable needs compileSdk 36 + AGP 8.9.1; keep alpha10 for AGP 8.2.1 / SDK 34.
+    implementation "androidx.health.connect:connect-client:1.1.0-alpha10"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+}
+
+task copyInlineEmoji(type: Copy) {
+    from "${rootProject.projectDir}/../assets/inline-emoji/out"
+    into "src/main/assets/inline-emoji"
+    include "*.png", "manifest.json"
+}
+preBuild.dependsOn copyInlineEmoji
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

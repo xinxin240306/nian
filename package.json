@@ -1,0 +1,24 @@
+{
+  "name": "nian",
+  "version": "1.0.0",
+  "private": true,
+  "description": "念 · 跨世界通讯（Capacitor Android）",
+  "scripts": {
+    "prepare:www": "node scripts/prepare-www.mjs",
+    "cap:sync": "npm run prepare:www && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "gen:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/gen-icons.ps1",
+    "android:debug": "node scripts/android-debug.mjs",
+    "android:release": "npm run cap:sync && cd android && gradlew.bat assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/keyboard": "^6.0.4",
+    "@capacitor/splash-screen": "^6.0.3",
+    "@capacitor/status-bar": "^6.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  }
+}

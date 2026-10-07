@@ -1,0 +1,457 @@
+"""TTS orchestration: pick an engine, synthesise, encode, and push.
+
+The orchestrator is the glue between the ``say`` MCP tool (defined in
+:mod:`stackchan_mcp.stdio_server`) and the engine implementations
+registered in :mod:`stackchan_mcp.tts`. It validates arguments, looks
+up an engine, runs the synthesis, encodes the result to Opus, and
+hands the frames off to :mod:`stackchan_mcp.audio_stream` for delivery.
+
+The framework half (Engine ABC, registry, validation surface) shipped
+in PR1 of Issue #70; PR2 wires the actual VOICEVOX → PCM → Opus →
+WebSocket pipeline. The signature stays back-compatible with PR1's
+tests: ``gateway`` is keyword-only and may be omitted, in which case
+calls that pass validation surface a clear error instead of silently
+synthesising audio with no destination.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from contextlib import nullcontext
+from typing import TYPE_CHECKING, Any
+
+from .audio_utils import (
+    DEVICE_FRAME_DURATION_MS,
+    DEVICE_SAMPLE_RATE,
+    encode_opus_frames,
+)
+from .base import EngineRegistry, get_registry
+
+if TYPE_CHECKING:
+    from ..gateway import Gateway
+
+#: Delay between the ``tts.start`` notification and the first audio
+#: frame, in seconds. Firmware dispatches the state transition through
+#: ``Schedule()`` (queued onto the main task), so the first frame can
+#: race the ``kDeviceStateSpeaking`` transition and be discarded by
+#: ``OnIncomingAudio``. 50 ms is well above typical scheduling latency
+#: but well below human-perceptible delay.
+TTS_START_TRANSITION_DELAY_S = 0.05
+
+logger = logging.getLogger(__name__)
+
+
+#: Default engine name when ``voice`` is omitted from the tool call.
+#: VOICEVOX is the canonical default (Issue #70); the concrete engine
+#: ships in PR2 of that Issue.
+DEFAULT_VOICE = "voicevox"
+
+
+async def push_pcm_to_device(
+    pcm: bytes,
+    *,
+    gateway: "Gateway",
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Encode 16 kHz mono PCM and push Opus frames with tts start/stop."""
+    if not gateway.esp32.device_connected:
+        raise RuntimeError(
+            "No ESP32 device connected; cannot deliver synthesised audio."
+        )
+
+    connection = getattr(gateway.esp32, "connection", None)
+    proto_version = getattr(connection, "protocol_version", 1)
+    if proto_version != 1:
+        raise RuntimeError(
+            f"TTS requires WebSocket protocol v1, but the connected "
+            f"device negotiated v{proto_version}."
+        )
+
+    if not pcm:
+        raise RuntimeError("No PCM data to push.")
+
+    try:
+        opus_frames = list(encode_opus_frames(pcm))
+    except Exception as exc:
+        raise RuntimeError(f"Opus encoding failed: {exc}") from exc
+
+    tts_lock = getattr(gateway.esp32, "tts_lock", None)
+    lock_ctx = tts_lock if tts_lock is not None else nullcontext()
+
+    sent = 0
+    push_error: ConnectionError | None = None
+    async with lock_ctx:
+        try:
+            await gateway.esp32.send_tts_state("start")
+        except ConnectionError as exc:
+            raise RuntimeError(
+                f"Device disconnected before TTS start notification: {exc}"
+            ) from exc
+
+        await asyncio.sleep(TTS_START_TRANSITION_DELAY_S)
+
+        frame_period_s = DEVICE_FRAME_DURATION_MS / 1000.0
+        loop = asyncio.get_event_loop()
+
+        try:
+            next_send_time = loop.time()
+            for frame in opus_frames:
+                now = loop.time()
+                if now < next_send_time:
+                    await asyncio.sleep(next_send_time - now)
+                try:
+                    await gateway.esp32.send_audio_frame(frame)
+                except ConnectionError as exc:
+                    push_error = exc
+                    break
+                sent += 1
+                next_send_time += frame_period_s
+        finally:
+            try:
+                await gateway.esp32.send_tts_state("stop")
+            except ConnectionError:
+                pass
+
+    if push_error is not None:
+        raise RuntimeError(
+            f"Device disconnected after sending "
+            f"{sent}/{len(opus_frames)} frames: {push_error}"
+        ) from push_error
+
+    duration_ms = sent * DEVICE_FRAME_DURATION_MS
+    out = {
+        "frame_count": sent,
+        "sample_rate": DEVICE_SAMPLE_RATE,
+        "frame_duration_ms": DEVICE_FRAME_DURATION_MS,
+        "duration_ms": duration_ms,
+    }
+    if meta:
+        out.update(meta)
+    return out
+
+
+async def play_audio_url(
+    arguments: dict[str, Any],
+    *,
+    gateway: "Gateway | None" = None,
+) -> dict[str, Any]:
+    """Download an audio URL (mp3/wav), resample to 16 kHz, push to device.
+
+    Used by nian so character MiniMax TTS can play without Voicevox.
+    Requires ``ffmpeg`` on PATH for non-WAV inputs.
+    """
+    import asyncio as _asyncio
+    import os
+    import tempfile
+    from pathlib import Path
+    from urllib.request import Request, urlopen
+
+    if gateway is None:
+        raise RuntimeError("play_audio_url requires a gateway")
+
+    url = str(arguments.get("url") or arguments.get("audio_url") or "").strip()
+    if not url:
+        raise ValueError("'url' is required")
+
+    text = str(arguments.get("text") or "").strip()
+    req = Request(url, headers={"User-Agent": "stackchan-mcp-nian/1.0"})
+    with urlopen(req, timeout=30) as resp:  # noqa: S310 — caller-controlled URL
+        raw = resp.read()
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+
+    if not raw:
+        raise RuntimeError("Downloaded audio is empty")
+
+    suffix = ".mp3"
+    if "wav" in ctype or url.lower().endswith(".wav"):
+        suffix = ".wav"
+    elif "mpeg" in ctype or "mp3" in ctype or url.lower().endswith(".mp3"):
+        suffix = ".mp3"
+    elif url.lower().endswith(".ogg"):
+        suffix = ".ogg"
+
+    tmp_in = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp_out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_in.close()
+    tmp_out.close()
+    try:
+        Path(tmp_in.name).write_bytes(raw)
+        if suffix == ".wav":
+            wav_bytes = raw
+        else:
+            # ffmpeg → 16 kHz mono s16le WAV
+            proc = await _asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-y",
+                "-i",
+                tmp_in.name,
+                "-ac",
+                "1",
+                "-ar",
+                str(DEVICE_SAMPLE_RATE),
+                "-f",
+                "wav",
+                tmp_out.name,
+                stdout=_asyncio.subprocess.DEVNULL,
+                stderr=_asyncio.subprocess.PIPE,
+            )
+            _, err = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"ffmpeg failed ({proc.returncode}): "
+                    f"{(err or b'')[-400:].decode('utf-8', 'ignore')}"
+                )
+            wav_bytes = Path(tmp_out.name).read_bytes()
+
+        from .audio_utils import resample_pcm16_linear, wav_to_pcm16_mono
+
+        rate, pcm = wav_to_pcm16_mono(wav_bytes)
+        if rate != DEVICE_SAMPLE_RATE:
+            pcm = resample_pcm16_linear(pcm, rate, DEVICE_SAMPLE_RATE)
+
+        return await push_pcm_to_device(
+            pcm,
+            gateway=gateway,
+            meta={"engine": "url", "url": url, "text": text},
+        )
+    finally:
+        for p in (tmp_in.name, tmp_out.name):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+async def synthesize_and_send(
+    arguments: dict[str, Any],
+    *,
+    gateway: "Gateway | None" = None,
+    registry: EngineRegistry | None = None,
+) -> dict[str, Any]:
+    """Synthesise text via a registered engine and push it to the device.
+
+    Args:
+        arguments: MCP tool arguments. Recognised keys:
+
+            * ``text`` (required): non-empty string to speak.
+            * ``voice``: engine name; defaults to :data:`DEFAULT_VOICE`.
+            * ``speaker_id``: engine-specific speaker identifier
+              (e.g. VOICEVOX speaker).
+            * ``reference_audio``: path to a reference audio sample
+              (e.g. for Irodori voice cloning, PR3).
+
+        gateway: The :class:`Gateway` instance whose
+            :attr:`Gateway.esp32` the audio frames are pushed through.
+            Required for the pipeline; left optional in the signature
+            so callers can inspect validation errors without setting
+            up a gateway (e.g. argument-validation tests).
+
+        registry: Engine registry to look up ``voice`` in. Defaults to
+            the process-wide registry. Tests inject a fresh registry
+            here to avoid leaking state across cases.
+
+    Returns:
+        Dict describing the synthesis: ``engine``, ``text``,
+        ``speaker_id``, ``frame_count``, ``sample_rate``,
+        ``frame_duration_ms``, ``duration_ms``.
+
+    Raises:
+        ValueError: if ``text`` is missing / empty / non-string.
+        NotImplementedError: if no engine is registered under ``voice``.
+            The message lists the registered engines so callers can
+            tell whether they need to install an extra (e.g.
+            ``pip install stackchan-mcp[tts]``) or pick a different
+            ``voice``.
+        RuntimeError: if ``gateway`` is omitted, or if no ESP32 device
+            is connected when the orchestrator tries to push frames.
+    """
+    # Validation runs first so callers can probe argument shape without
+    # a real gateway / engine.
+    text = arguments.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("'text' is required and must be a non-empty string")
+
+    voice_raw = arguments.get("voice", DEFAULT_VOICE)
+    voice = voice_raw if isinstance(voice_raw, str) and voice_raw else DEFAULT_VOICE
+
+    reg = registry if registry is not None else get_registry()
+    engine = reg.get(voice)
+
+    if engine is None:
+        available = reg.names()
+        raise NotImplementedError(
+            f"TTS engine '{voice}' is not registered. "
+            f"Available engines: {available or '(none)'}. "
+            "Install the relevant extra (e.g. "
+            "'pip install stackchan-mcp[tts]' for VOICEVOX) and ensure "
+            "the corresponding service (e.g. the VOICEVOX HTTP engine) "
+            "is reachable."
+        )
+
+    if gateway is None:
+        raise RuntimeError(
+            "synthesize_and_send requires a 'gateway' argument to push "
+            "audio frames; this call appears to be a validation probe "
+            "without one."
+        )
+
+    if not gateway.esp32.device_connected:
+        raise RuntimeError(
+            "No ESP32 device connected; cannot deliver synthesised audio."
+        )
+
+    # WebSocket protocol version gate. The firmware decodes raw Opus
+    # binary frames only on protocol v1; v2/v3 wrap each binary message
+    # in a BinaryProtocol header that this gateway does not yet emit.
+    # Streaming raw frames to a v2/v3 device makes the firmware parse
+    # Opus bytes as header fields, so the audio never plays — yet
+    # without this check ``say()`` would still report success. Fail
+    # fast with a clear, actionable error instead. BinaryProtocol
+    # header wrapping is tracked as a follow-up to Issue #70.
+    connection = getattr(gateway.esp32, "connection", None)
+    proto_version = getattr(connection, "protocol_version", 1)
+    if proto_version != 1:
+        raise RuntimeError(
+            f"TTS requires WebSocket protocol v1, but the connected "
+            f"device negotiated v{proto_version}. Rebuild the firmware "
+            "with v1 (the default for this repository) — v2/v3 "
+            "BinaryProtocol header wrapping is not yet supported."
+        )
+
+    speaker_id = arguments.get("speaker_id")
+    reference_audio = arguments.get("reference_audio")
+
+    # Engine failures (HTTP errors from VOICEVOX, malformed WAV from
+    # the synthesiser, etc.) are translated to RuntimeError so the
+    # MCP layer's narrow exception filter still produces clean error
+    # JSON. Validation errors (ValueError) are kept distinct so bad
+    # arguments stay separable from operational degradation.
+    try:
+        pcm = await engine.synthesize(
+            text,
+            speaker_id=speaker_id,
+            reference_audio=reference_audio,
+        )
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(
+            f"TTS engine '{voice}' failed: {exc}"
+        ) from exc
+
+    if not pcm:
+        # An engine returning no PCM is a bug, not a runtime condition;
+        # surface it to the caller rather than silently sending zero
+        # frames (which would look like the device "ignored" the call).
+        raise RuntimeError(
+            f"Engine '{voice}' produced no PCM data for the given text."
+        )
+
+    # Encode -> push. Materialising the frame list before pushing keeps
+    # the count reportable and makes it easy to short-circuit if Opus
+    # encoding fails before any audio reaches the wire.
+    try:
+        opus_frames = list(encode_opus_frames(pcm))
+    except Exception as exc:
+        raise RuntimeError(f"Opus encoding failed: {exc}") from exc
+
+    # Bracket the binary audio frames in TTS start/stop notifications.
+    # The device firmware (Application::OnIncomingAudio) only accepts
+    # binary audio frames while in kDeviceStateSpeaking, which is
+    # entered on receipt of {"type":"tts","state":"start"} and exited
+    # on "stop". Without these notifications the audio frames are
+    # silently discarded and the say() tool returns success even
+    # though nothing actually plays.
+    #
+    # The whole start → frames → stop block runs under the device's
+    # TTS lock so two concurrent ``say()`` invocations can't interleave
+    # their Opus frames on the same WebSocket or overlap their state
+    # notifications. Without the lock, utterance B's ``stop`` could
+    # land mid-A and pull the firmware out of ``kDeviceStateSpeaking``
+    # while A's frames are still in flight, silently dropping the
+    # remainder of A's audio.
+    # Acquire the device's TTS lock for the duration of the
+    # start → frames → stop block. ``getattr`` lets test fakes that
+    # don't expose the lock attribute keep working — production always
+    # provides it via :class:`ESP32Manager.tts_lock`.
+    tts_lock = getattr(gateway.esp32, "tts_lock", None)
+    lock_ctx = tts_lock if tts_lock is not None else nullcontext()
+
+    sent = 0
+    push_error: ConnectionError | None = None
+    async with lock_ctx:
+        try:
+            await gateway.esp32.send_tts_state("start")
+        except ConnectionError as exc:
+            raise RuntimeError(
+                f"Device disconnected before TTS start notification: {exc}"
+            ) from exc
+
+        # Wait for the firmware's state machine to land in
+        # kDeviceStateSpeaking before sending the first frame.
+        await asyncio.sleep(TTS_START_TRANSITION_DELAY_S)
+
+        # Frame pacing: the device's decode queue holds at most ~40
+        # frames (firmware MAX_DECODE_PACKETS_IN_QUEUE = 2400 /
+        # OPUS_FRAME_DURATION_MS), and pushes that exceed it are
+        # dropped silently. Send each frame at roughly the device's
+        # consumption rate (one frame per frame_duration_ms) so a long
+        # utterance never overflows. We let the loop drift by a single
+        # interval if the network is slow — the wall clock is the
+        # reference, not the loop iteration count.
+        frame_period_s = DEVICE_FRAME_DURATION_MS / 1000.0
+        loop = asyncio.get_event_loop()
+
+        try:
+            next_send_time = loop.time()
+            for frame in opus_frames:
+                now = loop.time()
+                if now < next_send_time:
+                    await asyncio.sleep(next_send_time - now)
+                try:
+                    await gateway.esp32.send_audio_frame(frame)
+                except ConnectionError as exc:
+                    # Stop pushing on the first disconnect, but fall
+                    # through to the stop notification (see finally) so
+                    # that *if* the device is somehow still listening
+                    # it returns to idle rather than staying in speaking
+                    # forever.
+                    push_error = exc
+                    break
+                sent += 1
+                next_send_time += frame_period_s
+        finally:
+            try:
+                await gateway.esp32.send_tts_state("stop")
+            except ConnectionError:
+                # If the device dropped, it'll return to idle on its
+                # own when the WebSocket close lands; nothing to do
+                # here.
+                pass
+
+    if push_error is not None:
+        raise RuntimeError(
+            f"Device disconnected after sending "
+            f"{sent}/{len(opus_frames)} frames: {push_error}"
+        ) from push_error
+
+    duration_ms = sent * DEVICE_FRAME_DURATION_MS
+
+    logger.info(
+        "say(): engine=%s speaker=%s frames=%d duration_ms=%d",
+        voice,
+        speaker_id if speaker_id is not None else "default",
+        sent,
+        duration_ms,
+    )
+
+    return {
+        "engine": voice,
+        "text": text,
+        "speaker_id": speaker_id,
+        "frame_count": sent,
+        "sample_rate": DEVICE_SAMPLE_RATE,
+        "frame_duration_ms": DEVICE_FRAME_DURATION_MS,
+        "duration_ms": duration_ms,
+    }

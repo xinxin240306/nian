@@ -1,0 +1,193 @@
+/* 音乐同步图标按钮样式（顶栏模式） */
+
+.music-sync-icon-btn {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.music-sync-icon-btn svg {
+  transition: transform 0.2s ease;
+}
+
+.music-sync-icon-btn:hover svg {
+  transform: scale(1.1);
+}
+
+/* 脉动指示点 */
+.music-sync-pulse-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  background: #38BDF8;
+  border-radius: 50%;
+  animation: music-sync-pulse 2s ease-in-out infinite;
+}
+
+@keyframes music-sync-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0);
+  }
+}
+
+.music-sync-icon-btn.music-sync-connecting .music-sync-pulse-dot {
+  background: #F59E0B;
+  animation: music-sync-blink 1s ease-in-out infinite;
+}
+
+@keyframes music-sync-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.music-sync-icon-btn.music-sync-paused .music-sync-pulse-dot {
+  background: #94A3B8;
+  animation: none;
+}
+
+/* 音乐同步弹窗 */
+.music-sync-popup {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  width: 280px;
+  background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 9999;
+  animation: music-sync-popup-in 0.2s ease-out;
+}
+
+@keyframes music-sync-popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.music-sync-popup-closing {
+  animation: music-sync-popup-out 0.2s ease-in forwards;
+}
+
+@keyframes music-sync-popup-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+}
+
+.music-sync-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.1);
+}
+
+.music-sync-popup-icon {
+  font-size: 24px;
+  animation: music-sync-icon-bounce 2s ease-in-out infinite;
+}
+
+@keyframes music-sync-icon-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.music-sync-popup-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #F8FAFC;
+  letter-spacing: 0.3px;
+}
+
+.music-sync-popup-content {
+  padding: 16px;
+}
+
+.music-sync-popup-status {
+  font-size: 11px;
+  color: #38BDF8;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.music-sync-popup-track {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.music-sync-popup-track-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #F8FAFC;
+  line-height: 1.4;
+}
+
+.music-sync-popup-track-artist {
+  font-size: 13px;
+  color: #94A3B8;
+  line-height: 1.4;
+}
+
+.music-sync-popup-actions {
+  padding: 12px 16px;
+  border-top: 1px solid rgba(56, 189, 248, 0.1);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.music-sync-popup-actions .btn {
+  font-size: 13px;
+  padding: 6px 12px;
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .music-sync-popup {
+    background: linear-gradient(135deg, #0B0E14 0%, #111827 100%);
+    border-color: rgba(34, 211, 238, 0.2);
+  }
+  
+  .music-sync-popup-status {
+    color: #22D3EE;
+  }
+  
+  .music-sync-pulse-dot {
+    background: #22D3EE;
+  }
+}
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  .music-sync-popup {
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-width: 320px;
+  }
+  
+  .music-sync-pulse-dot {
+    width: 6px;
+    height: 6px;
+  }
+}

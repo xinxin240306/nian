@@ -1,0 +1,24 @@
+# MCP 网关 · VPS Docker
+# 前置：把带 /tools 补丁的 gateway 目录放到 ./gateway
+#   scp -r D:\stackchan-mcp\gateway root@VPS:/opt/stackchan-mcp/gateway
+
+services:
+  stackchan-mcp:
+    build: .
+    container_name: stackchan-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 盖过漏配的 .env，强制念模式（不启 Codex stdio）
+      STACKCHAN_MODE: nian
+    ports:
+      # 只绑本机，公网走 Nginx /stackchan/
+      - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - ./gateway:/app
+      - stackchan-captures:/root/.stackchan
+    working_dir: /app
+
+volumes:
+  stackchan-captures:

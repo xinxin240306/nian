@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_together_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_together_bg"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingLeft="10dp"
+    android:paddingTop="10dp"
+    android:paddingRight="10dp"
+    android:paddingBottom="10dp">
+
+    <ImageView
+        android:id="@+id/widget_together_mood"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:adjustViewBounds="true"
+        android:contentDescription="@string/together_widget_name"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/widget_together_mood_emoji"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="😌"
+        android:textSize="30sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/widget_together_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingTop="2dp"
+        android:text="与 TA"
+        android:textColor="#F7F1EA"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_together_days"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:text="—"
+        android:textColor="#FFFFFF"
+        android:textSize="30sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/widget_together_unit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="天"
+        android:textColor="#F7F1EA"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/widget_together_sub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingTop="1dp"
+        android:text=""
+        android:textColor="#E8DDD2"
+        android:textSize="10sp"
+        android:visibility="gone" />
+</LinearLayout>

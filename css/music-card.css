@@ -1,0 +1,139 @@
+/* 音乐卡片样式 */
+
+.music-card {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 12px;
+  margin: 8px 0;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.music-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
+  pointer-events: none;
+}
+
+.music-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+}
+
+.music-card:active {
+  transform: translateY(0);
+}
+
+.music-card-cover {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.music-card-info {
+  flex: 1;
+  margin-left: 12px;
+  min-width: 0;
+  color: #fff;
+}
+
+.music-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.music-card-artist {
+  font-size: 13px;
+  opacity: 0.9;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-card-emotions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.music-emotion-tag {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+  backdrop-filter: blur(4px);
+  font-weight: 500;
+}
+
+.music-card-platform {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(4px);
+}
+
+.music-card-icon {
+  width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+/* 播放动画 */
+@keyframes music-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.music-card:hover .music-card-icon {
+  animation: music-pulse 1.5s ease-in-out infinite;
+}
+
+/* Dark mode 适配 */
+@media (prefers-color-scheme: dark) {
+  .music-card {
+    background: linear-gradient(135deg, #434343 0%, #000000 100%);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  }
+  
+  .music-card:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .music-card {
+    max-width: 100%;
+  }
+}

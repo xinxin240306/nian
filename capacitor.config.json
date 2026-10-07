@@ -1,0 +1,29 @@
+{
+  "appId": "app.nian.comm",
+  "appName": "念",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#100818"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#e8d5f5",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#00000000",
+      "overlaysWebView": true
+    },
+    "Keyboard": {
+      "resize": "none",
+      "resizeOnFullScreen": false
+    }
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}

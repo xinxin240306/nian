@@ -1,0 +1,7 @@
+--- Warning: GDB cannot open serial ports accessed as COMx
+--- Using \\.\COM4 instead...
+--- esp-idf-monitor 1.9.0 on \\.\COM4 115200
+--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+--- 0x421aeecb: mul_rvf_rsf_rvf_728 at /home/sunxiangyu/workspace/esp_sr_lib/components/esp_audio_processor/asm_functions/mul_rvf_rsf_rvf_728.S:30
+--- 0x403c8700: _stext at ??:?
+--- 0x403c8908: call_start_cpu0 at D:/esp/esp-idf/components/bootloader/subproject/main/bootloader_start.c:25

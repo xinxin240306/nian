@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">念</string>
+    <string name="title_activity_main">念</string>
+    <string name="package_name">app.nian.comm</string>
+    <string name="accessibility_service_description">念读取当前屏幕上能看见的文字；你主动让角色帮忙时，可以点按或滑动当前这一屏。不会代支付、不填密码、不代下单。可随时在系统设置里关掉。</string>
+    <string name="notification_listener_description">念读取通知栏里当前展示的标题和摘要，给角色看你有没有新消息。不会点开微信，也不会改通知。</string>
+    <string name="together_widget_name">在一起</string>
+    <string name="together_widget_description">2×2 显示在一起天数，心情豆会轻轻呼吸</string>
+</resources>

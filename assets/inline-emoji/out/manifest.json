@@ -1,0 +1,396 @@
+{
+  "version": 1,
+  "name": "小黄豆",
+  "emojis": [
+    {
+      "code": "爱心",
+      "file": "爱心.png",
+      "aliases": []
+    },
+    {
+      "code": "安慰",
+      "file": "安慰.png",
+      "aliases": []
+    },
+    {
+      "code": "抱抱",
+      "file": "抱抱.png",
+      "aliases": []
+    },
+    {
+      "code": "抱拳",
+      "file": "抱拳.png",
+      "aliases": []
+    },
+    {
+      "code": "比耶",
+      "file": "比耶.png",
+      "aliases": []
+    },
+    {
+      "code": "闭嘴",
+      "file": "闭嘴.png",
+      "aliases": []
+    },
+    {
+      "code": "吃瓜",
+      "file": "吃瓜.png",
+      "aliases": []
+    },
+    {
+      "code": "呲牙",
+      "file": "呲牙.png",
+      "aliases": []
+    },
+    {
+      "code": "打招呼",
+      "file": "打招呼.png",
+      "aliases": []
+    },
+    {
+      "code": "大哭",
+      "file": "大哭.png",
+      "aliases": []
+    },
+    {
+      "code": "大笑",
+      "file": "大笑.png",
+      "aliases": []
+    },
+    {
+      "code": "呆",
+      "file": "呆.png",
+      "aliases": []
+    },
+    {
+      "code": "蛋糕",
+      "file": "蛋糕.png",
+      "aliases": []
+    },
+    {
+      "code": "得意",
+      "file": "得意.png",
+      "aliases": []
+    },
+    {
+      "code": "奋斗",
+      "file": "奋斗.png",
+      "aliases": []
+    },
+    {
+      "code": "给心",
+      "file": "给心.png",
+      "aliases": []
+    },
+    {
+      "code": "勾手指",
+      "file": "勾手指.png",
+      "aliases": []
+    },
+    {
+      "code": "狗头",
+      "file": "狗头.png",
+      "aliases": []
+    },
+    {
+      "code": "鼓掌",
+      "file": "鼓掌.png",
+      "aliases": []
+    },
+    {
+      "code": "跪",
+      "file": "跪.png",
+      "aliases": []
+    },
+    {
+      "code": "海浪",
+      "file": "海浪.png",
+      "aliases": []
+    },
+    {
+      "code": "害羞",
+      "file": "害羞.png",
+      "aliases": []
+    },
+    {
+      "code": "喊",
+      "file": "喊.png",
+      "aliases": []
+    },
+    {
+      "code": "汗",
+      "file": "汗.png",
+      "aliases": []
+    },
+    {
+      "code": "哼",
+      "file": "哼.png",
+      "aliases": []
+    },
+    {
+      "code": "红包",
+      "file": "红包.png",
+      "aliases": []
+    },
+    {
+      "code": "红酒",
+      "file": "红酒.png",
+      "aliases": []
+    },
+    {
+      "code": "花谢了",
+      "file": "花谢了.png",
+      "aliases": []
+    },
+    {
+      "code": "坏笑",
+      "file": "坏笑.png",
+      "aliases": []
+    },
+    {
+      "code": "惊悚",
+      "file": "惊悚.png",
+      "aliases": []
+    },
+    {
+      "code": "惊讶",
+      "file": "惊讶.png",
+      "aliases": []
+    },
+    {
+      "code": "囧",
+      "file": "囧.png",
+      "aliases": []
+    },
+    {
+      "code": "咖啡",
+      "file": "咖啡.png",
+      "aliases": []
+    },
+    {
+      "code": "可怜",
+      "file": "可怜.png",
+      "aliases": []
+    },
+    {
+      "code": "酷",
+      "file": "酷.png",
+      "aliases": []
+    },
+    {
+      "code": "快哭了",
+      "file": "快哭了.png",
+      "aliases": []
+    },
+    {
+      "code": "礼物",
+      "file": "礼物.png",
+      "aliases": []
+    },
+    {
+      "code": "落泪",
+      "file": "落泪.png",
+      "aliases": []
+    },
+    {
+      "code": "玫瑰",
+      "file": "玫瑰.png",
+      "aliases": []
+    },
+    {
+      "code": "怒",
+      "file": "怒.png",
+      "aliases": []
+    },
+    {
+      "code": "撇嘴",
+      "file": "撇嘴.png",
+      "aliases": []
+    },
+    {
+      "code": "敲",
+      "file": "敲.png",
+      "aliases": []
+    },
+    {
+      "code": "亲",
+      "file": "亲.png",
+      "aliases": []
+    },
+    {
+      "code": "色",
+      "file": "色.png",
+      "aliases": []
+    },
+    {
+      "code": "生气",
+      "file": "生气.png",
+      "aliases": []
+    },
+    {
+      "code": "竖大拇指",
+      "file": "竖大拇指.png",
+      "aliases": []
+    },
+    {
+      "code": "睡着",
+      "file": "睡着.png",
+      "aliases": []
+    },
+    {
+      "code": "说脏话",
+      "file": "说脏话.png",
+      "aliases": []
+    },
+    {
+      "code": "送你花",
+      "file": "送你花.png",
+      "aliases": []
+    },
+    {
+      "code": "锁",
+      "file": "锁.png",
+      "aliases": []
+    },
+    {
+      "code": "太阳",
+      "file": "太阳.png",
+      "aliases": []
+    },
+    {
+      "code": "摊手",
+      "file": "摊手.png",
+      "aliases": []
+    },
+    {
+      "code": "偷笑",
+      "file": "偷笑.png",
+      "aliases": []
+    },
+    {
+      "code": "吐舌",
+      "file": "吐舌.png",
+      "aliases": []
+    },
+    {
+      "code": "微笑",
+      "file": "微笑.png",
+      "aliases": []
+    },
+    {
+      "code": "委屈",
+      "file": "委屈.png",
+      "aliases": []
+    },
+    {
+      "code": "握手",
+      "file": "握手.png",
+      "aliases": []
+    },
+    {
+      "code": "无辜",
+      "file": "无辜.png",
+      "aliases": []
+    },
+    {
+      "code": "捂脸",
+      "file": "捂脸.png",
+      "aliases": []
+    },
+    {
+      "code": "嫌弃",
+      "file": "嫌弃.png",
+      "aliases": []
+    },
+    {
+      "code": "小猪",
+      "file": "小猪.png",
+      "aliases": []
+    },
+    {
+      "code": "笑哭",
+      "file": "笑哭.png",
+      "aliases": []
+    },
+    {
+      "code": "心碎",
+      "file": "心碎.png",
+      "aliases": []
+    },
+    {
+      "code": "嘘",
+      "file": "嘘.png",
+      "aliases": []
+    },
+    {
+      "code": "药",
+      "file": "药.png",
+      "aliases": []
+    },
+    {
+      "code": "疑问",
+      "file": "疑问.png",
+      "aliases": []
+    },
+    {
+      "code": "阴险",
+      "file": "阴险.png",
+      "aliases": []
+    },
+    {
+      "code": "音乐",
+      "file": "音乐.png",
+      "aliases": []
+    },
+    {
+      "code": "愉快",
+      "file": "愉快.png",
+      "aliases": []
+    },
+    {
+      "code": "月亮",
+      "file": "月亮.png",
+      "aliases": []
+    },
+    {
+      "code": "晕",
+      "file": "晕.png",
+      "aliases": []
+    },
+    {
+      "code": "再见",
+      "file": "再见.png",
+      "aliases": []
+    },
+    {
+      "code": "炸弹",
+      "file": "炸弹.png",
+      "aliases": []
+    },
+    {
+      "code": "智慧",
+      "file": "智慧.png",
+      "aliases": []
+    },
+    {
+      "code": "祝贺",
+      "file": "祝贺.png",
+      "aliases": []
+    },
+    {
+      "code": "emm",
+      "file": "emm.png",
+      "aliases": []
+    },
+    {
+      "code": "ok",
+      "file": "ok.png",
+      "aliases": []
+    },
+    {
+      "code": "wink",
+      "file": "wink.png",
+      "aliases": []
+    }
+  ]
+}

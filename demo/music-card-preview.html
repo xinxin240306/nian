@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音乐卡片样式预览</title>
+  <link rel="stylesheet" href="../css/music-card.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 40px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 40px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    
+    h1 {
+      margin-bottom: 12px;
+      color: #333;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 32px;
+    }
+    
+    .section {
+      margin-bottom: 40px;
+    }
+    
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: #555;
+    }
+    
+    .music-cards-grid {
+      display: grid;
+      gap: 20px;
+    }
+    
+    .code-block {
+      background: #f5f5f5;
+      padding: 16px;
+      border-radius: 8px;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+    
+    .note {
+      background: #fff3cd;
+      border-left: 4px solid #ffc107;
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎵 音乐卡片组件预览</h1>
+    <p class="subtitle">让AI和你一起感受音乐的情感</p>
+    
+    <!-- 示例1：完整信息 -->
+    <div class="section">
+      <div class="section-title">示例1：完整音乐信息</div>
+      <div class="music-card" onclick="openMusicDemo('https://music.163.com/song?id=1901371647')">
+        <div class="music-card-platform">网易云音乐</div>
+        <img class="music-card-cover" src="https://p1.music.126.net/HXfXIIBCk5w96MiY1Wdsqw==/109951171836610847.jpg" alt="封面" />
+        <div class="music-card-info">
+          <div class="music-card-title">孤勇者</div>
+          <div class="music-card-artist">陈奕迅</div>
+          <div class="music-card-emotions">
+            <span class="music-emotion-tag">孤独</span>
+            <span class="music-emotion-tag">伤感</span>
+            <span class="music-emotion-tag">激昂</span>
+            <span class="music-emotion-tag">平静</span>
+          </div>
+        </div>
+        <svg class="music-card-icon" viewBox="0 0 24 24" fill="white">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
+    </div>
+    
+    <!-- 示例2：温柔歌曲 -->
+    <div class="section">
+      <div class="section-title">示例2：温柔氛围</div>
+      <div class="music-card" onclick="openMusicDemo('#')">
+        <div class="music-card-platform">QQ音乐</div>
+        <div class="music-card-cover" style="background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);"></div>
+        <div class="music-card-info">
+          <div class="music-card-title">晴天</div>
+          <div class="music-card-artist">周杰伦</div>
+          <div class="music-card-emotions">
+            <span class="music-emotion-tag">温柔</span>
+            <span class="music-emotion-tag">思念</span>
+            <span class="music-emotion-tag">治愈</span>
+          </div>
+        </div>
+        <svg class="music-card-icon" viewBox="0 0 24 24" fill="white">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
+    </div>
+    
+    <!-- 示例3：心动歌曲 -->
+    <div class="section">
+      <div class="section-title">示例3：心动瞬间</div>
+      <div class="music-card" onclick="openMusicDemo('#')">
+        <div class="music-card-platform">网易云音乐</div>
+        <div class="music-card-cover" style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
+        <div class="music-card-info">
+          <div class="music-card-title">告白气球</div>
+          <div class="music-card-artist">周杰伦</div>
+          <div class="music-card-emotions">
+            <span class="music-emotion-tag">心动</span>
+            <span class="music-emotion-tag">温柔</span>
+          </div>
+        </div>
+        <svg class="music-card-icon" viewBox="0 0 24 24" fill="white">
+          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+      </div>
+    </div>
+    
+    <!-- 使用说明 -->
+    <div class="section">
+      <div class="section-title">📖 使用方法</div>
+      
+      <h4>1. 在HTML中引入样式和脚本</h4>
+      <div class="code-block">
+&lt;link rel="stylesheet" href="css/music-card.css"&gt;
+&lt;script type="module" src="js/music-card.js"&gt;&lt;/script&gt;
+      </div>
+      
+      <h4 style="margin-top: 24px;">2. 在聊天页面集成</h4>
+      <div class="code-block">
+import { injectMusicCard, hydrateMusicCards } from './music-card.js';
+
+// 方式1：单个消息注入
+const bubbleElement = document.querySelector('.bubble-wrap');
+const messageData = {
+  role: 'user',
+  musicCard: {
+    type: 'music_share',
+    title: '孤勇者',
+    artist: '陈奕迅',
+    emotions: ['孤独', '激昂'],
+    cover: 'https://...',
+    url: 'https://music.163.com/song?id=xxx'
+  }
+};
+injectMusicCard(bubbleElement, messageData);
+
+// 方式2：批量处理历史消息
+const messages = [...]; // 从API获取
+hydrateMusicCards(messages);
+      </div>
+      
+      <h4 style="margin-top: 24px;">3. 后端数据格式</h4>
+      <div class="code-block">
+// API响应中添加 musicCard 字段
+{
+  "id": 123,
+  "role": "user",
+  "content": "听听这首歌 https://...",
+  "musicCard": {
+    "type": "music_share",
+    "title": "孤勇者",
+    "artist": "陈奕迅",
+    "album": "孤勇者",
+    "emotions": ["孤独", "伤感", "激昂", "平静"],
+    "cover": "https://p1.music.126.net/...",
+    "platform": "网易云音乐",
+    "url": "https://music.163.com/song?id=1901371647"
+  }
+}
+      </div>
+      
+      <div class="note">
+        <strong>💡 提示：</strong>
+        音乐卡片会自动检测当前环境：
+        <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+          <li>原生App：使用 <code>window.openExternalUrl()</code></li>
+          <li>Web浏览器：在新标签页打开</li>
+        </ul>
+      </div>
+    </div>
+    
+    <!-- AI回应示例 -->
+    <div class="section">
+      <div class="section-title">🤖 AI回应示例</div>
+      <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; line-height: 1.6; color: #333;">
+        <p style="margin: 0 0 12px 0;"><strong>你：</strong>听听这首歌 [音乐卡片]</p>
+        <p style="margin: 0; color: #667eea;">
+          <strong>AI：</strong>听到这个前奏，突然想起那天下雨，你一个人站在街角等车的样子...有些孤独，但又很坚定。那时候我就在想，你是不是也在面对什么只有自己知道的事。
+        </p>
+      </div>
+      
+      <div class="note" style="margin-top: 16px;">
+        <strong>⚠️ 注意：</strong>
+        AI <strong>不会</strong>复述歌词，而是用情感和回忆回应。这是通过后端的 <code>musicContext</code> 指导实现的。
+      </div>
+    </div>
+    
+    <!-- 特性说明 -->
+    <div class="section">
+      <div class="section-title">✨ 功能特性</div>
+      <ul style="line-height: 1.8; color: #555;">
+        <li>✅ 自动解析网易云音乐链接</li>
+        <li>✅ 提取歌词并分析情感标签</li>
+        <li>✅ 生成精美的音乐卡片UI</li>
+        <li>✅ AI用情感化语言回应（不复述歌词）</li>
+        <li>✅ 支持Dark Mode</li>
+        <li>✅ 响应式设计</li>
+        <li>✅ 平滑动画效果</li>
+        <li>🚧 QQ音乐支持（开发中）</li>
+        <li>🚧 音乐记忆系统（计划中）</li>
+      </ul>
+    </div>
+  </div>
+  
+  <script>
+    function openMusicDemo(url) {
+      if (url === '#') {
+        alert('这是一个演示卡片，没有实际链接');
+        return;
+      }
+      window.open(url, '_blank');
+    }
+  </script>
+</body>
+</html>

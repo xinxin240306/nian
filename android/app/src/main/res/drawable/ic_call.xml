@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!--
+      微信式白色电话图标：保留原 HTML 里用的 SVG path。
+      拒绝按钮会在 Java 端 rotate 135°，复用同一份图。
+      图标颜色由按钮 bg 控制（红/绿），pathData fillColor 设为白色更直观；为了
+      兼容「外层 Tint / 主题」统一改为白色 fillColor，背景由按钮底色承担。
+    -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6.6,10.8c1.4,2.8 3.8,5.1 6.6,6.6l2.2,-2.2c0.27,-0.27 0.67,-0.36 1.02,-0.24c1.12,0.37 2.33,0.57 3.58,0.57c0.55,0 1,0.45 1,1V20c0,0.55 -0.45,1 -1,1C10.61,21 3,13.39 3,4c0,-0.55 0.45,-1 1,-1h3.5c0.55,0 1,0.45 1,1c0,1.25 0.2,2.46 0.57,3.58c0.11,0.35 0.03,0.74 -0.25,1.02L6.6,10.8z" />
+</vector>

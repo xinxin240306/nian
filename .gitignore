@@ -1,0 +1,62 @@
+# 依赖
+backend/node_modules/
+/node_modules/
+
+# Capacitor 构建产物（由 npm run prepare:www 生成）
+/www/
+/dist/
+/.tools/
+/android/gradle-*.zip
+/android/build-log.txt
+
+# 数据库（包含聊天记录等隐私数据，不上传）
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/db_backups/
+
+# 上传的图片/视频（可能很大，不上传）
+backend/uploads/
+backend/uploads/**
+!backend/uploads/.gitkeep
+
+# 本地调试 / 预览草稿
+preview/sprites/
+preview/meowyu-pet.html
+preview/sprite-preview.html
+preview/pixel-editor*.html
+preview/ref-*.jpg
+preview/extract-*.py
+preview/trace-*.py
+
+# Android 签名证书（请自行生成，勿提交私人 keystore）
+*.keystore
+*.jks
+android/app/*.keystore
+android/app/*.jks
+
+backend/bin/*.exe
+backend/data/app-update/
+
+# 环境变量
+.env
+backend/.env
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志
+*.log
+npm-debug.log*
+
+# ????? APK????
+*.apk
+tmp-robot-tools-test.txt
+
+# ??????????????????????
+assets/fonts/*.ttf
+
+.tmp-apk.zip
+

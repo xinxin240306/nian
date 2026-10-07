@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000">
+  <meta name="nian-version" content="108">
+  <meta name="color-scheme" content="light dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-touch-fullscreen" content="yes">
+  <meta name="apple-mobile-web-app-title" content="念">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png?v=108">
+  <link rel="apple-touch-startup-image" href="/assets/icons/splash-1170x2532.png?v=108" media="(orientation: portrait)">
+  <link rel="icon" href="/assets/icons/icon-192.png?v=108" type="image/png">
+  <link rel="icon" href="/assets/icons/icon.svg?v=108" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Liu+Jian+Mao+Cao&family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@300;400;500&family=Noto+Serif+SC:wght@400;500;700&family=ZCOOL+KuaiLe&family=ZCOOL+XiaoWei&family=Zhi+Mang+Xing&display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      margin: 0; height: 100%; height: 100dvh; height: 100svh;
+      overflow: hidden;
+      background: #100818;
+    }
+    body {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      overscroll-behavior: none;
+      min-height: 100dvh;
+      min-height: -webkit-fill-available;
+    }
+    #app-splash {
+      position: fixed; inset: 0; z-index: 99999;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      background: linear-gradient(135deg, #e8d5f5 0%, #c9a0dc 100%);
+      transition: opacity 1.45s ease, visibility 1.45s ease;
+    }
+    #app-splash.is-hiding { opacity: 0; pointer-events: none; }
+    #app-splash.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    .splash-center {
+      display: flex; flex-direction: column; align-items: center;
+      margin-top: -6vh;
+    }
+    #app-splash-logo {
+      font-family: 'Liu Jian Mao Cao', cursive;
+      font-size: clamp(132px, 34vw, 188px);
+      font-weight: 400;
+      line-height: 1;
+      color: #fff;
+      text-shadow: 0 2px 20px rgba(140, 90, 160, .28);
+      opacity: 0;
+      animation: splash-char-in 1.85s ease forwards;
+    }
+    #app-splash-roman {
+      margin-top: 12px;
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      font-size: 11px;
+      font-weight: 300;
+      letter-spacing: 0.42em;
+      text-indent: 0.42em;
+      color: rgba(255, 255, 255, .82);
+      opacity: 0;
+      animation: splash-roman-in 1.5s ease .55s forwards;
+    }
+    .splash-footer {
+      position: absolute;
+      left: 0; right: 0;
+      bottom: calc(10vh + env(safe-area-inset-bottom, 0px));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+    }
+    #app-splash-tagline,
+    #app-splash-quote {
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      font-size: 11px;
+      font-weight: 300;
+      color: rgba(255, 255, 255, .58);
+      opacity: 0;
+    }
+    #app-splash-tagline {
+      letter-spacing: 0.38em;
+      text-indent: 0.38em;
+      animation: splash-tagline-in 1.5s ease .9s forwards;
+    }
+    #app-splash-quote {
+      letter-spacing: 0.04em;
+      animation: splash-quote-in 1.5s ease 1.15s forwards;
+    }
+    #app-splash.is-hiding .splash-center,
+    #app-splash.is-hiding .splash-footer {
+      animation: splash-char-out 1.4s ease forwards;
+    }
+    @keyframes splash-char-in {
+      0% { opacity: 0; transform: scale(.9) translateY(14px); filter: blur(8px); }
+      100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+    }
+    @keyframes splash-roman-in {
+      0% { opacity: 0; transform: translateY(6px); letter-spacing: 0.55em; }
+      100% { opacity: 1; transform: translateY(0); letter-spacing: 0.42em; }
+    }
+    @keyframes splash-tagline-in {
+      0% { opacity: 0; transform: translateY(10px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes splash-quote-in {
+      0% { opacity: 0; transform: translateY(8px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes splash-char-out {
+      0% { opacity: 1; transform: scale(1); filter: blur(0); }
+      100% { opacity: 0; transform: scale(1.04); filter: blur(4px); }
+    }
+  </style>
+  <link rel="stylesheet" href="/css/style.css?v=167">
+  <link rel="stylesheet" href="/css/circle.css?v=1">
+  <link rel="stylesheet" href="/css/music-card.css?v=1">
+  <link rel="stylesheet" href="/css/music-sync.css?v=1">
+  <title>念</title>
+</head>
+<body>
+
+<div id="app-splash" aria-hidden="true">
+  <div class="splash-center">
+    <div id="app-splash-logo">念</div>
+    <div id="app-splash-roman">NIAN</div>
+  </div>
+  <div class="splash-footer">
+    <div id="app-splash-tagline">异世界通讯</div>
+    <div id="app-splash-quote">My soul has always known yours.</div>
+  </div>
+</div>
+<script>
+(function () {
+  var done = false;
+  window.__nianDismissSplash = function () {
+    if (done) return;
+    var el = document.getElementById('app-splash');
+    if (!el || el.classList.contains('is-hiding') || el.classList.contains('is-hidden')) return;
+    done = true;
+    el.classList.add('is-hiding');
+    setTimeout(function () {
+      el.classList.add('is-hidden');
+      setTimeout(function () { el.remove(); }, 1600);
+    }, 1450);
+  };
+  setTimeout(window.__nianDismissSplash, 3200);
+  setTimeout(window.__nianDismissSplash, 5600);
+})();
+</script>
+
+<!-- 内页主题背景（从主页点进应用后的底色，与主页壁纸分离） -->
+<div id="theme-bg" aria-hidden="true"></div>
+
+<!-- 主页桌面壁纸：放在 page 外，避免离开主页时被 display:none 拖垮视频解码 -->
+<div id="home-desktop-bg" class="home-desktop-bg" aria-hidden="true">
+  <canvas id="particle-canvas"></canvas>
+  <video id="bg-video" autoplay loop muted playsinline preload="auto" style="display:none"></video>
+  <img id="bg-image" alt="" style="display:none">
+  <div id="desktop-overlay" class="desktop-overlay" aria-hidden="true"></div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+<!-- 网络异常改走 showSystemNotify；保留节点以免旧缓存脚本报错 -->
+<div id="offline-banner" hidden aria-hidden="true">网络已断开，部分功能可能不可用</div>
+
+<!-- 站点访问锁（换 IP 时需重新验证） -->
+<div id="site-lock-overlay" class="site-lock-overlay" aria-hidden="true">
+  <div class="site-lock-card">
+    <div class="site-lock-logo">念</div>
+    <p class="site-lock-desc">此站点仅限授权访问。验证通过后，同一浏览器会记住登录；换浏览器或清除站点数据后需重新输入。</p>
+    <input class="input site-lock-input" id="site-lock-user" type="text" autocomplete="username" placeholder="用户名">
+    <input class="input site-lock-input" id="site-lock-pass" type="password" autocomplete="current-password" placeholder="密码">
+    <p id="site-lock-error" class="site-lock-error" style="display:none"></p>
+    <button type="button" class="btn btn-primary site-lock-btn" id="site-lock-submit">进入</button>
+  </div>
+</div>
+
+<!-- 长按菜单 -->
+<div id="ctx-scrim" class="ctx-scrim" hidden></div>
+<div id="context-menu" class="context-menu">
+  <div class="context-item" id="ctx-locate-item" data-ctx-action="locate" style="display:none">定位到原文位置</div>
+  <div class="context-item" id="ctx-copy-item" data-ctx-action="copy">📋 复制</div>
+  <div class="context-item" id="ctx-quote-item" data-ctx-action="quote">💬 引用</div>
+  <div class="context-item" id="ctx-select-item" data-ctx-action="select">☑️ 多选</div>
+  <div class="context-item" id="ctx-edit-item" data-ctx-action="edit" style="display:none">✎ 编辑</div>
+  <div class="context-item" id="ctx-recall-item" data-ctx-action="recall">↩️ 撤回</div>
+  <div class="context-item danger" id="ctx-delete-item" data-ctx-action="delete">🗑️ 删除</div>
+</div>
+
+<!-- 撤回内容弹窗 -->
+<div id="recalled-overlay" class="overlay center" onclick="this.classList.remove('active')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-title">撤回的消息</div>
+    <div class="modal-body" id="recalled-content" style="font-size:15px;line-height:1.7"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" title="关闭" onclick="document.getElementById('recalled-overlay').classList.remove('active')">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天图片/视频全屏查看 -->
+<div id="chat-media-viewer" class="overlay center chat-media-viewer" style="display:none;z-index:10002;background:rgba(0,0,0,0.88)" onclick="window.closeChatMediaViewer?.(event)">
+  <button type="button" class="chat-media-viewer-close" aria-label="关闭" onclick="window.closeChatMediaViewer?.()">×</button>
+  <div class="chat-media-viewer-inner" onclick="event.stopPropagation()">
+    <img id="chat-media-viewer-img" alt="" style="display:none">
+    <video id="chat-media-viewer-video" controls playsinline style="display:none"></video>
+  </div>
+  <button type="button" id="chat-media-reroll-btn" class="chat-media-reroll-btn" style="display:none" title="重新生成" onclick="window.rerollMediaFromViewer?.(event)">重新生成</button>
+</div>
+
+<!-- 聊天链接卡片内页 -->
+<div id="chat-link-sheet" class="overlay fullscreen chat-link-sheet" style="display:none;z-index:10001" onclick="if(event.target===this)window.closeChatLinkSheet?.()">
+  <div class="sheet-full" onclick="event.stopPropagation()">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="window.closeChatLinkSheet?.()" title="返回"></button>
+      <div class="sheet-full-title">链接</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <div class="chat-link-cover" aria-hidden="true"></div>
+    <div class="chat-link-sheet-article">
+      <h2 id="chat-link-sheet-title"></h2>
+      <p id="chat-link-sheet-text"></p>
+    </div>
+  </div>
+</div>
+
+<!-- 聊天网页卡全屏 -->
+<div id="chat-web-card-sheet" class="overlay fullscreen chat-web-card-sheet" style="display:none;z-index:10001" onclick="if(event.target===this)window.closeChatWebCardSheet?.()">
+  <div class="sheet-full" onclick="event.stopPropagation()">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="window.closeChatWebCardSheet?.()" title="返回"></button>
+      <div class="sheet-full-title" id="chat-web-card-sheet-title">网页卡</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <iframe id="chat-web-card-sheet-frame" class="chat-web-card-sheet-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="网页卡"></iframe>
+  </div>
+</div>
+
+<!-- ===== 主页（沉浸式） ===== -->
+<div id="home-page" class="page active">
+
+  <!-- iOS 风格可滑动图标桌面（含每页顶栏：时钟 + 角色） -->
+  <div class="home-launcher" id="home-launcher" data-grid="4">
+    <div class="home-pages-viewport">
+      <div class="home-pages" id="home-pages"></div>
+    </div>
+    <div class="home-page-dots" id="home-page-dots" hidden></div>
+  </div>
+
+  <div class="home-edit-bar" id="home-edit-bar" hidden>
+    <button type="button" class="home-edit-add" id="home-edit-add" title="设置">设置</button>
+    <button type="button" class="home-edit-done" id="home-edit-done">完成</button>
+  </div>
+
+  <!-- 底部功能区（约占页面 1/5） -->
+  <div class="home-dock-wrap">
+    <div class="home-dock" id="home-dock"></div>
+  </div>
+
+  <!-- 品牌标识 -->
+  <div class="home-brand">念 · NIAN</div>
+
+</div>
+
+<!-- ===== 聊天页 ===== -->
+<div id="chat-page" class="page" style="background:transparent">
+  <div id="chat-bg"></div>
+  
+  <!-- 音乐同步状态栏占位（已废弃，改用顶栏图标） -->
+  <!-- <div id="music-sync-container"></div> -->
+  
+  <!-- 顶栏 -->
+  <div class="topbar" id="chat-topbar">
+    <button type="button" class="topbar-back topbar-nav-back" onclick="chatPageGoBack()" title="返回"></button>
+    <div id="chat-avatar-wrap" style="position:relative;cursor:pointer">
+      <img id="chat-avatar" class="avatar" src="" alt="" style="display:none">
+      <div id="chat-avatar-placeholder" class="avatar" style="font-size:18px">👤</div>
+      <div class="status-dot" id="chat-status-dot"></div>
+    </div>
+    <div class="topbar-title">
+      <div id="chat-char-name" style="font-size:16px"></div>
+      <div id="chat-char-status" style="font-size:12px;color:var(--text-secondary);font-weight:300"></div>
+    </div>
+    <div class="topbar-actions">
+      <button type="button" id="chat-link-sc" class="chat-link-badge" hidden title="Stack-chan 已连接" aria-label="Stack-chan 已连接" onclick="openToyFromChat('stackchan')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="7" width="14" height="12" rx="2"/>
+          <path d="M12 4v3M9 19v2M15 19v2"/>
+          <circle cx="9.5" cy="12.5" r="1.1"/>
+          <circle cx="14.5" cy="12.5" r="1.1"/>
+        </svg>
+      </button>
+      <button type="button" id="chat-link-bbtoy" class="chat-link-badge" hidden title="啵啵贝已连接" aria-label="啵啵贝已连接" onclick="openToyFromChat('bbtoy')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20c5.8-1.8 8-6.5 8-10.5C20 7.5 19 6.2 17.4 6.2c-.9 0-1.7.4-2.2 1.1C14.6 5.8 13.4 5 12 5s-2.6.8-3.2 2.3c-.5-.7-1.3-1.1-2.2-1.1C5 6.2 4 7.5 4 9.5 4 13.5 6.2 18.2 12 20z"/>
+          <path d="M12 8.2V20M8.2 10.2 12 20M15.8 10.2 12 20"/>
+        </svg>
+      </button>
+      <button type="button" class="topbar-action" onclick="openChatSettings()" title="设置">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- 消息区 -->
+  <div class="scroll-area" id="messages-area" style="padding:8px 0">
+    <div id="messages-list"></div>
+    <div id="typing-area"></div>
+  </div>
+
+  <!-- 多条攒发提示 -->
+  <div id="pending-bar" style="display:none;padding:4px 16px;background:var(--bg-glass);backdrop-filter:blur(10px);border-top:1px solid var(--border)">
+    <span style="font-size:12px;color:var(--text-secondary)">已攒 <b id="pending-count">0</b> 条，点发送统一回复</span>
+    <span style="font-size:12px;color:var(--theme);cursor:pointer;margin-left:8px" onclick="clearPendingMsgs()">清空</span>
+  </div>
+
+  <!-- 忙碌提示 -->
+  <div id="busy-bar" style="display:none;padding:8px 16px;background:rgba(250,173,20,0.1);border-top:1px solid rgba(250,173,20,0.2);text-align:center">
+    <span style="font-size:13px;color:#d48806">⏳ 对方忙碌中</span>
+    <span class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:12px" onclick="pokeCharacter()">叫TA一下</span>
+  </div>
+
+  <!-- 摇一摇陌生人：还不是好友 -->
+  <div id="stranger-bar" class="chat-stranger-bar" style="display:none">
+    <span class="chat-stranger-bar-text">你们还不是好友，可继续聊或添加好友</span>
+    <button type="button" class="btn btn-primary btn-sm" id="stranger-bar-add-btn" onclick="requestFriendFromChat()">添加好友</button>
+  </div>
+
+  <!-- 多选删除栏 -->
+  <div id="chat-select-bar" style="display:none;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;background:var(--bg-glass);border-top:1px solid var(--border)">
+    <button type="button" class="btn btn-ghost btn-sm" onclick="exitChatSelectMode()">取消</button>
+    <span style="font-size:13px;color:var(--text-secondary)">已选 <b id="chat-select-count" style="color:var(--theme)">0</b> 条</span>
+    <button type="button" id="chat-select-edit-btn" class="btn btn-ghost btn-sm" title="编辑" disabled onclick="editSelectedChatMessage()">✎ 编辑</button>
+    <button type="button" id="chat-select-delete-btn" class="btn btn-danger btn-sm" title="删除" disabled onclick="deleteSelectedChatMessages()">🗑 删除</button>
+  </div>
+
+  <!-- 输入栏 -->
+  <div class="chat-input-area">
+    <!-- 引用预览栏 -->
+    <div id="reply-bar" class="chat-context-bar" style="display:none">
+      <div class="chat-context-card chat-context-card--reply">
+        <div class="chat-context-name" id="reply-bar-name"></div>
+        <div class="chat-context-text" id="reply-bar-text"></div>
+      </div>
+      <button type="button" class="chat-context-close" onclick="clearReply()" title="取消引用" aria-label="取消引用">×</button>
+    </div>
+    <!-- 游戏管家栏 -->
+    <div id="game-butler-bar" class="chat-context-bar" style="display:none">
+      <div class="chat-context-card chat-context-card--game">
+        <div class="chat-context-name">游戏中 · <span id="game-butler-bar-name"></span></div>
+        <div class="chat-context-text" id="game-butler-bar-text"></div>
+      </div>
+      <button type="button" id="game-butler-dice-btn" class="btn btn-primary btn-sm chat-context-action" style="display:none" onclick="gameButlerRollDice()">掷骰</button>
+      <button type="button" class="chat-context-close" onclick="exitGameButler()" title="退出游戏" aria-label="退出游戏">×</button>
+    </div>
+    <!-- 游戏话题栏 -->
+    <div id="game-topic-bar" class="chat-context-bar" style="display:none">
+      <div class="chat-context-card chat-context-card--topic">
+        <div class="chat-context-name">话题 · <span id="game-topic-bar-name"></span></div>
+        <div class="chat-context-text" id="game-topic-bar-text"></div>
+      </div>
+      <button type="button" class="chat-context-close" onclick="clearGameTopic()" title="清除话题" aria-label="清除话题">×</button>
+    </div>
+    <!-- 小剧场栏 -->
+    <div id="theater-bar" class="chat-context-bar" style="display:none">
+      <div class="chat-context-card chat-context-card--theater">
+        <div class="chat-context-name">小剧场 · 文字扮演中</div>
+        <div class="chat-context-text">动作用（括号）写 · 不是真实剧情</div>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm chat-context-action" onclick="endTheater()" title="结束小剧场">结束</button>
+    </div>
+    <!-- 桌宠操纵中 / 看屏操作中 -->
+    <div id="operating-bar" class="chat-context-bar" style="display:none">
+      <div class="chat-context-card chat-context-card--operating">
+        <div class="chat-context-name" id="operating-bar-title">操纵中 · 正在操纵桌上小机</div>
+        <div class="chat-context-text" id="operating-bar-text">聊天仍可发送，用来指挥或打断</div>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm chat-context-action" onclick="endRobotOperating()" title="结束操作">结束</button>
+    </div>
+
+    <div class="chat-input-row chat-composer" id="chat-composer">
+      <button type="button" class="chat-plus-btn" id="chat-plus-btn" onclick="toggleToolbar()" title="更多" aria-label="更多功能">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button type="button" class="chat-voice-toggle" id="chat-voice-toggle" onclick="toggleChatVoiceMode()" title="语音" aria-label="切换语音输入">
+        <svg class="chat-voice-icon-mic" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+        <svg class="chat-voice-icon-kbd" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>
+      </button>
+      <div class="chat-composer-field">
+        <textarea class="chat-input" id="chat-input" placeholder="写点什么…" rows="1"
+          enterkeyhint="enter" inputmode="text"
+          oninput="autoResize(this);updatePendingCount()"
+          onkeydown="handleChatKey(event)"></textarea>
+        <button type="button" class="chat-hold-talk" id="chat-hold-talk" style="display:none"
+          aria-label="按住说话">按住 说话</button>
+        <button type="button" class="chat-emoji-btn" id="chat-emoji-btn" onclick="toggleEmojiPanel()" title="表情" aria-label="表情">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01"/><path d="M8.5 14.5c.9 1.2 2.1 1.8 3.5 1.8s2.6-.6 3.5-1.8"/></svg>
+        </button>
+      </div>
+      <div class="chat-send-btn-wrap" id="chat-send-btn-wrap">
+        <button type="button" class="chat-send-btn" onclick="sendChatMessage()" title="发送" aria-label="发送">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>
+        </button>
+        <div id="pending-ai-badge" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- 工具栏（左右滑翻页，仿微信） -->
+    <div id="chat-toolbar" class="chat-toolbar-panel" style="display:none">
+      <div class="toolbar-pages" id="toolbar-pages">
+        <div class="toolbar-page">
+          <div class="toolbar-grid">
+            <button type="button" class="toolbar-item" onclick="openCamera()">
+              <div class="toolbar-icon toolbar-icon--cam">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-2h6l2 2h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+              </div>
+              <span class="toolbar-label">拍照</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="openImagePicker()">
+              <div class="toolbar-icon toolbar-icon--img">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-8 8"/></svg>
+              </div>
+              <span class="toolbar-label">图片</span>
+            </button>
+            <button type="button" class="toolbar-item" id="toolbar-location-btn" onclick="sendLocation()">
+              <div class="toolbar-icon toolbar-icon--loc">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+              </div>
+              <span class="toolbar-label">位置</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="rerollMessage()">
+              <div class="toolbar-icon toolbar-icon--reroll">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 5v5h5"/></svg>
+              </div>
+              <span class="toolbar-label">重新生成</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="openGameTopicsPanel()">
+              <div class="toolbar-icon toolbar-icon--topic">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v14l-5-3-5 3z"/></svg>
+              </div>
+              <span class="toolbar-label">话题</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="pokeChat()">
+              <div class="toolbar-icon toolbar-icon--poke">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V6.5a1.5 1.5 0 0 1 3 0V11"/><path d="M12 11V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M15 11V7.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6H9.5A5.5 5.5 0 0 1 4 14.5V12a1.5 1.5 0 0 1 3 0v1"/></svg>
+              </div>
+              <span class="toolbar-label">拍一拍</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="openMemoryPage()">
+              <div class="toolbar-icon toolbar-icon--mem">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c-2.8 2.4-5 5-5 8.2A5 5 0 0 0 12 21a5 5 0 0 0 5-9.8C17 8 14.8 5.4 12 3z"/><path d="M12 13v4"/></svg>
+              </div>
+              <span class="toolbar-label">记忆</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="toggleMusicSync()">
+              <div class="toolbar-icon toolbar-icon--music">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              </div>
+              <span class="toolbar-label">一起听歌</span>
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-page">
+          <div class="toolbar-grid">
+            <button type="button" class="toolbar-item" onclick="startScreenShare()">
+              <div class="toolbar-icon toolbar-icon--share">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>
+              </div>
+              <span class="toolbar-label">共享屏幕</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="startCall()">
+              <div class="toolbar-icon toolbar-icon--call">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+              </div>
+              <span class="toolbar-label">语音通话</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="startVideoCall()">
+              <div class="toolbar-icon toolbar-icon--video">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              </div>
+              <span class="toolbar-label">视频通话</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="summarizeCurrentChat()">
+              <div class="toolbar-icon toolbar-icon--summary">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 00-4 12.7V17a1 1 0 001 1h6a1 1 0 001-1v-2.3A7 7 0 0012 2z"/><path d="M9 21h6"/></svg>
+              </div>
+              <span class="toolbar-label">总结记忆</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="startTheater()">
+              <div class="toolbar-icon toolbar-icon--theater">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h4l2 3h4l2-3h4v13H4z"/><path d="M9 14h.01M15 14h.01"/><path d="M9.5 17c.8 1 1.9 1.5 2.5 1.5s1.7-.5 2.5-1.5"/></svg>
+              </div>
+              <span class="toolbar-label">小剧场</span>
+            </button>
+            <button type="button" class="toolbar-item" onclick="openEmotionPanel()">
+              <div class="toolbar-icon toolbar-icon--emotion">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c2-4 4-6 5-6s2 3 4 6 4 6 5 6 3-2 5-6"/><circle cx="12" cy="12" r="9"/></svg>
+              </div>
+              <span class="toolbar-label">情绪</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-dots" id="toolbar-dots" aria-hidden="true">
+        <span class="active" data-page="0"></span>
+        <span data-page="1"></span>
+      </div>
+    </div>
+
+    <!-- 表情包面板（与 + 工具栏同样从下方展开） -->
+    <div id="chat-emoji-panel" class="chat-emoji-panel" style="display:none">
+      <div id="emoji-panel-tabs" class="emoji-panel-tabs"></div>
+      <div id="emoji-picker-content" class="emoji-panel-grid"></div>
+    </div>
+  </div>
+
+  <!-- 隐藏文件输入 -->
+  <input type="file" id="img-input" accept="image/*" style="display:none" onchange="handleImageFile(event)">
+  <input type="file" id="cam-input" accept="image/*" capture="environment" style="display:none" onchange="handleImageFile(event)">
+</div>
+
+<!-- ===== 来电界面（微信式） ===== -->
+<div id="incoming-call-overlay" class="incoming-call-overlay" style="display:none" onclick="event.stopPropagation()">
+  <div class="incoming-call-bg" id="incoming-call-bg"></div>
+  <video id="incoming-call-cam" class="incoming-call-cam" playsinline muted autoplay></video>
+  <div class="incoming-call-veil"></div>
+  <div class="incoming-call-inner">
+    <div class="incoming-call-hero">
+      <div class="incoming-call-avatar-wrap">
+        <img id="incoming-call-avatar" class="incoming-call-avatar" src="" alt="">
+        <div id="incoming-call-avatar-fallback" class="incoming-call-avatar-fallback" hidden></div>
+      </div>
+      <div id="incoming-call-name" class="incoming-call-name"></div>
+      <div id="incoming-call-kind" class="incoming-call-kind">邀请你语音通话</div>
+    </div>
+    <div class="incoming-call-cam-tools" id="incoming-call-cam-tools">
+      <button type="button" class="incoming-call-tool-btn" id="incoming-call-flip-btn" onclick="flipIncomingCallCamera()" aria-label="翻转摄像头">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2"/><path d="M12 17a4 4 0 1 0-3.5-6"/><path d="M8 7l2-3h4l2 3"/><path d="M8.5 12.5L7 11l-1.5 1.5"/><path d="M15.5 11.5L17 13l1.5-1.5"/></svg>
+        <span>翻转</span>
+      </button>
+      <button type="button" class="incoming-call-tool-btn" id="incoming-call-cam-btn" onclick="toggleIncomingCallCamera()" aria-label="开关摄像头">
+        <svg class="incoming-call-cam-on" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+        <svg class="incoming-call-cam-off" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M3.27 2L2 3.27 4.73 6H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.21 0 .39-.08.55-.18L19.73 21 21 19.73 3.27 2zM21 6.5l-4 4V7c0-.55-.45-1-1-1h-4.18l6.91 6.91L21 6.5z"/></svg>
+        <span id="incoming-call-cam-label">摄像头开</span>
+      </button>
+    </div>
+    <div class="incoming-call-actions">
+      <div class="incoming-call-action">
+        <button type="button" class="incoming-call-btn incoming-call-btn-decline" onclick="declineIncomingCall()" aria-label="点按拒绝">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.58.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1C10.61 21 3 13.39 3 4c0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.46.57 3.58.11.35.03.74-.25 1.02l-2.22 2.2z"/></svg>
+        </button>
+        <span>拒绝</span>
+        <span class="incoming-call-action-hint">点按</span>
+      </div>
+      <div class="incoming-call-action">
+        <button type="button" class="incoming-call-btn incoming-call-btn-answer" onclick="answerIncomingCall()" aria-label="点按接听">
+          <svg class="incoming-call-icon-phone" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.58.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1C10.61 21 3 13.39 3 4c0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.46.57 3.58.11.35.03.74-.25 1.02l-2.22 2.2z"/></svg>
+          <svg class="incoming-call-icon-video" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+        </button>
+        <span>接听</span>
+        <span class="incoming-call-action-hint">点按</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 游戏管家 ===== -->
+<div id="game-butler-overlay" class="overlay fullscreen" style="display:none;z-index:9998;background:var(--bg-gradient)" onclick="if(event.target===this)closeGameButlerPanel()">
+  <div class="sheet-full" onclick="event.stopPropagation()" style="display:flex;flex-direction:column;height:100%">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="closeGameButlerPanel()" title="返回"></button>
+      <div class="sheet-full-title">玩游戏</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <div id="game-butler-pick-step" style="flex:1;padding:0 16px 16px;overflow-y:auto">
+      <div style="font-size:12px;color:var(--text-secondary);padding:0 0 12px">和 TA 商量好赌注后再开局 · 游戏助手会在聊天里主持</div>
+      <div id="game-butler-list"></div>
+    </div>
+    <div id="game-butler-stake-step" style="display:none;flex:1;padding:16px">
+      <div id="game-butler-stake-title" style="font-size:18px;font-weight:600;margin-bottom:8px"></div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-bottom:16px;line-height:1.6">和 TA 商量好后，填写本局的赌注（输的人要兑现）</div>
+      <input id="game-butler-stake-input" type="text" placeholder="例如：明天叫对方起床、请喝奶茶…" maxlength="80"
+        style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--bg-glass);color:var(--text-primary);font-size:15px;margin-bottom:16px">
+      <button type="button" class="btn btn-primary" style="width:100%" onclick="confirmGameButlerStake()">开始游戏</button>
+      <button type="button" class="btn btn-ghost" style="width:100%;margin-top:8px" onclick="closeGameButlerPanel()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 游戏话题 ===== -->
+<div id="game-topics-overlay" class="overlay fullscreen" style="display:none;z-index:9997;background:var(--bg-gradient)" onclick="if(event.target===this)closeGameTopicsPanel()">
+  <div class="sheet-full" onclick="event.stopPropagation()" style="display:flex;flex-direction:column;height:100%">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="closeGameTopicsPanel()" title="返回"></button>
+      <div class="sheet-full-title">游戏话题</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);padding:0 16px 8px">真心话 / 默契翻牌收录的问答摘要（不含局内闲聊）</div>
+    <div id="game-topics-list" class="scroll-area" style="flex:1;padding:0 16px 16px"></div>
+  </div>
+</div>
+
+<!-- ===== 聊天搜索 ===== -->
+<div id="chat-search-overlay" class="overlay fullscreen" style="display:none;z-index:9998;background:var(--bg-gradient)" onclick="if(event.target===this)closeChatSearch()">
+  <div class="sheet-full" onclick="event.stopPropagation()">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="closeChatSearch()" title="返回"></button>
+      <div class="sheet-full-title">搜索聊天记录</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <div style="padding:12px 16px 0">
+      <input class="input" id="chat-search-input" placeholder="输入关键词…" oninput="doChatSearch(this.value)">
+    </div>
+    <div style="padding:10px 16px;display:flex;align-items:center;gap:10px">
+      <div style="height:1px;flex:1;background:var(--border)"></div>
+      <span style="font-size:11px;color:var(--text-secondary)">或按日期查找</span>
+      <div style="height:1px;flex:1;background:var(--border)"></div>
+    </div>
+    <div style="padding:0 16px 12px">
+      <input type="date" class="input" id="chat-search-date" oninput="jumpToChatDate(this.value)" onchange="jumpToChatDate(this.value)">
+    </div>
+    <div class="scroll-area" id="chat-search-results" style="flex:1;min-height:0;padding:0 16px 20px"></div>
+  </div>
+</div>
+
+<!-- ===== 角色情绪 ===== -->
+<div id="emotion-overlay" class="overlay fullscreen" style="display:none;z-index:9998;background:var(--bg-gradient)" onclick="if(event.target===this)closeEmotionPanel()">
+  <div class="sheet-full" onclick="event.stopPropagation()">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="closeEmotionPanel()" title="返回"></button>
+      <div class="sheet-full-title" id="emotion-panel-title">情绪</div>
+      <div style="min-width:32px"></div>
+    </div>
+    <div class="scroll-area emotion-panel-body" id="emotion-panel-body">
+      <div class="emotion-hero">
+        <div class="emotion-label" id="emotion-label">—</div>
+        <div class="emotion-buildup" id="emotion-buildup"></div>
+        <div class="emotion-note" id="emotion-note"></div>
+      </div>
+      <div class="emotion-chart-wrap">
+        <div class="emotion-chart-legend" aria-hidden="true">
+          <span class="emotion-leg emotion-leg--pos"><i></i>比平静暖</span>
+          <span class="emotion-leg emotion-leg--neg"><i></i>比平静沉</span>
+          <span class="emotion-chart-range" id="emotion-chart-amplitude">幅度 —</span>
+        </div>
+        <div class="emotion-range-tabs" id="emotion-range-tabs">
+          <button type="button" class="active" data-hours="2" onclick="setEmotionRange(2)">2小时</button>
+          <button type="button" data-hours="24" onclick="setEmotionRange(24)">24小时</button>
+          <button type="button" data-hours="168" onclick="setEmotionRange(168)">7天</button>
+        </div>
+        <div class="emotion-chart-plot">
+          <svg id="emotion-chart" class="emotion-chart" viewBox="0 0 360 220" preserveAspectRatio="xMidYMid meet" aria-label="角色心情起伏和幅度"></svg>
+          <div class="emotion-chart-empty" id="emotion-chart-empty" style="display:none">还没有足够的情绪轨迹，聊几轮再来看</div>
+        </div>
+        <div class="emotion-chart-xlab">
+          <span id="emotion-chart-start-label">2小时前</span>
+          <span>现在</span>
+        </div>
+      </div>
+      <div class="emotion-values-title">此刻的心情</div>
+      <div class="emotion-fuels" id="emotion-fuels"></div>
+      <div class="emotion-events-block">
+        <div class="emotion-events-title">大幅起伏</div>
+        <div class="emotion-events" id="emotion-events"></div>
+      </div>
+      <div class="emotion-hint">上面是此刻各类强弱（用符号表示）：😊🌸 亮的；💢😢🌧️😟😴 沉的；💭💗🔥 对人。对话会让它们变化；曲线中间是平静。情绪会随时间回落，具体怎么表现仍由人设决定。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 语音通话 ===== -->
+<div id="call-screen" class="call-screen">
+  <video id="call-char-video" class="call-char-video" playsinline muted loop autoplay disablepictureinpicture></video>
+  <div id="call-lens-caption" class="call-lens-caption" hidden></div>
+  <button type="button" class="call-minimize-btn" id="call-minimize-btn" onclick="minimizeCall()" title="收起通话" aria-label="收起通话">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>
+  </button>
+  <button type="button" class="call-flip-cam-btn" id="call-flip-cam-btn" onclick="flipCallCamera()" title="翻转摄像头" aria-label="翻转摄像头">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2"/><path d="M12 17a4 4 0 1 0-3.5-6"/><path d="M8 7l2-3h4l2 3"/><path d="M8.5 12.5L7 11l-1.5 1.5"/><path d="M15.5 11.5L17 13l1.5-1.5"/></svg>
+  </button>
+  <button type="button" class="call-pip-hangup" id="call-pip-hangup" onclick="endCall()" title="挂断" aria-label="挂断">✕</button>
+
+  <!-- 拨号中（等待对方接听） -->
+  <div id="call-dialing-view" class="call-dialing-view" style="display:none">
+    <div class="call-dialing-hero">
+      <div class="call-avatar-wrap call-dialing-avatar-wrap">
+        <img id="call-dialing-avatar" class="call-avatar" src="" alt="">
+      </div>
+      <div id="call-dialing-name" class="call-name"></div>
+      <div id="call-dialing-status" class="call-status">正在呼叫…</div>
+      <div class="call-dialing-pulse" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+    <button type="button" class="call-hangup call-hangup-light" onclick="cancelDialingCall()" title="取消" aria-label="取消呼叫">
+      <svg class="call-hangup-icon" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z"/></svg>
+    </button>
+  </div>
+
+  <!-- 正常通话状态 -->
+  <div id="call-active-view" style="display:flex;flex-direction:column;align-items:center;width:100%;flex:1;min-height:0">
+    <div class="call-hero" style="display:flex;flex-direction:column;align-items:center;padding-top:16px;flex-shrink:0">
+      <div id="call-time-display" class="call-time-display"></div>
+      <div class="call-avatar-wrap">
+        <img id="call-avatar" class="call-avatar" src="" alt="">
+      </div>
+      <div id="call-name" class="call-name"></div>
+      <div id="call-timer" class="call-timer">00:00</div>
+      <div id="call-mode-badge" class="call-mode-badge" data-mode="talk" hidden>普通通话</div>
+      <div class="call-waveform" id="call-waveform">
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+        <div class="call-wave-bar" style="height:6px"></div>
+      </div>
+    </div>
+    <!-- 通话内容实时文字显示 -->
+    <div id="call-chat-area" class="call-chat-area"></div>
+  </div>
+  <!-- 通话结束状态（内联） -->
+  <div id="call-ended-view" style="display:none;flex-direction:column;align-items:center;gap:10px;flex:1;justify-content:center">
+    <div style="font-size:48px;opacity:0.7">📞</div>
+    <div style="font-size:20px;color:rgba(0,0,0,0.72);font-weight:300">通话已结束</div>
+    <div id="call-ended-dur" style="font-size:15px;color:rgba(0,0,0,0.45)"></div>
+  </div>
+  <!-- 底部按钮区 -->
+  <div id="call-bottom" style="width:100%;padding:12px 16px;position:absolute;bottom:max(24px,var(--sab))">
+    <div class="call-mode-bar" id="call-mode-bar" role="tablist" aria-label="通话状态">
+      <div class="call-mode-track" id="call-mode-track">
+        <div class="call-mode-thumb" id="call-mode-thumb" aria-hidden="true"></div>
+        <button type="button" class="call-mode-chip is-on" data-mode="talk" role="tab" aria-selected="true" onclick="setCallPresenceMode('talk')">普通</button>
+        <button type="button" class="call-mode-chip" data-mode="hangout" role="tab" aria-selected="false" onclick="setCallPresenceMode('hangout')">连麦</button>
+        <button type="button" class="call-mode-chip" data-mode="watch" role="tab" aria-selected="false" onclick="setCallPresenceMode('watch')">观影</button>
+      </div>
+      <div class="call-mode-hint" id="call-mode-hint">正常聊天 · 停顿会接话</div>
+    </div>
+    <div class="call-composer" id="call-composer">
+      <button type="button" class="call-roll-btn" onclick="rerollCallMessage()" title="重新生成上一条回复" aria-label="重新生成">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.2"/><path d="M21 3v6h-6"/></svg>
+      </button>
+      <button type="button" class="call-voice-toggle" id="call-voice-toggle" onclick="toggleCallVoiceMode()" title="免提说话" aria-label="切换免提说话">
+        <svg class="call-voice-icon-mic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+        <svg class="call-voice-icon-kbd" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>
+      </button>
+      <textarea class="chat-input call-input" id="call-input" placeholder="文字或语音…" rows="1"
+        enterkeyhint="enter" inputmode="text"
+        oninput="autoResize(this)"
+        onkeydown="handleCallKey(event)"></textarea>
+      <button type="button" class="call-hold-talk" id="call-hold-talk" style="display:none" tabindex="-1" aria-label="免提说话">通话中</button>
+      <button type="button" class="call-send-btn" onclick="sendCallMessage()" title="发送" aria-label="发送">↑</button>
+    </div>
+    <button type="button" class="call-hangup call-hangup-light" onclick="endCall()" title="挂断" aria-label="挂断">
+      <svg class="call-hangup-icon" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z"/></svg>
+    </button>
+  </div>
+  <video id="call-user-video" class="call-user-video" playsinline muted autoplay disablepictureinpicture></video>
+  <button type="button" class="call-pip-fallback" id="call-pip-fallback" onclick="swapCallVideoLayout()" aria-label="切换画面">
+    <img id="call-pip-fallback-img" alt="">
+  </button>
+</div>
+
+<!-- ===== 通讯内设置 ===== -->
+<div id="chat-settings-overlay" class="overlay fullscreen" style="display:none">
+  <div class="sheet-full">
+    <div class="sheet-full-topbar">
+      <button type="button" class="topbar-back topbar-nav-back" onclick="closeChatSettings()" title="返回"></button>
+      <div class="sheet-full-title">通讯设置</div>
+      <button type="button" class="topbar-save" onclick="saveChatSettingsUI()" title="保存"></button>
+    </div>
+    <div class="sheet-full-body">
+      <div style="padding:0 0 24px">
+
+        <div class="settings-section">
+          <div class="settings-section-title">外观</div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">浏览效果</label>
+              <div class="bubble-browse-preview" id="cs-bubble-preview">
+                <div class="bubble-browse-stage" id="cs-bubble-preview-stage">
+                  <div class="bubble-wrap message-container ai received no-avatar">
+                    <div class="bubble-col"><div class="bubble message-bubble ai"><div class="content">嗯，我在听呢</div></div></div>
+                  </div>
+                  <div class="bubble-wrap message-container user sent no-avatar">
+                    <div class="bubble-col"><div class="bubble message-bubble user"><div class="content">今天好想你呀</div></div></div>
+                  </div>
+                  <div class="bubble-wrap message-container user sent no-avatar">
+                    <div class="bubble-col"><div class="bubble message-bubble user"><div class="content">这条是用户气泡预览</div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">用户气泡颜色</label>
+              <div class="bubble-color-palette" style="width:100%">
+                <div class="color-presets" id="cs-bubble-presets" style="padding:2px 0">
+                  <div class="color-preset bubble-color-swatch is-theme" data-color="" title="跟随主题色" onclick="setBubbleColorPreset('')" style="background:linear-gradient(135deg,var(--theme),var(--theme-dark))"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#c9a0dc" style="background:#c9a0dc" onclick="setBubbleColorPreset('#c9a0dc')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#74b9ff" style="background:#74b9ff" onclick="setBubbleColorPreset('#74b9ff')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#0984e3" style="background:#0984e3" onclick="setBubbleColorPreset('#0984e3')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#00b894" style="background:#00b894" onclick="setBubbleColorPreset('#00b894')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#55efc4" style="background:#55efc4" onclick="setBubbleColorPreset('#55efc4')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#fd79a8" style="background:#fd79a8" onclick="setBubbleColorPreset('#fd79a8')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#e17055" style="background:#e17055" onclick="setBubbleColorPreset('#e17055')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#fdcb6e" style="background:#fdcb6e" onclick="setBubbleColorPreset('#fdcb6e')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#a29bfe" style="background:#a29bfe" onclick="setBubbleColorPreset('#a29bfe')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#6c5ce7" style="background:#6c5ce7" onclick="setBubbleColorPreset('#6c5ce7')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#2d3436" style="background:#2d3436" onclick="setBubbleColorPreset('#2d3436')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#dfe6e9" style="background:#dfe6e9" onclick="setBubbleColorPreset('#dfe6e9')"></div>
+                  <div style="position:relative">
+                    <input type="color" id="cs-userBubbleColor" value="#c9a0dc"
+                      style="opacity:0;position:absolute;top:0;left:0;width:32px;height:32px;cursor:pointer"
+                      oninput="setBubbleColorPreset(this.value)" onchange="setBubbleColorPreset(this.value)">
+                    <div class="color-preset bubble-color-swatch is-custom"
+                      id="cs-bubble-custom-swatch"
+                      style="background:conic-gradient(red,yellow,green,cyan,blue,magenta,red);border:2px dashed rgba(255,255,255,0.5)"
+                      title="自定义颜色"
+                      onclick="document.getElementById('cs-userBubbleColor').click()"></div>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">点色块实时预览；彩虹环可自定义。顶栏「保存」后固定。「主题」跟随全局主题色。</div>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">角色气泡颜色</label>
+              <div class="bubble-color-palette" style="width:100%">
+                <div class="color-presets" id="cs-char-bubble-presets" style="padding:2px 0">
+                  <div class="color-preset bubble-color-swatch is-default" data-color="" title="默认（中性色，不跟随主题）" onclick="setCharBubbleColorPreset('')" style="background:linear-gradient(135deg,#eceef2,#cfd3dc)"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#ffffff" style="background:#ffffff;border:1px solid var(--border)" onclick="setCharBubbleColorPreset('#ffffff')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#f1f2f6" style="background:#f1f2f6;border:1px solid var(--border)" onclick="setCharBubbleColorPreset('#f1f2f6')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#dfe6e9" style="background:#dfe6e9" onclick="setCharBubbleColorPreset('#dfe6e9')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#74b9ff" style="background:#74b9ff" onclick="setCharBubbleColorPreset('#74b9ff')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#55efc4" style="background:#55efc4" onclick="setCharBubbleColorPreset('#55efc4')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#fab1a0" style="background:#fab1a0" onclick="setCharBubbleColorPreset('#fab1a0')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#fdcb6e" style="background:#fdcb6e" onclick="setCharBubbleColorPreset('#fdcb6e')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#a29bfe" style="background:#a29bfe" onclick="setCharBubbleColorPreset('#a29bfe')"></div>
+                  <div class="color-preset bubble-color-swatch" data-color="#2d3436" style="background:#2d3436" onclick="setCharBubbleColorPreset('#2d3436')"></div>
+                  <div style="position:relative">
+                    <input type="color" id="cs-charBubbleColor" value="#f1f2f6"
+                      style="opacity:0;position:absolute;top:0;left:0;width:32px;height:32px;cursor:pointer"
+                      oninput="setCharBubbleColorPreset(this.value)" onchange="setCharBubbleColorPreset(this.value)">
+                    <div class="color-preset bubble-color-swatch is-custom"
+                      id="cs-char-bubble-custom-swatch"
+                      style="background:conic-gradient(red,yellow,green,cyan,blue,magenta,red);border:2px dashed rgba(255,255,255,0.5)"
+                      title="自定义颜色"
+                      onclick="document.getElementById('cs-charBubbleColor').click()"></div>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">默认是不透明中性浅色（不跟随主题、无半透明），和用户实色气泡同一种质感；也可点色块单独换色。</div>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡文字大小</label>
+              <div style="display:flex;align-items:center;gap:10px;width:100%">
+                <span style="font-size:12px;color:var(--text-secondary);min-width:22px">12</span>
+                <input type="range" id="cs-bubbleFontSizePx" min="12" max="24" step="1" value="15" style="flex:1"
+                  oninput="onBubbleFontSizeSlide(this.value)">
+                <span id="cs-bubbleFontSizePx-val" style="font-size:12px;color:var(--text-secondary);min-width:38px;text-align:right">15px</span>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡大小</label>
+              <div style="display:flex;align-items:center;gap:10px;width:100%">
+                <span style="font-size:12px;color:var(--text-secondary);min-width:22px">小</span>
+                <input type="range" id="cs-bubbleSizePct" min="70" max="140" step="5" value="100" style="flex:1"
+                  oninput="onBubbleSizeSlide(this.value)">
+                <span id="cs-bubbleSizePct-val" style="font-size:12px;color:var(--text-secondary);min-width:38px;text-align:right">100%</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary)">拉大内边距和气泡宽度，和上面的文字大小分开调</div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡间隔</label>
+              <div style="display:flex;align-items:center;gap:10px;width:100%">
+                <span style="font-size:12px;color:var(--text-secondary);min-width:22px">密</span>
+                <input type="range" id="cs-bubbleGapPx" min="0" max="28" step="1" value="5" style="flex:1"
+                  oninput="onBubbleGapSlide(this.value)">
+                <span id="cs-bubbleGapPx-val" style="font-size:12px;color:var(--text-secondary);min-width:38px;text-align:right">5px</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary)">相邻气泡之间的上下间距，和气泡大小分开调</div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡文字颜色</label>
+              <div class="tag-list" id="cs-bubbleTextColor">
+                <div class="tag" data-val="black" onclick="setChatSettingPending('bubbleTextColor','black',this)">黑色</div>
+                <div class="tag" data-val="white" onclick="setChatSettingPending('bubbleTextColor','white',this)">白色</div>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary)">用户和角色用同一颜色，方便配浅色或深色气泡。</div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡字体</label>
+              <div class="tag-list" id="cs-bubbleFont"></div>
+              <div style="font-size:11px;color:var(--text-secondary)">点选即可预览；顶栏保存后固定到当前角色聊天。</div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡风格</label>
+              <div class="tag-list" id="cs-bubbleStyle">
+                <div class="tag" data-val="solid"      onclick="setChatSettingPending('bubbleStyle','solid',this)">实色</div>
+                <div class="tag" data-val="transparent" onclick="setChatSettingPending('bubbleStyle','transparent',this)">透明</div>
+                <div class="tag" data-val="frosted"    onclick="setChatSettingPending('bubbleStyle','frosted',this)">毛玻璃</div>
+                <div class="tag" data-val="matte"      onclick="setChatSettingPending('bubbleStyle','matte',this)">磨砂</div>
+              </div>
+              <div id="cs-bubble-intensity-row" style="display:none;width:100%;margin-top:2px">
+                <label class="input-label">不透明度</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:12px;color:var(--text-secondary)">轻</span>
+                  <input type="range" id="cs-bubbleOpacity" min="10" max="95" value="65" style="flex:1"
+                    oninput="onBubbleIntensityInput()">
+                  <span style="font-size:12px;color:var(--text-secondary)">重</span>
+                </div>
+                <label class="input-label" style="margin-top:8px">实色强度</label>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:12px;color:var(--text-secondary)">淡</span>
+                  <input type="range" id="cs-bubbleBlur" min="2" max="40" value="12" style="flex:1"
+                    oninput="onBubbleIntensityInput()">
+                  <span style="font-size:12px;color:var(--text-secondary)">浓</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:6px">同时作用于你和角色的气泡</div>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">气泡形状</label>
+              <div class="tag-list" id="cs-bubbleShape">
+                <div class="tag" data-val="default"   onclick="setChatSettingPending('bubbleShape','default',this)">默认</div>
+                <div class="tag" data-val="soft"      onclick="setChatSettingPending('bubbleShape','soft',this)">软圆</div>
+                <div class="tag" data-val="tail"      onclick="setChatSettingPending('bubbleShape','tail',this)">微信</div>
+                <div class="tag" data-val="plane"     onclick="setChatSettingPending('bubbleShape','plane',this)">Telegram</div>
+                <div class="tag" data-val="sharp"     onclick="setChatSettingPending('bubbleShape','sharp',this)">直角</div>
+                <div class="tag" data-val="slash"     onclick="setChatSettingPending('bubbleShape','slash',this)">斜切</div>
+                <div class="tag" data-val="underline" onclick="setChatSettingPending('bubbleShape','underline',this)">下划线</div>
+                <div class="tag" data-val="custom"     onclick="setChatSettingPending('bubbleShape','custom',this)">自定义</div>
+              </div>
+              <div id="cs-custom-bubble-css-row" style="display:none;width:100%;margin-top:2px">
+                <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.55">
+                  只填 <b>CSS</b>，不用写 HTML。选「自定义」后以上方代码为准。<br>
+                  兼容常见主题选择器：<code>.message-container.sent .message-bubble</code>、<code>.message-bubble.user .content</code> 等；也可写本项目的 <code>.bubble-wrap.user .bubble</code>。<br>
+                  语音条会套用自定义外观（颜色/圆角等），播放键 / 波形 / 时长仍保持同一行。改完下方预览会变；保存后生效到聊天。
+                </div>
+                <textarea class="input" id="cs-custom-bubble-css" rows="6"
+                  style="font-family:'SFMono-Regular',Menlo,Consolas,monospace;font-size:12px;line-height:1.5;width:100%"
+                  placeholder=".bubble-wrap.user .bubble { background: #ff6b81; border-radius: 4px; }"
+                  oninput="onCustomBubbleCssInput(this.value)"></textarea>
+                <div class="bubble-browse-preview" id="cs-custom-bubble-preview" style="margin-top:10px">
+                  <div class="bubble-browse-stage" id="cs-custom-bubble-preview-stage">
+                    <div class="bubble-wrap message-container ai received no-avatar">
+                      <div class="bubble-col"><div class="bubble message-bubble ai"><div class="content">角色气泡预览</div></div></div>
+                    </div>
+                    <div class="bubble-wrap message-container user sent no-avatar">
+                      <div class="bubble-col"><div class="bubble message-bubble user"><div class="content">用户气泡预览</div></div></div>
+                    </div>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-primary" style="width:100%;margin-top:10px;border-radius:12px"
+                  onclick="saveChatSettingsUI()">保存自定义</button>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">用户头像</label>
+              <div class="settings-row" style="padding:0;width:100%">
+                <span class="settings-row-label">显示用户头像</span>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-showUserAvatar" checked onchange="document.getElementById('cs-user-avatar-detail').style.display=this.checked?'block':'none'">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div id="cs-user-avatar-detail" style="width:100%">
+                <label class="input-label" style="margin-top:6px">圆角</label>
+                <input type="range" id="cs-userAvatarRadius" min="0" max="50" value="50" style="width:100%">
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">角色头像</label>
+              <div class="settings-row" style="padding:0;width:100%">
+                <span class="settings-row-label">显示角色头像</span>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-showCharAvatar" checked onchange="document.getElementById('cs-char-avatar-detail').style.display=this.checked?'block':'none'">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div id="cs-char-avatar-detail" style="width:100%">
+                <label class="input-label" style="margin-top:6px">圆角</label>
+                <input type="range" id="cs-charAvatarRadius" min="0" max="50" value="50" style="width:100%">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">时间戳</div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">样式</label>
+              <div class="tag-list" id="cs-timestampStyle">
+                <div class="tag" data-val="relative" onclick="setChatSettingPending('timestampStyle','relative',this)">相对时间</div>
+                <div class="tag" data-val="absolute" onclick="setChatSettingPending('timestampStyle','absolute',this)">绝对时间</div>
+                <div class="tag" data-val="detail" onclick="setChatSettingPending('timestampStyle','detail',this)">详细</div>
+              </div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">位置</label>
+              <div class="tag-list" id="cs-timestampPosition">
+                <div class="tag" data-val="divider" onclick="setChatSettingPending('timestampPosition','divider',this)">分割线</div>
+                <div class="tag" data-val="corner" onclick="setChatSettingPending('timestampPosition','corner',this)">右下角</div>
+                <div class="tag" data-val="bubble" onclick="setChatSettingPending('timestampPosition','bubble',this)">气泡下</div>
+                <div class="tag" data-val="outside" onclick="setChatSettingPending('timestampPosition','outside',this)">气泡外</div>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary)">「右下角」= 微信/Telegram 写法：时间和已读都在气泡里右下角同一行。</div>
+            </div>
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <label class="input-label">已读 / 未读颜色</label>
+              <div class="tag-list" id="cs-readTagColor">
+                <div class="tag" data-val="black" onclick="setChatSettingPending('readTagColor','black',this)">黑色</div>
+                <div class="tag" data-val="white" onclick="setChatSettingPending('readTagColor','white',this)">白色</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">背景</div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+              <div class="tag-list" style="margin-bottom:2px" id="cs-bgType">
+                <div class="tag" data-val="gradient" onclick="setChatBg('gradient','')">跟随美化</div>
+                <div class="tag" data-val="image" onclick="setChatBg('image','')">本地图片</div>
+                <div class="tag" data-val="color" onclick="setChatBg('color','')">纯色</div>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary);line-height:1.5">「跟随美化」使用 🎨 美化页的主题背景；可在此单独换图或纯色</div>
+              <div id="cs-bg-image-row" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;width:100%">
+                <button class="btn btn-sm" onclick="pickChatBgImage()" style="flex:1">选择图片</button>
+                <button class="btn btn-sm btn-ghost" onclick="setChatSettingPending('bgValue','');document.getElementById('cs-bg-preview').style.display='none'">清除</button>
+                <div id="cs-bg-preview" style="width:100%;height:60px;border-radius:8px;background:center/cover;margin-top:6px;display:none"></div>
+              </div>
+              <div id="cs-bg-color-row" style="display:none;align-items:center;gap:8px;width:100%">
+                <input type="color" id="cs-bgColor" value="#1a1a2e" style="width:44px;height:36px;border:none;border-radius:8px;cursor:pointer">
+                <span style="font-size:13px;color:var(--text-secondary)">选择背景颜色</span>
+              </div>
+              <input type="file" id="chat-bg-input" accept="image/*" style="display:none" onchange="handleChatBgUpload(event)">
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">交互</div>
+          <div class="settings-group">
+            <div class="settings-row">
+              <span class="settings-row-label">回车发送</span>
+              <label class="toggle">
+                <input type="checkbox" id="enter-send-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <span class="settings-row-label">工具栏显示「位置」</span>
+              <label class="toggle">
+                <input type="checkbox" id="show-location-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="cs-char-section" style="display:none">
+          <div class="settings-section">
+            <div class="settings-section-title">当前角色</div>
+            <div class="settings-group">
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <div class="settings-row-label" style="flex:1">
+                  <div>备注昵称</div>
+                  <div class="settings-row-sub">聊天顶栏优先显示备注；空则显示角色名</div>
+                </div>
+                <input type="text" id="cs-remark" class="input" maxlength="40" placeholder="备注" style="width:120px;text-align:right">
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <div class="settings-row-label" style="flex:1">
+                  <div>时区</div>
+                  <div class="settings-row-sub">只影响这个角色的聊天日界线/日程等；全局默认在「设置 → 时间与时区」</div>
+                </div>
+                <select class="input" id="cs-timezone" style="width:170px">
+                  <option value="Asia/Shanghai">上海 UTC+8</option>
+                  <option value="Asia/Tokyo">东京 UTC+9</option>
+                  <option value="Asia/Seoul">首尔 UTC+9</option>
+                  <option value="America/New_York">纽约</option>
+                  <option value="America/Los_Angeles">洛杉矶</option>
+                  <option value="Europe/London">伦敦</option>
+                  <option value="Europe/Paris">巴黎</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">语音</div>
+            <div class="settings-group">
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">MiniMax 声音 ID</span>
+                <input type="text" id="cs-voice-id" class="input" placeholder="如 Chinese (Mandarin)_Warm_Girl" style="width:160px;text-align:right">
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>语音消息模式</div>
+                  <div class="settings-row-sub">随机 1～2 条或忙碌时发语音条；需配置声音 ID</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-voice-messages">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>生成乐谱</div>
+                  <div class="settings-row-sub">角色弹奏时用 ElevenLabs 环境音接口生成真乐器片段；未配置或失败则回退电子合成音</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-music-score">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">当前心情</span>
+                <input type="text" id="cs-mood" class="input" placeholder="自动更新或手动填写" style="width:140px;text-align:right">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">记忆</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>携带记忆</div>
+                  <div class="settings-row-sub">开：把「挂在心上」的记忆每轮带上；关：不挂，只靠【脑海】自动检索</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-carry-memory" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>携带画像</div>
+                  <div class="settings-row-sub">开：相关画像常挂进提示；关：不常挂，聊到相关时再检索</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-carry-portrait">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>自动总结对话记忆</div>
+                  <div class="settings-row-sub">按下方间隔批量总结；强情绪会立即记入；聊得少时凌晨 2:55 补总结昨日</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-mem-summary">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">每几轮对话总结一次</span>
+                <input type="number" id="cs-memory-trigger-n" min="5" max="50" value="12" class="input" style="width:64px;text-align:center">
+              </div>
+              <div class="settings-row" style="padding:0 16px 12px">
+                <span style="font-size:12px;color:var(--text-secondary);line-height:1.5">写入当天碎片（短期记忆）。太密会把吐槽也记进去；建议 8～12。</span>
+              </div>
+              <div class="settings-row">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="summarizeCurrentChat()">总结当前对话</button>
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">聊天携带对话轮数</span>
+                <input type="number" id="cs-chat-rounds" min="3" max="50" value="18" class="input" style="width:64px;text-align:center">
+              </div>
+              <div class="settings-row" style="padding:8px 16px 12px">
+                <span style="font-size:12px;color:var(--text-secondary);line-height:1.5">本段会话里发给模型的最近「你说一轮」。隔开约两小时会自动翻篇，上一段原文不再带着。连续聊得长、又容易忘前几句，可调到 24～30。</span>
+              </div>
+              <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px">
+                <div class="settings-row-label">
+                  <div>做事时偶然想起</div>
+                  <div class="settings-row-sub">行程、天气、眼前的事可能勾起旧记忆，不是每轮都提。0 为关。</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <input type="range" id="cs-mem-flash-chance" min="0" max="100" value="20" style="flex:1" oninput="document.getElementById('cs-mem-flash-chance-val').textContent=this.value+'%'">
+                  <span id="cs-mem-flash-chance-val" style="width:42px;text-align:right;font-size:13px;color:var(--text-secondary)">20%</span>
+                </div>
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">当前上下文 token 数（约）</span>
+                <span id="cs-context-tokens" style="font-size:13px;font-weight:600;color:var(--theme)">计算中…</span>
+              </div>
+              <div class="settings-row" style="padding:8px 16px 12px">
+                <span style="font-size:12px;color:var(--text-secondary);line-height:1.5">系统提示词 + 携带的历史消息粗估，仅供参考，不是精确计费值</span>
+              </div>
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:8px;padding:14px">
+                <div style="font-size:13px;color:var(--text-secondary)">记忆关键词触发（逗号分隔，留空用默认）</div>
+                <input type="text" id="cs-mem-keywords" class="input" placeholder="记住,别忘了,约定,重要" style="width:100%">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">聊天风格</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>真人聊天模式</div>
+                  <div class="settings-row-sub">减少 AI 腔和机械套话；关心按关系亲疏来</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-natural-chat">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>时间感知</div>
+                  <div class="settings-row-sub">按真实时间演变状态，并感知消息空窗</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-time-aware" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">主动联络</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>主动发消息</div>
+                  <div class="settings-row-sub">开了之后角色按性格自己找你：黏的大约一两小时会问一句或丢件小事，淡的会等久一点。电脑上的后端要一直开着</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-proactive-msg">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>主动来电</div>
+                  <div class="settings-row-sub">开了才会在想念时自己打来语音或视频（你没在聊、他也不在开会这类忙）。聊天里你让他打、或他自己写了要打，不依赖这个开关，会直接响铃。也可能只从屏幕边探头说一句。</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-proactive-call">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">视频通话</div>
+            <div class="settings-group">
+              <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+                <div class="settings-row-label">
+                  <div>角色怎么看你的摄像头</div>
+                  <div class="settings-row-sub">你说话时带一帧画面；镜头大幅晃动或换角度、停稳后也会自动给角色看。不用自己截屏。</div>
+                </div>
+                <div class="tag-list" id="cs-videoCallLook">
+                  <div class="tag" data-val="auto" onclick="setChatSettingPending('videoCallLook','auto',this)">自动看</div>
+                  <div class="tag" data-val="off" onclick="setChatSettingPending('videoCallLook','off',this)">不看画面</div>
+                </div>
+              </div>
+              <div class="settings-row" id="cs-video-look-sec-row" style="display:none;align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">晃完后再看，至少隔几秒</span>
+                <input type="number" id="cs-videoCallLookSec" min="8" max="60" value="12" class="input" style="width:72px;text-align:center">
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">其他</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>忙碌自动回复</div>
+                  <div class="settings-row-sub">TA明确说要去忙时自动发送留言</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-busy-auto">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <div class="settings-row-label">
+                  <div>允许发表情包</div>
+                  <div class="settings-row-sub">关闭后角色不会主动发送表情包</div>
+                </div>
+                <label class="toggle">
+                  <input type="checkbox" id="cs-emoji-enabled" checked onchange="document.getElementById('cs-emoji-cats-row').style.display=this.checked?'block':'none'">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div id="cs-emoji-cats-row">
+                <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+                  <label class="input-label">发表情包概率</label>
+                  <div style="display:flex;align-items:center;gap:10px;width:100%">
+                    <span style="font-size:12px;color:var(--text-secondary);min-width:28px">很少</span>
+                    <input type="range" id="cs-emoji-freq" min="0" max="100" step="5" value="30" style="flex:1"
+                      oninput="document.getElementById('cs-emoji-freq-val').textContent=this.value+'%'">
+                    <span style="font-size:12px;color:var(--text-secondary);min-width:28px;text-align:right">经常</span>
+                    <span id="cs-emoji-freq-val" style="font-size:12px;color:var(--text-secondary);min-width:36px;text-align:right">30%</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--text-secondary)">每条回复独立计算：40% 就是这轮有四成机会带一个表情包。0% 几乎不发（对方发了仍可回一个）。</div>
+                </div>
+                <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:10px">
+                  <label class="input-label">角色可用表情包分类</label>
+                  <div style="font-size:11px;color:var(--text-secondary)">至少勾选一个分类；改完后须点下方「保存设置」。上传的表情须在「表情包管理」里填写描述并点保存。</div>
+                  <div class="tag-list" id="cs-emoji-cats"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">记录</div>
+          <div class="settings-group">
+            <div class="list-item" onclick="openChatSearch();closeChatSettings()">
+              <div>
+                <div>查找聊天记录</div>
+                <div class="settings-row-sub">关键词 / 日期</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">导出</div>
+          <div class="settings-group">
+            <div class="settings-row" style="flex-direction:column;align-items:stretch;padding:14px;gap:8px">
+              <div style="display:flex;gap:8px">
+                <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="exportChatHistory('txt')">导出 TXT</button>
+                <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="exportChatHistory('md')">导出 MD</button>
+                <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="exportChatHistory('json')">导出 JSON</button>
+              </div>
+              <input type="file" id="chat-import-file" accept=".txt,.md,.json" style="display:none" onchange="importChatHistory(event)">
+              <button type="button" class="btn btn-ghost btn-sm" style="width:100%" onclick="document.getElementById('chat-import-file').click()">导入聊天记录（TXT / MD / JSON）</button>
+              <button class="btn btn-danger btn-sm" style="width:100%" onclick="confirmClearChat()">清除聊天记录</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===== 其余页面通过 iframe/include 加载 ===== -->
+<div id="dream-page" class="page"></div>
+<div id="diary-page" class="page"></div>
+<div id="character-page" class="page"></div>
+<div id="manage-page" class="page"></div>
+<div id="album-page" class="page"></div>
+<div id="photostudio-page" class="page"></div>
+<div id="worldbook-page" class="page"></div>
+<div id="preset-page" class="page"></div>
+<div id="moments-page" class="page"></div>
+<div id="circle-page" class="page"></div>
+<div id="settings-page" class="page"></div>
+<div id="memory-page" class="page"></div>
+<div id="beautify-page" class="page"></div>
+<div id="schedule-page" class="page"></div>
+<div id="emoji-manager-page" class="page"></div>
+<div id="contacts-page" class="page"></div>
+<div id="group-chat-page" class="page"></div>
+<div id="profile-page" class="page"></div>
+<div id="friend-settings-page" class="page"></div>
+<div id="games-page" class="page"></div>
+<div id="reader-page" class="page"></div>
+<div id="series-page" class="page"></div>
+<div id="robot-page" class="page"></div>
+<div id="mcp-page" class="page"></div>
+<div id="impression-page" class="page"></div>
+<div id="wardrobe-page" class="page"></div>
+<div id="appearance-page" class="page"></div>
+<div id="monitor-page" class="page"></div>
+<div id="ta-page" class="page"></div>
+<div id="mailbox-page" class="page"></div>
+<div id="postoffice-page" class="page"></div>
+<div id="tieba-page" class="page"></div>
+
+  <script type="module" src="/js/app.js?v=174"></script>
+
+<script>
+// 全局工具函数（非模块）
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function showRecalledMsg(id) {
+  const el = document.querySelector(`[data-id="${id}"]`);
+  const content = el?.dataset?.recalledContent || '内容已删除';
+  document.getElementById('recalled-content').textContent = content;
+  document.getElementById('recalled-overlay').classList.add('active');
+}
+
+let ctxMsgId = null, ctxMsgRole = null, ctxMsgEl = null;
+let _ctxIgnoreUntil = 0;
+let _ctxDismissBound = false;
+let _ctxActionLock = 0;
+
+function getBubbleWrapFromEvent(e) {
+  if (e?.currentTarget?.classList?.contains('bubble-wrap')) return e.currentTarget;
+  if (e?.currentTarget?.classList?.contains('dream-block')) return e.currentTarget;
+  return e?.target?.closest?.('.bubble-wrap[data-id], .dream-block[data-id]') || null;
+}
+
+function getQuoteTextFromWrap(wrap) {
+  if (!wrap) return '';
+  if (wrap.classList?.contains('dream-block')) {
+    const lines = Array.from(wrap.querySelectorAll('.dream-line')).map(p => p.textContent.trim()).filter(Boolean);
+    return lines.join('\n') || (wrap.textContent || '').trim();
+  }
+  const voiceTranscript = wrap.querySelector('.voice-transcript-inner');
+  if (voiceTranscript?.textContent?.trim()) return voiceTranscript.textContent.trim();
+  const voiceSrc = wrap.querySelector('.voice-text-src');
+  if (voiceSrc?.textContent?.trim()) return voiceSrc.textContent.trim();
+  const mainBubble = wrap.querySelector('.bubble-main .bubble:not(.recalled)')
+    || wrap.querySelector('.location-bubble')
+    || wrap.querySelector('.bubble:not(.recalled):not(.voice-bubble)');
+  if (mainBubble?.textContent?.trim()) return mainBubble.textContent.trim();
+  if (wrap.querySelector('.voice-bubble')) return '[语音]';
+  if (wrap.querySelector('.bubble-media')) return '[图片]';
+  return '';
+}
+
+function setCtxItemVisible(id, visible) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = visible ? '' : 'none';
+}
+
+/** 不依赖 chat-page 模块：文字气泡可编辑（纯图/卡除外） */
+function canEditChatBubbleWrap(wrap) {
+  if (!wrap) return false;
+  const role = wrap.dataset?.role || '';
+  if (role !== 'user' && role !== 'assistant') return false;
+  const id = String(wrap.dataset?.msgId || wrap.dataset?.id || '');
+  if (!id || id.startsWith('tmp_') || id.startsWith('tmp') || id.startsWith('seg_')
+    || id.startsWith('vseg_') || id.startsWith('hist_')) return false;
+  const text = (
+    wrap.querySelector('.voice-transcript-inner')?.textContent
+    || wrap.querySelector('.voice-text-src')?.textContent
+    || wrap.querySelector('.bubble-main .bubble:not(.recalled)')?.textContent
+    || wrap.querySelector('.bubble:not(.recalled):not(.voice-bubble)')?.textContent
+    || ''
+  ).trim();
+  if (!text) return false;
+  return true;
+}
+window.canEditChatBubbleWrap = canEditChatBubbleWrap;
+
+function openChatBubbleEditor(bubbleId, presetText) {
+  const id = String(bubbleId || '');
+  if (!id) return;
+  const wrap = document.querySelector(`.bubble-wrap[data-id="${id}"], .bubble-wrap[data-msg-id="${id}"]`);
+  const current = (presetText != null ? String(presetText) : '')
+    || (typeof window.getBubbleTextForEdit === 'function' ? window.getBubbleTextForEdit(wrap) : '')
+    || getQuoteTextFromWrap(wrap)
+    || '';
+  document.getElementById('chat-bubble-edit-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'chat-bubble-edit-overlay';
+  overlay.className = 'overlay active center';
+  overlay.style.zIndex = '500';
+  overlay.onclick = (ev) => { if (ev.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal" style="width:calc(100% - 32px);max-width:400px" onclick="event.stopPropagation()">
+      <div class="modal-title">编辑消息</div>
+      <div class="modal-body">
+        <textarea class="input" id="chat-bubble-edit-text" style="min-height:120px;line-height:1.6"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost btn-sm" id="chat-bubble-edit-cancel">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" id="chat-bubble-edit-save">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const ta = document.getElementById('chat-bubble-edit-text');
+  if (ta) {
+    ta.value = current;
+    setTimeout(() => {
+      try {
+        ta.focus();
+        const len = ta.value.length;
+        ta.setSelectionRange(len, len);
+      } catch { ta.focus(); }
+    }, 30);
+  }
+  const saveId = wrap?.dataset?.msgId || wrap?.dataset?.id || id;
+  document.getElementById('chat-bubble-edit-cancel')?.addEventListener('click', () => overlay.remove());
+  document.getElementById('chat-bubble-edit-save')?.addEventListener('click', async () => {
+    const next = String(ta?.value || '').trim();
+    if (!next) { showToast?.('内容不能为空'); return; }
+    if (next === current) { overlay.remove(); return; }
+    try {
+      if (typeof window.editBubbleMsgSave === 'function') {
+        await window.editBubbleMsgSave(saveId, next, wrap);
+      } else {
+        const res = await fetch(`/api/messages/bubble/${encodeURIComponent(saveId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: next }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || '保存失败');
+        }
+        const bubble = wrap?.querySelector('.bubble-main .bubble:not(.recalled)')
+          || wrap?.querySelector('.bubble:not(.recalled):not(.voice-bubble)');
+        const voiceInner = wrap?.querySelector('.voice-transcript-inner');
+        if (voiceInner) voiceInner.textContent = next;
+        else if (bubble) bubble.textContent = next;
+        const voiceSrc = wrap?.querySelector('.voice-text-src');
+        if (voiceSrc) voiceSrc.textContent = next;
+      }
+      overlay.remove();
+      showToast?.('已保存');
+      window.exitChatSelectMode?.();
+    } catch (e) {
+      showToast?.('编辑失败: ' + (e.message || '网络错误'));
+    }
+  });
+}
+window.openChatBubbleEditor = openChatBubbleEditor;
+
+function clearCtxPressVisual() {
+  document.querySelectorAll('.is-holding, .is-holding-deep, .is-ctx-armed').forEach((el) => {
+    el.classList.remove('is-holding', 'is-holding-deep', 'is-ctx-armed');
+  });
+  const scrim = document.getElementById('ctx-scrim');
+  if (scrim) {
+    scrim.classList.remove('active');
+    setTimeout(() => {
+      if (!scrim.classList.contains('active')) scrim.hidden = true;
+    }, 200);
+  }
+}
+
+function hideContextMenu() {
+  const menu = document.getElementById('context-menu');
+  if (menu) {
+    menu.classList.remove('active');
+    menu.style.display = 'none';
+    menu.style.visibility = '';
+    menu.style.transformOrigin = '';
+  }
+  clearCtxPressVisual();
+  window._ctxDreamMode = false;
+  window._ctxEditBubble = false;
+  if (_ctxDismissBound) {
+    document.removeEventListener('pointerdown', onCtxDismissEvent, true);
+    document.removeEventListener('click', onCtxDismissEvent, true);
+    _ctxDismissBound = false;
+  }
+}
+window.hideContextMenu = hideContextMenu;
+
+function onCtxDismissEvent(ev) {
+  if (ev?.target?.closest?.('#context-menu')) return;
+  if (ev?.target?.closest?.('.topbar-nav-back, .topbar-back')) {
+    hideContextMenu();
+    return;
+  }
+  if (Date.now() < _ctxIgnoreUntil) {
+    ev.preventDefault?.();
+    ev.stopPropagation?.();
+    return;
+  }
+  hideContextMenu();
+}
+
+function bindCtxDismiss() {
+  _ctxIgnoreUntil = Date.now() + 180;
+  window._ctxIgnoreUntil = _ctxIgnoreUntil;
+  if (_ctxDismissBound) return;
+  _ctxDismissBound = true;
+  document.addEventListener('pointerdown', onCtxDismissEvent, true);
+  document.addEventListener('click', onCtxDismissEvent, true);
+}
+
+function runCtxAction(action) {
+  if (!action) return;
+  const now = Date.now();
+  if (now < _ctxActionLock) return;
+  _ctxActionLock = now + 400;
+  _ctxIgnoreUntil = now + 400;
+  window._ctxIgnoreUntil = _ctxIgnoreUntil;
+  const dream = window._ctxDreamMode;
+  const editBubble = window._ctxEditBubble;
+  const dreamId = window._dreamCtxMsgId;
+  const id = ctxMsgId;
+  hideContextMenu();
+  if (action === 'copy') ctxCopy();
+  else if (action === 'locate') {
+    const rid = window._ctxReplyToId;
+    if (rid) window.jumpToChatMessage?.(rid);
+    else window.showToast?.('找不到原文');
+  }
+  else if (action === 'quote') ctxQuote();
+  else if (action === 'select') ctxEnterSelect();
+  else if (action === 'edit') {
+    if (dream) window.editDreamMsg?.(dreamId);
+    else {
+      // 不依赖 _ctxEditBubble 标记；菜单点了就开编辑器
+      if (typeof window.editBubbleMsg === 'function') window.editBubbleMsg(id);
+      else window.openChatBubbleEditor?.(id);
+    }
+  }
+  else if (action === 'recall') ctxRecall();
+  else if (action === 'delete') ctxDelete();
+}
+
+function bindContextMenuActions() {
+  const menu = document.getElementById('context-menu');
+  if (!menu || menu.dataset.actionBound === '1') return;
+  menu.dataset.actionBound = '1';
+  const onPick = (e) => {
+    const item = e.target?.closest?.('.context-item');
+    if (!item || !menu.contains(item)) return;
+    if (item.style.display === 'none') return;
+    // 挡住长按松手误触；窗口已缩短，稍后点按即可
+    if (Date.now() < _ctxIgnoreUntil) return;
+    e.preventDefault();
+    e.stopPropagation();
+    runCtxAction(item.dataset.ctxAction);
+  };
+  menu.addEventListener('pointerup', onPick);
+  menu.addEventListener('click', onPick);
+}
+bindContextMenuActions();
+
+function showContextMenu(e, msgId, role) {
+  e.preventDefault?.();
+  e.stopPropagation?.();
+  const wrap = getBubbleWrapFromEvent(e);
+  ctxMsgEl = wrap;
+  ctxMsgId = wrap?.dataset?.id || msgId || null;
+  ctxMsgRole = wrap?.dataset?.role || role || null;
+  const menu = document.getElementById('context-menu');
+  if (!menu) return;
+
+  const inDream = !!wrap?.classList?.contains('dream-block') || !!window._inDreamDialogue;
+  const isUser = ctxMsgRole === 'user';
+  const isAssistant = ctxMsgRole === 'assistant';
+  const idStr = ctxMsgId != null ? String(ctxMsgId) : '';
+  const isTmp = !idStr || idStr.startsWith('tmp_') || idStr.startsWith('tmp') || idStr.startsWith('seg_');
+  const quoteText = getQuoteTextFromWrap(wrap);
+  // 优先用页面内置判断，避免 chat-page 未加载/旧缓存时永远没有「编辑」
+  const canEditBubble = !inDream && (isUser || isAssistant) && (
+    canEditChatBubbleWrap(wrap)
+    || !!(window.canEditBubbleWrap?.(wrap))
+  );
+  const quoteStrip = e.target?.closest?.('.bubble-reply-under');
+  const replyToId = quoteStrip?.dataset?.replyTo
+    || wrap?.querySelector?.('.bubble-reply-under')?.dataset?.replyTo
+    || '';
+  window._ctxReplyToId = replyToId;
+
+  if (quoteStrip) {
+    setCtxItemVisible('ctx-locate-item', !!replyToId);
+    setCtxItemVisible('ctx-copy-item', false);
+    setCtxItemVisible('ctx-quote-item', false);
+    setCtxItemVisible('ctx-select-item', false);
+    setCtxItemVisible('ctx-edit-item', false);
+    setCtxItemVisible('ctx-recall-item', false);
+    setCtxItemVisible('ctx-delete-item', false);
+    if (!replyToId) {
+      hideContextMenu();
+      showToast?.('找不到原文');
+      return;
+    }
+  } else {
+    setCtxItemVisible('ctx-locate-item', false);
+    setCtxItemVisible('ctx-copy-item', !!quoteText);
+    setCtxItemVisible('ctx-quote-item', !!quoteText && !inDream);
+    setCtxItemVisible('ctx-select-item', !isTmp && !inDream);
+    setCtxItemVisible('ctx-edit-item', inDream || canEditBubble);
+    setCtxItemVisible('ctx-recall-item', !isTmp);
+    setCtxItemVisible('ctx-delete-item', !isTmp);
+  }
+
+  if (inDream) window._dreamCtxMsgId = ctxMsgId;
+  window._ctxDreamMode = inDream;
+  window._ctxEditBubble = canEditBubble;
+
+  menu.style.display = '';
+  menu.classList.add('active');
+  menu.style.visibility = 'hidden';
+  menu.style.left = '0px';
+  menu.style.top = '0px';
+  const rect = menu.getBoundingClientRect();
+  const pad = 8;
+  const menuW = rect.width || 130;
+  const menuH = rect.height || 240;
+  const vw = window.visualViewport?.width ?? window.innerWidth;
+  const vh = window.visualViewport?.height ?? window.innerHeight;
+  const vx = window.visualViewport?.offsetLeft ?? 0;
+  const vy = window.visualViewport?.offsetTop ?? 0;
+  let left = e.clientX;
+  let top = e.clientY;
+  if (left + menuW > vx + vw - pad) left = vx + vw - menuW - pad;
+  if (left < vx + pad) left = vx + pad;
+  if (top + menuH > vy + vh - pad) top = e.clientY - menuH;
+  if (top < vy + pad) top = vy + pad;
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+  const ox = menuW ? Math.min(92, Math.max(8, ((e.clientX - left) / menuW) * 100)) : 20;
+  const oy = menuH ? Math.min(92, Math.max(8, ((e.clientY - top) / menuH) * 100)) : 8;
+  menu.style.transformOrigin = ox + '% ' + oy + '%';
+  menu.style.visibility = '';
+  if (quoteStrip) quoteStrip.classList.add('is-ctx-armed');
+  else wrap?.classList.add('is-ctx-armed');
+  const scrim = document.getElementById('ctx-scrim');
+  if (scrim) {
+    scrim.hidden = false;
+    requestAnimationFrame(() => scrim.classList.add('active'));
+  }
+  bindCtxDismiss();
+}
+window.showContextMenu = showContextMenu;
+
+function ctxCopy() {
+  const wrap = ctxMsgEl || (ctxMsgId ? document.querySelector(`.bubble-wrap[data-id="${CSS.escape(String(ctxMsgId))}"], .dream-block[data-id="${CSS.escape(String(ctxMsgId))}"]`) : null);
+  const text = getQuoteTextFromWrap(wrap);
+  if (text) navigator.clipboard?.writeText(text);
+  showToast('已复制');
+}
+
+function ctxRecall() {
+  window.recallMsg?.(ctxMsgId);
+}
+function ctxDelete() {
+  window.deleteMsg?.(ctxMsgId);
+}
+function ctxEdit() {
+  if (window._ctxDreamMode) window.editDreamMsg?.(window._dreamCtxMsgId);
+  else if (window._ctxEditBubble) window.editBubbleMsg?.(ctxMsgId);
+}
+
+// ===== 引用回复 =====
+window._replyState = null;
+
+function ctxEnterSelect() {
+  const wrap = ctxMsgEl;
+  const bubbleId = wrap?.dataset?.id || ctxMsgId;
+  window.enterChatSelectMode?.(bubbleId);
+}
+
+function ctxQuote() {
+  const wrap = ctxMsgEl || (ctxMsgId ? document.querySelector(`.bubble-wrap[data-id="${CSS.escape(String(ctxMsgId))}"]`) : null);
+  if (!wrap) return;
+  const text = getQuoteTextFromWrap(wrap);
+  const role = wrap.dataset.role || ctxMsgRole;
+  window._replyState = { id: wrap.dataset.msgId || wrap.dataset.id || ctxMsgId, preview: text.slice(0, 80), role };
+
+  const bar = document.getElementById('reply-bar');
+  const nameEl = document.getElementById('reply-bar-name');
+  const textEl = document.getElementById('reply-bar-text');
+  if (bar && nameEl && textEl) {
+    nameEl.textContent = role === 'user' ? '引用你的话' : `引用 ${document.getElementById('chat-char-name')?.textContent || 'TA'} 的话`;
+    textEl.textContent = text.slice(0, 80);
+    bar.style.display = 'flex';
+  }
+  document.getElementById('chat-input')?.focus();
+}
+
+window.clearReply = function() {
+  window._replyState = null;
+  const bar = document.getElementById('reply-bar');
+  if (bar) bar.style.display = 'none';
+};
+</script>
+</body>
+</html>

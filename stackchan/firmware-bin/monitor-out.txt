@@ -1,0 +1,270 @@
+Executing action: monitor
+Running idf_monitor in directory D:\stackchan-mcp\firmware
+Executing "D:\esp\espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe D:\esp\esp-idf\tools/idf_monitor.py -p COM4 -b 115200 --toolchain-prefix xtensa-esp32s3-elf- --target esp32s3 --revision 0 D:\stackchan-mcp\firmware\build\xiaozhi.elf D:\stackchan-mcp\firmware\build\bootloader\bootloader.elf --force-color -m 'D:\esp\espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe' 'D:\esp\esp-idf\tools\idf.py' '-p' 'COM4'"...
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x28 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x421aeecb
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x548
+load:0x403c8700,len:0xc3c
+load:0x403cb700,len:0x2e70
+entry 0x403c8908
+I (35) esp_psram: Found 8MB PSRAM device
+I (35) esp_psram: Speed: 80MHz
+I (36) cpu_start: Multicore app
+I (45) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (45) cpu_start: Pro cpu start user code
+I (45) cpu_start: cpu freq: 240000000 Hz
+I (47) app_init: Application information:
+I (50) app_init: Project name:     xiaozhi
+I (54) app_init: App version:      2.2.6
+I (58) app_init: Compile time:     Aug 28 2026 16:18:02
+I (63) app_init: ELF file SHA256:  24248b9e4...
+I (67) app_init: ESP-IDF:          v5.5.2
+I (71) efuse_init: Min chip rev:     v0.0
+I (75) efuse_init: Max chip rev:     v0.99 
+I (78) efuse_init: Chip rev:         v0.2
+I (82) heap_init: Initializing. RAM available for dynamic allocation:
+I (88) heap_init: At 3FCAF310 len 0003A400 (233 KiB): RAM
+I (93) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (99) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (104) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (109) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (116) spi_flash: detected chip: generic
+I (119) spi_flash: flash io: qio
+I (123) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (128) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (135) main_task: Started on CPU0
+I (145) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (145) main_task: Calling app_main()
+I (155) Board: UUID=7c7b729e-b7bf-4d0c-a683-c6b8e3fd5dbb SKU=stackchan
+I (155) PowerSaveTimer: Power save timer is disabled by settings
+I (165) StackChanBoard: Init AXP2101
+I (165) StackChanBoard: Init AW9523
+I (215) StackChanBoard: Init IlI9342
+I (215) ili9341: LCD panel create success, version: 1.2.0
+I (235) StackChanBoard: Reset IlI9342
+I (365) Display: Power management not supported
+I (415) LcdDisplay: Turning display on
+I (415) LcdDisplay: Initialize LVGL library
+I (415) LcdDisplay: Use 2MB of PSRAM for image cache
+I (425) LcdDisplay: Initialize LVGL port
+I (425) LcdDisplay: Adding LCD display
+I (425) LVGL: Starting LVGL task
+I (435) gc0308: Detected Camera sensor PID=0x9b
+I (515) EspVideo: Camera init success
+I (525) StackChanBoard: Init FT6336
+I (525) StackChanBoard: Get chip ID: 0x64
+I (525) Backlight: Set brightness to 75
+I (525) StackChanBoard: Init PY32 IO expander (I2C addr 0x6F)
+I (1025) StackChanBoard: PY32 IO expander READY (version=0x41, attempt=1/5)
+I (1225) StackChanBoard: Servo power ENABLED via PY32 pin 0 (VM EN HIGH confirmed, REG_GPIO_O_L=0x01)
+I (1425) StackChanBoard: RGB strip READY (12 WS2812C via PY32 pin 13, all cleared)
+I (1425) StackChanBoard: Init SCS0009 servo bus (UART1, baud=1000000, tx=6, rx=7)
+I (1425) uart: ESP_INTR_FLAG_IRAM flag not set while CONFIG_UART_ISR_IN_IRAM is enabled, flag updated
+I (1435) FeetechScs: begin uart=1 baud=1000000 tx=6 rx=7
+I (1445) StackChanBoard: Servo bus init: OK (Level=1, ACK enabled)
+I (1445) StackChanBoard: Boot snap-suppress pitch hold(pos=762): r=0
+I (1455) StackChanBoard: Boot snap-suppress yaw hold(pos=456): r=0
+I (1455) StackChanBoard: Boot pre-init ReadPos: yaw_raw=456 (attempts=1) pitch_raw=762 (attempts=1) tick=132
+I (1465) StackChanBoard: Restored yaw_motion_.current_deg=-1 from ReadPos=456
+I (1475) StackChanBoard: Restored pitch_motion_.current_deg=44 from ReadPos=762 (clamped to safe range 0..88)
+I (4585) StackChanBoard: Boot-time servo init complete: target yaw=0 pitch=45 (move=3000ms), post-ReadPos: yaw_raw=456 (attempts=1) pitch_raw=761 (attempts=1), elapsed_ms=3100
+I (4585) StackChanBoard: Phase 0' yaw re-sync: current_deg 0 -> -1 (actual ReadPos=456)
+I (4595) StackChanBoard: Phase 0' pitch re-sync: current_deg 45 -> 44 (actual ReadPos=761, clamped to safe range 0..88)
+I (4605) StackChanBoard: Init Si12T head-touch sensor (I2C addr 0x68)
+I (4615) Si12T: init OK: ctrl=0x03 out1=0x00 (sleep cleared)
+I (4615) StackChanBoard: Si12T touch poll started (100 ms interval)
+     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00: 00 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: -- 21 -- 23 -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- 34 -- 36 -- 38 -- -- -- -- -- -- -- 
+40: 40 41 -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: 50 51 -- -- -- -- -- -- 58 -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- 68 69 -- -- -- -- -- 6f 
+70: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+I (4665) StackChanBoard: InitializeParamFace
+I (4695) StackChanBoard: ParamFace Cat loaded, blinking every ~4.5s
+I (4695) StackChanBoard: Schedule avatar init (deferred until SetupUI completes)
+I (4695) StackChanBoard: Mouth sequence task ready
+I (4705) StackChanBoard: Registering StackChan MCP tools...
+I (4705) MCP: Add tool: self.robot.set_head_angles
+I (4715) MCP: Add tool: self.robot.get_head_angles
+I (4715) MCP: Add tool: self.robot.gpio_test
+I (4715) MCP: Add tool: self.robot.uart_diag
+I (4725) MCP: Add tool: self.robot.check_vm_en
+I (4725) MCP: Add tool: self.display.set_avatar
+I (4735) MCP: Add tool: self.display.set_mouth
+I (4735) MCP: Add tool: self.display.set_mouth_sequence
+I (4745) MCP: Add tool: self.display.set_blink
+I (4745) MCP: Add tool: self.touch.get_touch_state
+I (4755) MCP: Add tool: self.led.set_color
+I (4755) MCP: Add tool: self.led.set_all
+I (4755) MCP: Add tool: self.led.set_many
+I (4765) MCP: Add tool: self.led.clear
+I (4765) StackChanBoard: StackChan MCP tools registered
+I (4765) StateMachine: State: unknown -> starting
+I (4835) CoreS3AudioCodec: Audio IOs: mclk: 0, bclk: 34, ws: 33, dout: 13, din: 14
+I (4835) CoreS3AudioCodec: Duplex channels created
+I (4835) ES7210: Work in Slave mode
+I (4845) ES7210: Enable ES7210_INPUT_MIC1
+I (4845) ES7210: Enable ES7210_INPUT_MIC2
+I (4855) ES7210: Enable ES7210_INPUT_MIC3
+I (4855) ES7210: Enable TDM mode
+I (4855) CoreS3AudioCodec: CoreS3AudioCodec initialized
+I (4855) AudioCodec: Audio codec started
+I (4865) MCP: Add tool: self.get_device_status
+I (4865) MCP: Add tool: self.audio_speaker.set_volume
+I (4865) MCP: Add tool: self.screen.set_brightness
+I (4875) MCP: Add tool: self.screen.set_theme
+I (4875) MCP: Add tool: self.camera.take_photo
+I (4885) MCP: Add tool: self.get_system_info [user]
+I (4885) MCP: Add tool: self.reboot [user]
+I (4885) MCP: Add tool: self.upgrade_firmware [user]
+I (4895) MCP: Add tool: self.screen.get_info [user]
+I (4905) StackChanBoard: Avatar lv_image created on active screen
+I (4915) MCP: Add tool: self.screen.snapshot [user]
+I (4915) MCP: Add tool: self.screen.preview_image [user]
+I (4915) Assets: The storage free size is 21248 KB
+I (4925) Assets: The partition size is 8192 KB
+I (5025) Assets: The checksum calculation time is 98 ms
+I (5025) MCP: Add tool: self.assets.set_download_url [user]
+I (5025) WifiManager: Initializing...
+I (5025) pp: pp rom version: e7ae62f
+I (5025) net80211: net80211 rom version: e7ae62f
+I (5045) wifi:wifi driver task: 3fce8b70, prio:23, stack:6144, core=0
+I (5045) wifi:wifi firmware version: ee91c8c
+I (5045) wifi:wifi certification version: v7.0
+I (5045) wifi:config NVS flash: disabled
+I (5055) wifi:config nano formatting: enabled
+I (5055) wifi:Init data frame dynamic rx buffer num: 6
+I (5065) wifi:Init dynamic rx mgmt buffer num: 5
+I (5065) wifi:Init management short buffer num: 32
+I (5065) wifi:Init dynamic tx buffer num: 32
+I (5075) wifi:Init static tx FG buffer num: 2
+I (5075) wifi:Init static rx buffer size: 1600
+I (5085) wifi:Init static rx buffer num: 3
+I (5085) wifi:Init dynamic rx buffer num: 6
+I (5095) wifi_init: rx ba win: 3
+I (5095) wifi_init: accept mbox: 6
+I (5105) wifi_init: tcpip mbox: 16
+I (5105) wifi_init: udp mbox: 6
+I (5105) wifi_init: tcp mbox: 6
+I (5105) wifi_init: tcp tx win: 5760
+I (5105) wifi_init: tcp rx win: 5760
+I (5115) wifi_init: tcp mss: 1440
+I (5115) WifiManager: Initialized
+I (5125) WifiBoard: Starting WiFi connection attempt
+I (5125) WifiManager: Starting station
+I (5125) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (5175) wifi:mode : sta (7c:4f:ad:aa:35:44)
+I (5175) wifi:enable tsf
+I (5175) WifiBoard: WiFi scanning
+I (5195) StackChanBoard: Blink DISABLED
+I (5205) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (5695) StackChanBoard: Blink DISABLED
+I (5695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (6195) StackChanBoard: Blink DISABLED
+I (6195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (6695) StackChanBoard: Blink DISABLED
+I (6695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (7195) StackChanBoard: Blink DISABLED
+I (7195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (7585) WifiStation: Found AP: zxcz2024888, BSSID: 30:40:74:5e:e9:52, RSSI: -50, Channel: 10, Authmode: 4
+I (7585) WifiBoard: WiFi connecting to zxcz2024888
+W (7585) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (7695) StackChanBoard: Blink DISABLED
+I (7695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (8195) StackChanBoard: Blink DISABLED
+I (8195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (8755) wifi:new:<10,0>, old:<1,0>, ap:<255,255>, sta:<10,0>, prof:1, snd_ch_cfg:0x0
+I (8755) wifi:state: init -> auth (0xb0)
+I (8755) StackChanBoard: Blink DISABLED
+I (8755) wifi:state: auth -> assoc (0x0)
+I (8765) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (8775) wifi:state: assoc -> run (0x10)
+I (8815) wifi:connected with zxcz2024888, aid = 15, channel 10, BW20, bssid = 30:40:74:5e:e9:52
+I (8815) wifi:security: WPA2-PSK, phy: bgn, rssi: -50
+I (8815) wifi:pm start, type: 1
+
+I (8815) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (8825) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
+I (8845) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (9045) wifi:<ba-add>idx:0 (ifx:0, 30:40:74:5e:e9:52), tid:0, ssn:2389, winSize:64
+I (9195) StackChanBoard: Blink DISABLED
+I (9195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (9695) StackChanBoard: Blink DISABLED
+I (9695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (10195) StackChanBoard: Blink DISABLED
+I (10195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (10695) StackChanBoard: Blink DISABLED
+I (10695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (11195) StackChanBoard: Blink DISABLED
+I (11195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (11485) esp_netif_handlers: sta ip: 192.168.10.108, mask: 255.255.255.0, gw: 192.168.10.1
+I (11485) WifiStation: Got IP: 192.168.10.108
+I (11485) WifiBoard: Connected to WiFi: zxcz2024888
+I (11485) Application: Network connected
+I (11485) StateMachine: State: starting -> activating
+create static modelsI (11495) MODEL_LOADER: Successfully load srmodels
+I (11505) Assets: Refreshing display theme...
+W (11515) EmojiCollection: Emoji not found: microchip_ai
+I (11515) Ota: Current version: 2.2.6
+I (11695) StackChanBoard: Blink DISABLED
+I (11695) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (11965) esp-x509-crt-bundle: Certificate validated
+I (12195) StackChanBoard: Blink DISABLED
+I (12195) StackChanBoard: Avatar OFF: hidden + blink disabled (was OFF)
+I (12275) HttpClient: Established new connection to www.xinxin240306.xyz:443 protocol=https cost=760
+I (12475) HttpClient: HTTP connection closed
+I (12475) Ota: No mqtt section found !
+I (12475) Ota: OTA response includes a websocket section; ignored (CONFIG_DISABLE_OTA_WEBSOCKET_CONFIG=y).
+I (12485) Ota: Current is the latest version
+I (12485) Ota: Running partition: ota_0
+I (12495) Application: Activation done
+I (12495) SystemInfo: free sram: 105195 minimal sram: 88355
+I (12505) StateMachine: State: activating -> idle
+I (12505) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (12515) wifi:Set ps type: 2, coexist: 0
+
+I (12515) AfeWakeWord: Model 0: wn9_nihaoxiaozhi_tts
+I (12525) AFE_CONFIG: Set WakeNet Model: wn9_nihaoxiaozhi_tts
+MC Quantized wakenet9: wakenet9l_tts1h8_ÄãºÃÐ¡ÖÇ_3_0.631_0.635, tigger:v4, mode:0, p:0, (Dec 16 2025 14:45:55)
+I (12635) AFE: AFE Version: (1MIC_V251128)
+I (12635) AFE: Input PCM Config: total 2 channels(1 microphone, 1 playback), sample rate:16000
+I (12645) AFE: AFE Pipeline: [input] -> |AEC(SR_HIGH_PERF)| ->  -> |VAD(WebRTC)| -> |WakeNet(wn9_nihaoxiaozhi_tts,)| -> [output]
+I (12655) AfeWakeWord: Audio detection task started, feed size: 512 fetch size: 512
+I (12655) I2S_IF: Paired data: 0x3fcdb30c, current mode: playback, paired in_enable: 0, paired out_enable: 0
+I (12675) I2S_IF: STD: TX, data_bit: 16, slot_bit: 16, ws_width: 16, slot_mode: MONO, slot_mask: 0x1
+I (12685) I2S_IF: STD: TX, sample_rate_hz: 24000, mclk_multiple: 256, clk_src: 6
+I (12685) I2S_IF: Current mode(record) and peer mode have same sample_rate 24000, channel 2, bits_per_sample 16
+I (12695) I2S_IF: TDM: RX, data_bit: 16, slot_bit: 16, ws_width: 16, total_slot: 2, slot_mask: 0x3
+I (12705) I2S_IF: TDM: RX, sample_rate_hz: 24000, mclk_multiple: 256, clk_src: 6
+I (12695) Adev_Codec: Open codec device OK
+I (12715) StackChanBoard: Initial avatar (idle) installed
+I (12725) AudioCodec: Set output enable to true
+I (12725) Application: Opening gateway websocket for desktop pet (no wake word)
+I (12735) AudioService: Resampling audio from 16000 to 24000
+I (12735) WS: Adding websocket gateway candidate from websocket.url: wss://www.xinxin240306.xyz/xiaozhi/v1/
+I (12755) WS: Connecting to websocket server candidate 1/1: wss://www.xinxin240306.xyz/xiaozhi/v1/ with version: 1
+I (12735) ES7210: Bits 16
+I (12775) ES7210: Enable ES7210_INPUT_MIC1
+I (12775) ES7210: Enable ES7210_INPUT_MIC2
+I (12785) ES7210: Enable ES7210_INPUT_MIC3
+I (12785) ES7210: Enable TDM mode
+I (12785) ES7210: Unmuted
+I (12785) Adev_Codec: Open codec device OK
+I (12795) AudioCodec: Set input enable to true
+I (13105) esp-x509-crt-bundle: Certificate validated
+I (14025) WebSocket: WebSocket handshake done, cost=1270 tcp=820 handshake=450
+I (14115) WS: Session ID: c06c54be-fb0b-4916-861c-cd2905a9b863
+I (14175) WifiStation: Setting WiFi power save level: PERFORMANCE (NONE)
+I (14175) wifi:Set ps type: 0, coexist: 0
+
+W (14175) Application: Server sample rate 16000 does not match device output sample rate 24000, resampling may cause distortion
+I (14185) WS: Connected to websocket server candidate 1/1: wss://www.xinxin240306.xyz/xiaozhi/v1/
+I (23935) SystemInfo: free sram: 72759 minimal sram: 64775
+I (33945) SystemInfo: free sram: 73203 minimal sram: 64775

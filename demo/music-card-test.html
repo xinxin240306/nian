@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音乐卡片测试</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      text-align: center;
+      margin-bottom: 30px;
+      font-size: 28px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .test-section {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .test-section h2 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .test-section p {
+      color: #666;
+      margin-bottom: 15px;
+      line-height: 1.6;
+    }
+
+    .message {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+
+    .music-card-placeholder {
+      min-height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+    }
+
+    .btn {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.3s;
+    }
+
+    .btn:hover {
+      background: #5568d3;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+    }
+
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    code {
+      background: #f4f4f4;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎵 音乐卡片集成测试</h1>
+
+    <div class="test-section">
+      <h2>测试 1：网易云音乐</h2>
+      <p>模拟消息：<code>https://music.163.com/#/song?id=1234567</code></p>
+      <div class="message">
+        <div class="music-card-placeholder" data-music-url="https://music.163.com/#/song?id=1234567">
+          等待渲染...
+        </div>
+      </div>
+      <button class="btn" onclick="testCard(1)">渲染卡片</button>
+      <div id="status-1"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>测试 2：QQ音乐</h2>
+      <p>模拟消息：<code>https://y.qq.com/n/ryqq/songDetail/001234</code></p>
+      <div class="message">
+        <div class="music-card-placeholder" data-music-url="https://y.qq.com/n/ryqq/songDetail/001234">
+          等待渲染...
+        </div>
+      </div>
+      <button class="btn" onclick="testCard(2)">渲染卡片</button>
+      <div id="status-2"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>测试 3：完整流程</h2>
+      <p>输入音乐链接，点击发送：</p>
+      <input type="text" id="music-url-input" placeholder="粘贴音乐链接..." style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px;">
+      <button class="btn" onclick="testFullFlow()">发送消息</button>
+      <div id="chat-messages" style="margin-top: 15px;"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>📋 使用说明</h2>
+      <ul style="color: #666; line-height: 1.8; padding-left: 20px;">
+        <li>直接在聊天中发送音乐链接</li>
+        <li>支持网易云、QQ音乐、酷狗、酷我等平台</li>
+        <li>自动识别并渲染为音乐卡片</li>
+        <li>点击卡片可播放或跳转</li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="module">
+    import { hydrateMusicCards } from '../js/music-card.js';
+
+    window.testCard = function(testId) {
+      const statusEl = document.getElementById(`status-${testId}`);
+      statusEl.textContent = '正在渲染...';
+      statusEl.className = 'status';
+
+      try {
+        // 模拟消息数据
+        const mockMessages = [{
+          id: `test-${testId}`,
+          content: testId === 1 ? 
+            'https://music.163.com/#/song?id=1234567' :
+            'https://y.qq.com/n/ryqq/songDetail/001234',
+          type: 'text'
+        }];
+
+        hydrateMusicCards(mockMessages);
+
+        statusEl.textContent = '✓ 渲染成功！检查上方是否显示卡片';
+        statusEl.className = 'status success';
+      } catch (error) {
+        statusEl.textContent = '✗ 渲染失败：' + error.message;
+        statusEl.className = 'status error';
+        console.error('Test error:', error);
+      }
+    };
+
+    window.testFullFlow = function() {
+      const input = document.getElementById('music-url-input');
+      const chatMessages = document.getElementById('chat-messages');
+      const url = input.value.trim();
+
+      if (!url) {
+        alert('请输入音乐链接');
+        return;
+      }
+
+      // 创建消息元素
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'message';
+      msgDiv.innerHTML = `
+        <div class="music-card-placeholder" data-music-url="${url}">
+          加载中...
+        </div>
+      `;
+      chatMessages.appendChild(msgDiv);
+
+      // 模拟消息数据并渲染
+      const mockMsg = [{
+        id: Date.now(),
+        content: url,
+        type: 'text'
+      }];
+
+      try {
+        hydrateMusicCards(mockMsg);
+        input.value = '';
+      } catch (error) {
+        msgDiv.innerHTML = `<div class="status error">渲染失败：${error.message}</div>`;
+        console.error('Flow error:', error);
+      }
+    };
+  </script>
+</body>
+</html>
