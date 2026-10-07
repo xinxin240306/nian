@@ -317,6 +317,15 @@ async function consolidateDays(charId, { dateStr = '', settings, maxDays = CATCH
     if (!split.points.length) {
       detail.push({ day, fragments: frags.length, points: 0, reason: split.reason });
       console.warn(`[memory-day] char#${charId} ${day}：${frags.length}条碎片没能分出记忆点（${split.reason}）`);
+      // 分不出记忆点也照样贴心情豆（按情绪日志 / 此刻心情）
+      try {
+        const stick = require('./day-mood-helper').autoStickCharDayMood(charId, day, { pointTitles: [] });
+        if (stick?.mood?.emojiCode) {
+          console.log(`[memory-day] char#${charId} ${day} 心情贴(无记忆点) → [${stick.mood.emojiCode}]`);
+        }
+      } catch (e) {
+        console.warn('[memory-day] mood sticker', e.message);
+      }
       continue;
     }
     const dayDetail = { day, fragments: frags.length, points: split.points.length, results: [] };

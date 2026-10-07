@@ -215,6 +215,7 @@ function autoStickCharDayMood(characterId, dateStr, { pointTitles = [] } = {}) {
 
   let code = inferBeanFromEmotionLogs(cid, date);
   if (!code) code = inferBeanFromPointTitles(pointTitles);
+  if (!code) code = inferBeanFromCurrentMood(cid);
   if (!code) code = FALLBACK_BEAN;
   code = normalizeBeanCode(code) || FALLBACK_BEAN;
 
@@ -222,6 +223,67 @@ function autoStickCharDayMood(characterId, dateStr, { pointTitles = [] } = {}) {
     source: 'auto',
     note: pointTitles.slice(0, 3).join(' · ').slice(0, 120),
   });
+}
+
+/** 从角色当前连续心情推断小黄豆（没聊天 / 没情绪日志也能贴） */
+function inferBeanFromCurrentMood(characterId) {
+  try {
+    const emotionHelper = require('./emotion-helper');
+    const row = db.prepare(
+      'SELECT emotion_state, personality, emotion_style, behavior, background, mood FROM characters WHERE id=?'
+    ).get(Number(characterId));
+    if (!row) return null;
+    let state = null;
+    try {
+      state = row.emotion_state
+        ? (typeof row.emotion_state === 'object' ? row.emotion_state : JSON.parse(String(row.emotion_state)))
+        : null;
+    } catch { state = null; }
+    const mood = state?.mood || null;
+    const view = emotionHelper.publicMoodView(
+      emotionHelper.normalizeMood(mood, row),
+      row
+    );
+    return beanFromPrimary(view?.primary);
+  } catch (e) {
+    console.warn('[day-mood] current mood', e.message);
+    return null;
+  }
+}
+
+/**
+ * 兜底：当天（或指定日）给所有角色贴心情豆。
+ * 几乎没聊也贴——优先当天情绪日志，否则用此刻心情。
+ * 不覆盖用户手动改过的角色贴。
+ */
+function ensureAllCharsDayMood(dateStr) {
+  const date = scheduleDateStr(dateStr);
+  const chars = db.prepare('SELECT id FROM characters').all();
+  const results = [];
+  for (const c of chars) {
+    try {
+      // 已有贴（含自动）就不动，只补空位，避免每晚用「此刻心情」改写历史天
+      const existing = getCharMood(c.id, date);
+      if (existing?.emojiCode) {
+        results.push({
+          characterId: c.id,
+          emoji: existing.emojiCode,
+          skipped: true,
+          reason: 'already',
+        });
+        continue;
+      }
+      const r = autoStickCharDayMood(c.id, date, { pointTitles: [] });
+      results.push({
+        characterId: c.id,
+        emoji: r?.mood?.emojiCode || null,
+        skipped: !!r?.skipped,
+      });
+    } catch (e) {
+      results.push({ characterId: c.id, error: e.message });
+    }
+  }
+  return { date, results };
 }
 
 module.exports = {
@@ -237,5 +299,7 @@ module.exports = {
   deleteMood,
   inferBeanFromEmotionLogs,
   inferBeanFromPointTitles,
+  inferBeanFromCurrentMood,
   autoStickCharDayMood,
+  ensureAllCharsDayMood,
 };

@@ -9497,6 +9497,38 @@ function startCronJobs(interactFn, npcInteractFn, ownerNpcReplyFn) {
     }
   });
 
+  // 睡前整理：碎片 → 记忆点挂树（此前未挂进 cron，导致日历心情豆也很少自动贴）
+  schedule('5 3 * * *', async () => {
+    console.log('[cron] 睡前记忆整理...');
+    try {
+      const r = await require('./memory-day-helper').runNightlyDayConsolidation();
+      const n = (r?.results || []).length;
+      console.log(`[cron] memory-day consolidate chars=${n}`);
+    } catch (e) {
+      console.warn('[cron] memory-day consolidate', e.message);
+    }
+  });
+
+  // 日历心情豆兜底：几乎没聊也按此刻心情贴；不覆盖用户手改
+  const stickDayMoods = async ( whylabel ) => {
+    try {
+      const dayMood = require('./day-mood-helper');
+      const settings = getSettings();
+      const tz = resolveIanaTimezone(settings.timezone);
+      const today = getLocalDateStr(new Date(), tz);
+      const yesterday = shiftDateStr(today, -1);
+      const a = dayMood.ensureAllCharsDayMood(yesterday);
+      const b = dayMood.ensureAllCharsDayMood(today);
+      const stuck = [...(a.results || []), ...(b.results || [])].filter((x) => x.emoji).length;
+      console.log(`[cron] day-mood stick (${whylabel}) yesterday=${yesterday} today=${today} stuck=${stuck}`);
+    } catch (e) {
+      console.warn('[cron] day-mood stick', e.message);
+    }
+  };
+  schedule('15 3 * * *', async () => { await stickDayMoods('03:15'); });
+  // 夜里再贴一次「今天」，白天打开日历也能看到
+  schedule('40 23 * * *', async () => { await stickDayMoods('23:40'); });
+
   // 夜里：聊天碎片 → 整天事记 → 有用讯息 + 画像；日程经过 → 自我看法
   schedule('20 3 * * *', async () => {
     console.log('[cron] 消化昨天：事记 + 画像 + 自我看法');
