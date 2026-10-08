@@ -313,14 +313,8 @@ function buildLocationContextBlock(char, settings, opts = {}) {
     lines.push(`用户所在地：${userLoc}`);
     lines.push('两边地名不同时不要默认同城。想挨在一起开小剧场；「回来」只等于各自回家后再聊。');
   }
-  const userHome = String(settings?.user_home_address || '').trim();
-  if (userHome) {
-    lines.push(`用户家：${userHome}（说「我家/回家」或人在家里时可对上这个点）`);
-  }
-  const userWork = String(settings?.user_work_address || '').trim();
-  if (userWork) {
-    lines.push(`用户公司：${userWork}（说「公司/上班」或人在公司时可对上这个点）`);
-  }
+  // 不要把名片「家定位/公司定位」当常驻事实注入——否则角色会默认对方在家。
+  // 家/公司/外面只在角色调 phone_location（或用户主动发位置）时由定位结果告知。
   if (weatherOk) {
     const userWeather = userLoc ? getCachedWeatherSummary(userLoc) : '';
     const charWeather = charWeatherPlace && charWeatherPlace !== userLoc
@@ -676,7 +670,8 @@ function standingPlacesFromSettings(settings) {
 }
 
 function matchStandingPlace(lat, lng, settings, accuracyM = 0) {
-  const radius = Math.max(80, Math.min(200, Number(accuracyM) * 1.8 || 80));
+  // 约 50m 内才认作「在家/在公司」；GPS 误差大时最多放到 70m，避免整条街都被收成家里
+  const radius = Math.max(50, Math.min(70, Number(accuracyM) * 1.2 || 50));
   let best = null;
   for (const p of standingPlacesFromSettings(settings)) {
     const dist = haversineM(lat, lng, p.lat, p.lng);

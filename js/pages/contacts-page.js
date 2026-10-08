@@ -1204,7 +1204,7 @@ window.openMeHomeAddress = async function() {
         ${meGroup(`
           <div class="settings-row settings-row--stack">
             <div class="settings-row-label">家定位</div>
-            <textarea class="input me-textarea" id="me-home-address" placeholder="家里的详细住址，用于「我家」相关对话">${escapeHtml(settings.user_home_address || '')}</textarea>
+            <textarea class="input me-textarea" id="me-home-address" placeholder="家里的详细住址；角色查定位时用来判断你在不在家">${escapeHtml(settings.user_home_address || '')}</textarea>
             <div class="me-addr-actions">
               <button type="button" class="btn btn-primary btn-sm" onclick="locateMeHomeAddress()">用当前位置设为家</button>
               <button type="button" class="btn btn-ghost btn-sm" onclick="saveMeHomeAddress()">保存</button>
@@ -1273,7 +1273,7 @@ window.openMeWorkAddress = async function() {
         ${meGroup(`
           <div class="settings-row settings-row--stack">
             <div class="settings-row-label">公司的定位</div>
-            <textarea class="input me-textarea" id="me-work-address" placeholder="公司/单位地址，人在这里时角色能对上「在公司」">${escapeHtml(settings.user_work_address || '')}</textarea>
+            <textarea class="input me-textarea" id="me-work-address" placeholder="公司/单位地址；角色查定位时用来判断你在不在公司">${escapeHtml(settings.user_work_address || '')}</textarea>
             <div class="me-addr-actions">
               <button type="button" class="btn btn-primary btn-sm" onclick="locateMeWorkAddress()">获取当前位置</button>
               <button type="button" class="btn btn-ghost btn-sm" onclick="saveMeWorkAddress()">保存</button>

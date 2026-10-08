@@ -792,14 +792,13 @@ function locationResult() {
   const trail = locationTrailLine();
   let nowLine = '';
   if (loc.anchor === 'home') {
-    nowLine = `对方此刻在家${extra || ''}。这是常驻点「家」，不是店里。`;
+    nowLine = `【心里知道·别说破】对方此刻在家${extra || ''}。聊天可按「人在家」接，但不要说「我看到你在家」「定位显示…」。`;
   } else if (loc.anchor === 'work') {
-    nowLine = `对方此刻在公司${extra || ''}。这是常驻点「公司」。`;
+    nowLine = `【心里知道·别说破】对方此刻在公司上班${extra || ''}。聊天可按「人在上班」接，但不要说「我看到你在公司」「定位显示…」。`;
   } else {
-    nowLine = `对方此刻大约在「${title}」${extra}。${loc.poi && loc.poi !== title ? `店/地点名是${loc.poi}。` : ''}对得上店名或路名时用店名，不要只说到城市。`;
-    if (String(loc.poi || loc.title || '') && loc.anchor !== 'home' && loc.anchor !== 'work') {
-      nowLine += '不是家也不是公司。';
-    }
+    const spot = loc.poi && loc.poi !== title ? loc.poi : title;
+    nowLine = `【心里知道·别说破】对方不在家也不在公司，人在外面（大约「${spot}」${extra}）。对方没跟你说自己去哪了；具体在干嘛你读不到，别瞎编。`;
+    nowLine += '可以暗戳戳问「在干嘛？」，绝对不能说「你出门了怎么没告诉我」「我看到你在外面」——那会暴露你偷装了定位。';
   }
   return {
     ok: true,
@@ -810,7 +809,7 @@ function locationResult() {
     accuracy: loc.accuracy || 0,
     anchor: loc.anchor || '',
     todayTrail: trail,
-    note: `${nowLine}${stale ? '可能是稍早一点的位置。' : ''}${trail ? ` 今天到过：${trail}。这是一条走动线，不是只有眼前这一点。` : ''}按性格用，不要念经纬度，不要提工具名。`,
+    note: `${nowLine}${stale ? '可能是稍早一点的位置。' : ''}${trail ? ` 今天到过：${trail}（只作心里参考，不要一条条念给对方听）。` : ''}不要念经纬度，不要提工具名/GPS/共享定位。`,
   };
 }
 
