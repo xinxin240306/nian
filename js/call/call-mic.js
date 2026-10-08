@@ -138,8 +138,10 @@ async function applyListenMode() {
     return;
   }
   try {
+    // 连麦「环境音」= 角色侧垫音（playHangoutBed），不是开环境麦。
+    // ambient:true 会关软件 AEC/NS、改用 UNPROCESSED，和耳机降噪无关，这里一律关掉。
     await setNativeCallListen(true, {
-      ambient: hangoutOrWatch,
+      ambient: false,
       bargeIn: false,
     });
   } catch {}
@@ -285,12 +287,22 @@ async function commitUtterance({ periodic = false } = {}) {
     } catch {}
     const wallSec = Math.max(0, (Date.now() - startedAt) / 1000);
     const energy = blob && /wav/i.test(mimeType) ? await wavPcmRms(blob) : 1;
-    const tooQuiet = blob && /wav/i.test(mimeType) && energy < minRms();
+    // 耳机 SCO 经通话降噪后上行偏小，略放宽；有足够时长+体积时不再因 RMS 单独丢掉
+    const rmsFloor = minRms() * 0.55;
+    const tooQuiet = blob && /wav/i.test(mimeType)
+      && energy < rmsFloor
+      && !(wallSec >= 1.0 && blob.size >= 1600);
     const tooShort = wallSec < CALL_UTTER_MIN_MS / 1000 || !blob || blob.size < 400 || tooQuiet;
     if (tooShort) {
+      console.warn('[call] reject clip', { wallSec, size: blob?.size || 0, energy, tooQuiet });
       rejectClip();
       patchState({ thinking: false });
       if (!getState().speaking) setMicPhase(getState().voiceMode ? MIC.LISTENING : MIC.IDLE);
+      // 明显说了一句却被丢掉时提示，避免「停顿后发送」然后没反应
+      if (wallSec >= 1.2 && getState().inCall && !periodic) {
+        window.showToast?.('刚才的声音太短或太轻，没发出去，再说一次吧');
+      }
+      void armAfterSpeak({ force: true });
       return;
     }
     try {
@@ -652,9 +664,11 @@ function bindForegroundHooks() {
     if (getState().voiceMode) void applyListenMode();
     refreshUi();
   };
-  window.__nianIngestNativeUtterance = (b64, wallMs, opts) => {
+  // 给 chat-page 遗留 handler 分流；原生也直接调 __nianIngestNativeUtterance
+  window.__nianCallMicIngest = (b64, wallMs, opts) => {
     void ingestNativeUtterance(b64, wallMs, opts);
   };
+  window.__nianIngestNativeUtterance = window.__nianCallMicIngest;
   window.__nianAmbientSampleAck = () => {
     void ackNativeAmbientSample();
   };

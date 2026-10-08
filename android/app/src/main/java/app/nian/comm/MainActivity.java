@@ -306,7 +306,7 @@ public class MainActivity extends BridgeActivity {
     } catch (Exception ignored) {}
   }
 
-  /** 隔夜保活后 WebView 偶发白屏：探活失败则放弃通话运行态并 reload。 */
+  /** 隔夜保活后 WebView 偶发白屏：探活失败再确认一次，仍死才放弃并 reload。 */
   private void checkWebAliveAfterLongKeep() {
     Bridge bridge = getBridge();
     WebView wv = bridge != null ? bridge.getWebView() : null;
@@ -314,24 +314,52 @@ public class MainActivity extends BridgeActivity {
       ScreenShareOverlay.abandonCallRuntime(this);
       return;
     }
+    final boolean callLive = NativeCallEngine.isRunning() || ScreenShareOverlay.isCallOn();
     try {
       wv.evaluateJavascript(
         "(function(){try{var b=document.body;return !!(window.__nianBootOk&&b&&b.childElementCount>0);}catch(e){return false;}})()",
         value -> {
           boolean ok = "true".equals(value);
-          if (!ok) {
-            if (ScreenShareOverlay.isCallOn() || keepWebAlive) {
-              ScreenShareOverlay.abandonCallRuntime(MainActivity.this);
-            }
-            try { wv.reload(); } catch (Exception ignored) {}
-          } else {
-            evalJs("(function(){try{if(window.__nianReconcileCall)window.__nianReconcileCall();}catch(e){}})()");
+          if (ok) {
+            evalJs("(function(){try{if(window.__nianCallPlayIdle)window.__nianCallPlayIdle();if(window.__nianReconcileCall)window.__nianReconcileCall();}catch(e){}})()");
+            return;
           }
+          // 通话还在时，探活偶发失败不要立刻杀进程态（隔夜回前台会卡死/白屏）
+          MAIN_HANDLER.postDelayed(() -> {
+            try {
+              wv.evaluateJavascript(
+                "(function(){try{var b=document.body;return !!(window.__nianBootOk&&b&&b.childElementCount>0);}catch(e){return false;}})()",
+                value2 -> {
+                  boolean ok2 = "true".equals(value2);
+                  if (ok2) {
+                    evalJs("(function(){try{if(window.__nianCallPlayIdle)window.__nianCallPlayIdle();if(window.__nianReconcileCall)window.__nianReconcileCall();}catch(e){}})()");
+                    return;
+                  }
+                  if (callLive && NativeCallEngine.isRunning()) {
+                    // 引擎还活着：只唤醒 JS，不 abandon/reload
+                    evalJs("(function(){try{if(window.__nianCallPlayIdle)window.__nianCallPlayIdle();if(window.__nianReconcileCall)window.__nianReconcileCall();}catch(e){}})()");
+                    return;
+                  }
+                  if (ScreenShareOverlay.isCallOn() || keepWebAlive) {
+                    ScreenShareOverlay.abandonCallRuntime(MainActivity.this);
+                  }
+                  try { wv.reload(); } catch (Exception ignored) {}
+                }
+              );
+            } catch (Exception e) {
+              if (!(callLive && NativeCallEngine.isRunning())) {
+                ScreenShareOverlay.abandonCallRuntime(MainActivity.this);
+                try { wv.reload(); } catch (Exception ignored) {}
+              }
+            }
+          }, 1600);
         }
       );
     } catch (Exception e) {
-      ScreenShareOverlay.abandonCallRuntime(this);
-      try { wv.reload(); } catch (Exception ignored) {}
+      if (!(callLive && NativeCallEngine.isRunning())) {
+        ScreenShareOverlay.abandonCallRuntime(this);
+        try { wv.reload(); } catch (Exception ignored) {}
+      }
     }
   }
 

@@ -1249,7 +1249,10 @@ public class AppPermissionsPlugin extends Plugin {
     boolean on = Boolean.TRUE.equals(call.getBoolean("on"));
     boolean ambient = Boolean.TRUE.equals(call.getBoolean("ambient"));
     boolean bargeIn = Boolean.TRUE.equals(call.getBoolean("bargeIn"));
-    NativeCallEngine.setAmbientListen(on && ambient);
+    boolean wantAmbient = on && ambient;
+    // ambient 切换会换采集源 / AEC·NS，才需要重绑；否则每次 listen=true 重绑会清空正在录的一句
+    boolean ambientChanged = NativeCallEngine.isAmbientListen() != wantAmbient;
+    NativeCallEngine.setAmbientListen(wantAmbient);
     NativeCallEngine.setBargeInEnabled(on && bargeIn);
     if (!on) {
       NativeCallEngine.setBargeInEnabled(false);
@@ -1263,7 +1266,9 @@ public class AppPermissionsPlugin extends Plugin {
     }
     Context ctx = getContext();
     CallAudioRoute.ensureMicRoute(ctx, () -> {
-      NativeCallEngine.rebindMic();
+      if (!NativeCallEngine.hasHealthyRecord() || ambientChanged) {
+        NativeCallEngine.rebindMic();
+      }
       NativeCallEngine.setListen(true);
       JSObject o = new JSObject();
       o.put("listen", true);

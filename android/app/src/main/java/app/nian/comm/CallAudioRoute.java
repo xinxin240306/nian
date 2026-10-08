@@ -248,6 +248,11 @@ final class CallAudioRoute {
     return isHeadsetRoute();
   }
 
+  /** TTS 正在走 A2DP/媒体通路（SCO 已卸）。 */
+  static boolean isMediaSuspended() {
+    return mediaSuspended;
+  }
+
   /** 播媒体前先卸 SCO；播完用 {@link #resumeAfterMedia} 等 SCO 再开麦。 */
   static void suspendScoForMedia(Context ctx, Runnable done) {
     Context app = ctx != null ? ctx.getApplicationContext() : null;

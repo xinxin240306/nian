@@ -25,7 +25,7 @@ import {
   insertInlineEmojiAtCursor,
 } from '../inline-emoji.js';
 import { getPaperFonts, isValidPaperFontId } from '../diary-paper.js';
-import { shouldInsertTimeDivider, escapeHtml, splitAiSegments, stripVoiceLaneTags, stripAiContextLabels, looksLikeWebCardPayload, looksTruncatedUtterance } from '../memory.js';
+import { shouldInsertTimeDivider, escapeHtml, splitAiSegments, stripVoiceLaneTags, stripAiContextLabels, looksLikeWebCardPayload } from '../memory.js';
 
 function voiceBubbleSegments(content) {
   const raw = String(content || '').trim();
@@ -1710,8 +1710,14 @@ async function playCallReplyAudio(result, forCharId) {
   } else if (result.content) {
     parts.push({ raw: result.content, id: result.aiMsgId });
   }
+  // WS 已在播 / 已占坑：HTTP「气泡在 DOM 但听筒没播」补播会砍断正在念的句子
+  const pending = parts.filter((p) => p.id == null || !wasCallSpeechPlayed(p.id));
+  if (!pending.length) {
+    await armCallLiveAfterSpeak();
+    return;
+  }
   for (const part of parts) applyCallScenePayload(parseCallAudioPayload(part.raw));
-  for (const part of parts) {
+  for (const part of pending) {
     await playCallSpeechPayload(parseCallAudioPayload(part.raw), forCharId, part.id, {
       armListen: false,
       emotion: part.emotion,
@@ -4835,7 +4841,7 @@ function callSpeakText(text) {
     if (quotes.length) return quotes.join('\n').trim();
     return fallbackSpeakFromVideoText(t);
   }
-  if (looksTruncatedUtterance(t)) return '';
+  // 通话里宁可把略像「没说完」的句子念出来，也不要整句静音（听感像被截断）
   return t;
 }
 
@@ -5014,11 +5020,12 @@ function splitForCallTTS(text) {
   }
   const tail = raw.slice(last).trim();
   if (tail) parts.push(tail);
-  return parts.filter((p) => p && !looksTruncatedUtterance(p));
+  // 通话朗读不要丢「看起来像没说完」的段，否则耳机里会像半句被截断
+  return parts.filter((p) => !!p);
 }
 
 /** 通话段间停顿（毫秒）：够听清上一句尾音，又别让人等不耐烦 */
-const CALL_SEGMENT_GAP_MS = 520;
+const CALL_SEGMENT_GAP_MS = 220;
 /** 文字视频：两句台词中间夹了旁白时，停顿略长一点 */
 const CALL_TEXT_VIDEO_QUOTE_GAP_MS = 900;
 
@@ -5139,9 +5146,20 @@ async function persistCallTtsClip(msgId, blobUrl, transcript) {
   }
 }
 
-async function playCallTtsSegment(text, forCharId, { msgId, clipUrl, armListen = true, emotion, tone, soft, skipScenePush = false } = {}) {
+async function playCallTtsSegment(text, forCharId, {
+  msgId, clipUrl, armListen = true, emotion, tone, soft, skipScenePush = false, relatedIds = null,
+} = {}) {
+  return withCallTtsGate(() => playCallTtsSegmentLocked(text, forCharId, {
+    msgId, clipUrl, armListen, emotion, tone, soft, skipScenePush, relatedIds,
+  }));
+}
+
+async function playCallTtsSegmentLocked(text, forCharId, {
+  msgId, clipUrl, armListen = true, emotion, tone, soft, skipScenePush = false, relatedIds = null,
+} = {}) {
   if (!isInVoiceCallWith(forCharId)) return;
-  if (msgId != null && wasCallSpeechPlayed(msgId)) {
+  // 开播前占坑：堵住 WS/HTTP 双通道抢播（否则原生打断被当成播完，只听到每个句首一个字）
+  if (!tryClaimCallSpeech(msgId, relatedIds)) {
     if (armListen) await armCallLiveAfterSpeak();
     return;
   }
@@ -5292,7 +5310,7 @@ async function playCallTtsSegment(text, forCharId, { msgId, clipUrl, armListen =
     setCallIdleStatus();
     try { duckCallAmbient(false); } catch {}
     try { ensureCallAmbientPlaying(); } catch {}
-    if (allOk) markCallSpeechPlayed(msgId);
+    // id 已在开播前 claim；失败也不清，避免补播再抢一次把上一句砍成单字
     if (!allOk && firstErr && !/自动播放|NotAllowed|interact/i.test(firstErr)) {
       window.showToast?.('语音播放失败: ' + firstErr);
     }
@@ -5300,8 +5318,6 @@ async function playCallTtsSegment(text, forCharId, { msgId, clipUrl, armListen =
     setCallIdleStatus();
     if (t && !hasVoice) {
       window.showToast?.('角色未配置声音 ID，通话没有语音');
-    } else if (t) {
-      markCallSpeechPlayed(msgId);
     }
   }
   // 开场白播完（或无需播）再开麦听
@@ -5756,6 +5772,7 @@ async function appendAiBubble(msg, userTimestamp, forCharId = charId) {
         emotion: emo || undefined,
         tone: tone || undefined,
         skipScenePush: !!(inVideoCall && isCallVideoTextMode()),
+        relatedIds: hydrated.callSpeechIds || null,
       });
     }
     return;
@@ -5830,6 +5847,7 @@ async function appendAiBubble(msg, userTimestamp, forCharId = charId) {
       tone: tone || undefined,
       // 场景条已由 applyCallLensFromResult 推过，这里只播声音
       skipScenePush: !!(inVideoCall && isCallVideoTextMode()),
+      relatedIds: hydrated.callSpeechIds || null,
     });
     if (holdBubbleForDial) paintBubble();
   } else if (holdBubbleForDial) {
@@ -5862,10 +5880,13 @@ async function renderAiMessageSequence(aiMessages, userTimestamp, forCharId = ch
       } else {
         const bits = speechBuf.map((m) => String(m.content || '').trim()).filter(Boolean);
         const head = speechBuf[0];
+        const callSpeechIds = speechBuf.map((m) => m.id).filter((id) => id != null && id !== '');
         out.push({
           ...head,
           type: head.type === 'voice' || speechBuf.some((m) => m.type === 'voice') ? 'voice' : 'text',
           content: bits.join('\n'),
+          // 合并气泡只留 head.id；把同轮其它 id 带上，开播时一起占坑，防 HTTP 按条补播跳到中间句
+          callSpeechIds,
           media_meta: (() => {
             try {
               const meta = typeof head.media_meta === 'string'
@@ -7393,6 +7414,8 @@ let _watchCaptureWarned = false;
 let _callSoftTtsNext = false;
 /** 通话里已播过听筒的消息 id，避免 DOM 先插入后 HTTP 漏播、或双通道重播 */
 const _playedCallSpeechIds = new Set();
+/** 串行化通话 TTS：WS 逐条播 + HTTP「补播」并行时会抢同一个原生播放器，听感像跳字/跳句 */
+let _callTtsGate = Promise.resolve();
 
 function markCallSpeechPlayed(msgId) {
   if (msgId == null || msgId === '') return;
@@ -7409,6 +7432,30 @@ function markCallSpeechPlayed(msgId) {
 function wasCallSpeechPlayed(msgId) {
   if (msgId == null || msgId === '') return false;
   return _playedCallSpeechIds.has(String(msgId));
+}
+
+/** 开播前占坑：任一相关 id 已占则放弃，避免 HTTP 补播打断正在念的合并气泡 */
+function tryClaimCallSpeech(msgId, relatedIds = []) {
+  const ids = [];
+  const push = (id) => {
+    if (id == null || id === '') return;
+    const s = String(id);
+    if (s.startsWith('tmp_') || s.startsWith('seg_') || s.startsWith('vseg_') || s.startsWith('hist_')) return;
+    if (!ids.includes(s)) ids.push(s);
+  };
+  push(msgId);
+  for (const id of relatedIds || []) push(id);
+  if (!ids.length) return true;
+  if (ids.some((id) => _playedCallSpeechIds.has(id))) return false;
+  for (const id of ids) markCallSpeechPlayed(id);
+  return true;
+}
+
+function withCallTtsGate(fn) {
+  const prev = _callTtsGate;
+  let release;
+  _callTtsGate = new Promise((r) => { release = r; });
+  return prev.catch(() => {}).then(fn).finally(() => { release(); });
 }
 
 const CALL_WATCH_MIN_MS = 5 * 60 * 1000;
@@ -8428,7 +8475,11 @@ async function startCallLiveListen() {
 }
 
 /** 页面计时被系统停掉时，原生麦自己把一句收完再交给这里发出去 */
-window.__nianIngestNativeUtterance = async function(b64, wallMs) {
+window.__nianIngestNativeUtterance = async function(b64, wallMs, opts) {
+  // 新引擎已接管：走 call-mic（支持 periodic / 连麦环境采样）
+  if (typeof window.__nianCallMicIngest === 'function') {
+    return window.__nianCallMicIngest(b64, wallMs, opts);
+  }
   if (!inCall || callDialing || !callCharId) return;
   if (_callLiveCommitting || _voiceSending) return;
   // 后台收句时若 speaking 仍卡着，先清掉，否则角色回完又关麦

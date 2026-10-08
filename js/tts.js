@@ -400,6 +400,8 @@ export async function playReadyTTS(url, onEnd, { volume } = {}) {
       try { ensureCallAmbientPlaying(); } catch {}
       onEnd?.();
     }, { volume: finalVolume });
+    // 播放期间若被 stopTTS / 抢播打断，generation 会变——当作失败，别让通话段循环继续往下跳
+    if (_ttsGeneration !== gen) return false;
     return true;
   } catch (e) {
     lastTtsError = e.message || '语音播放失败';

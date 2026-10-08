@@ -325,6 +325,11 @@ final class NativeCallEngine {
     return bargeInEnabled;
   }
 
+  /** AudioRecord 已开且线程在跑：听麦开着时不必每次 setListen(true) 都重绑。 */
+  static boolean hasHealthyRecord() {
+    return running && record != null;
+  }
+
   /**
    * SCO/A2DP 切换后必须重开 AudioRecord，否则仍绑在手机麦上。
    * 在路由回调线程调用即可。
@@ -335,6 +340,13 @@ final class NativeCallEngine {
     // 角色说完 900ms 后会再绑一次麦。若前端已经开始录下一句，这里不能把 capturing 清掉，
     // 否则 commit 拿到空 WAV，连麦看起来像「从没把声音发出去」。
     boolean keepCapturing = capturing;
+    // 重绑会停掉 AudioRecord；正在收的一句必须带走 PCM，否则 UI 已「停顿发送」却上传空音
+    byte[] keptPcm = null;
+    if (keepCapturing) {
+      synchronized (pcm) {
+        keptPcm = pcm.toByteArray();
+      }
+    }
     stopRecordOnlyLocked();
     String err = null;
     for (int attempt = 0; attempt < 3; attempt++) {
@@ -357,12 +369,20 @@ final class NativeCallEngine {
     }
     listen = keepListen;
     capturing = keepCapturing;
+    if (keptPcm != null && keptPcm.length > 0) {
+      synchronized (pcm) {
+        pcm.reset();
+        try { pcm.write(keptPcm); } catch (IOException ignored) {}
+      }
+    }
     paused = false;
     lastRms = 0;
-    resetRing();
+    // 正在录一句时别清环缓：preroll 已在 begin 时写入 PCM；清环缓无害但避免多余抖动
+    if (!keepCapturing) resetRing();
     recThread = new Thread(NativeCallEngine::loop, "nian-call-mic");
     recThread.start();
-    Log.i(TAG, "rebindMic ok rate=" + sampleRate + " capturing=" + capturing);
+    Log.i(TAG, "rebindMic ok rate=" + sampleRate + " capturing=" + capturing
+      + " keptPcm=" + (keptPcm != null ? keptPcm.length : 0));
   }
 
   static void setPaused(boolean on) {
@@ -438,7 +458,8 @@ final class NativeCallEngine {
   static void stopPlay() {
     MAIN.post(() -> {
       playGen++;
-      stopPlayLocked(true, true, true);
+      // 主动停 = 未播完，勿当 success，否则前端会立刻播下一段造成「跳句」
+      stopPlayLocked(true, false, true);
     });
   }
 
@@ -520,7 +541,8 @@ final class NativeCallEngine {
   }
 
   private static void playOnMain(String url, byte[] data, String mime, PlayCallback done) {
-    stopPlayLocked(true, true, false);
+    // 打断上一句必须 ok=false：若报 success，JS 会以为本段播完并立刻开下一段 → 听感像跳字/跳句
+    stopPlayLocked(true, false, false);
     resumeGen++; // 取消上一句播完后挂起的 SCO 恢复，同轮连播保持媒体通路
     final int gen = ++playGen;
     boolean hasUrl = url != null && !url.trim().isEmpty();
@@ -548,11 +570,11 @@ final class NativeCallEngine {
     CallAudioRoute.suspendScoForMedia(appCtx, () -> {
       if (gen != playGen) return;
       // 路由切稳后直接满音量开播，把切换毛刺顶过去；不做淡入（淡入会让短句整句发虚）
-      beginPlayer(url, data, mime);
+      beginPlayer(url, data, mime, gen);
     });
   }
 
-  private static void beginPlayer(String url, byte[] data, String mime) {
+  private static void beginPlayer(String url, byte[] data, String mime, int gen) {
     boolean hasUrl = url != null && !url.trim().isEmpty();
     boolean hasData = data != null && data.length > 0;
     MediaPlayer mp = new MediaPlayer();
@@ -560,11 +582,13 @@ final class NativeCallEngine {
     try {
       ensurePlayVolume(false);
       if (Build.VERSION.SDK_INT >= 21) {
-        // 通话里角色声音走「通话流」(VOICE_COMMUNICATION)，
-        // 蓝牙耳机/有线耳机在通话模式下不再主动把输出压低，
-        // 也能用系统独立的「通话音量」调大小。
-        // 极少数系统会拒绝第三方 App 使用通话流，失败时回退到媒体流。
-        AudioAttributes attrs = buildPlayAttrs(inCallMode);
+        // 已卸 SCO 走 A2DP 时必须用媒体流；仍标 VOICE_COMMUNICATION 会在耳机上断断续续/截半句。
+        // 听筒/SCO/外放通话通路才用通话流。
+        String route = CallAudioRoute.currentRoute();
+        boolean mediaRoute = CallAudioRoute.isMediaSuspended()
+          || "a2dp".equals(route);
+        boolean useVoiceComm = inCallMode && !mediaRoute;
+        AudioAttributes attrs = buildPlayAttrs(useVoiceComm);
         try {
           mp.setAudioAttributes(attrs);
         } catch (Exception e) {
@@ -573,7 +597,7 @@ final class NativeCallEngine {
         }
       }
       if (hasData) {
-        File f = writePlayFile(data, mime);
+        File f = writePlayFile(data, mime, gen);
         mp.setDataSource(f.getAbsolutePath());
       } else {
         String src = url.trim();
@@ -583,6 +607,7 @@ final class NativeCallEngine {
         mp.setDataSource(src);
       }
       mp.setOnPreparedListener(p -> {
+        if (gen != playGen || player != p) return;
         paused = true;
         try {
           float target = playGain > 0f ? playGain : 1f;
@@ -609,14 +634,16 @@ final class NativeCallEngine {
           p.start();
         } catch (Exception e) {
           Log.w(TAG, "start failed", e);
-          stopPlayLocked(true, false, true);
+          if (gen == playGen && player == p) stopPlayLocked(true, false, true);
         }
       });
       mp.setOnCompletionListener(p -> {
+        if (gen != playGen || player != p) return;
         restoreMediaBoost();
         stopPlayLocked(true, true, true);
       });
       mp.setOnErrorListener((p, what, extra) -> {
+        if (gen != playGen || player != p) return true;
         Log.w(TAG, "play error " + what + "/" + extra);
         restoreMediaBoost();
         stopPlayLocked(true, false, true);
@@ -625,7 +652,7 @@ final class NativeCallEngine {
       mp.prepareAsync();
     } catch (Exception e) {
       Log.w(TAG, "play failed", e);
-      stopPlayLocked(true, false, true);
+      if (gen == playGen) stopPlayLocked(true, false, true);
     }
   }
 
@@ -642,7 +669,7 @@ final class NativeCallEngine {
     return ab.build();
   }
 
-  private static File writePlayFile(byte[] data, String mime) throws IOException {
+  private static File writePlayFile(byte[] data, String mime, int gen) throws IOException {
     Context ctx = appCtx;
     if (ctx == null) throw new IOException("no context");
     deletePlayFile();
@@ -652,7 +679,8 @@ final class NativeCallEngine {
     else if (m.contains("ogg")) ext = ".ogg";
     else if (m.contains("mp4") || m.contains("m4a") || m.contains("aac")) ext = ".m4a";
     else if (m.contains("webm")) ext = ".webm";
-    File f = new File(ctx.getCacheDir(), "nian-call-play" + ext);
+    // 按 playGen 命名，避免并发/抢播时覆盖同一文件导致听感跳句
+    File f = new File(ctx.getCacheDir(), "nian-call-play-" + gen + ext);
     try (FileOutputStream out = new FileOutputStream(f)) {
       out.write(data);
     }
@@ -799,17 +827,20 @@ final class NativeCallEngine {
   }
 
   /**
-   * TTS 播完后：若 Activity 不在前台且 JS VAD 已停（>2s 无打卡），
-   * 强制 listen=true，否则后台 VAD / 用户说话永远进不来。
+   * TTS 播完后：锁屏或 WebView 冻住时前端 setCallSpeaking(false) 到不了，
+   * 强制 listen=true 并注入 __nianCallPlayIdle，否则用户说话永远进不来 / 听起来像没声音。
    */
   private static void scheduleBackgroundListenRearm() {
     if (!running) return;
     final int gen = playGen;
     MAIN.postDelayed(() -> {
       if (gen != playGen || !running || player != null) return;
-      if (MainActivity.isResumed()) return;
+      long sinceTick = System.currentTimeMillis() - lastJsTickAt;
+      // 亮屏但 JS 已停打卡（>2.5s）也当作冻住；仅在明确前台且 VAD 还活着时跳过
+      boolean jsAlive = MainActivity.isResumed() && sinceTick >= 0 && sinceTick < 2500;
+      if (jsAlive) return;
       if (!listen) {
-        Log.i(TAG, "bg rearm listen after TTS");
+        Log.i(TAG, "rearm listen after TTS (jsStuckOrBg sinceTick=" + sinceTick + ")");
         setListen(true);
       }
       if (record == null) {
@@ -939,9 +970,7 @@ final class NativeCallEngine {
       try { t.join(500); } catch (Exception ignored) {}
     }
     running = wasRunning;
-    synchronized (pcm) {
-      pcm.reset();
-    }
+    // 不在这里 pcm.reset()：rebindMic 可能正在收一句，由调用方决定是否保留/清空
   }
 
   private static void stopRecordLocked() {
@@ -949,6 +978,9 @@ final class NativeCallEngine {
     listen = false;
     capturing = false;
     stopRecordOnlyLocked();
+    synchronized (pcm) {
+      pcm.reset();
+    }
     resetRing();
     deletePlayFile();
   }
