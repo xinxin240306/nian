@@ -321,6 +321,7 @@ async function composeDayStory(char, dateStr, summaries, settings, callChatAPICo
 规则：
 - 材料已按时间排好，并去掉了衔接处的重复句；仍有少量重复只算一次。
 - story 用第一人称：「我」=${char.name}；用户写「对方」或「${uname}」。
+${require('./memory-brain-helper').MEMORY_ACTOR_RULE}
 - 按时间讲清这一天到底发生了什么：起因→关键转折→结果/未了；不要逐句摘抄，不要流水账。正文里尽量带上材料里的日期/时段感，不要把时间抹平。
 - 纯寒暄、无信息量的玩笑可一笔带过或省略；有约定、情绪、重要事实必须留下。
 - 【具体词】材料里用户/角色亲口说的具体词须原样保留（药名、地名、店名、作品名、人名昵称、具体物品、品牌、数字与约定原文）；禁止收成「止痛药/东西/那个地方」这类笼统说法。
@@ -345,6 +346,7 @@ async function refineUsefulFromStory(char, dateStr, story, settings, callChatAPI
 - 只留有用讯息：承诺/约定、到期待办、重要事件、稳定偏好、关系/情绪的关键结果。
 - 闲聊、寒暄、无后果的玩笑 → 不要写进 items。
 - content 用第一人称；用户写「对方」或「${uname}」；不要用「你」指用户。
+${require('./memory-brain-helper').MEMORY_ACTOR_RULE}
 - 【时间】有明确日期/时段的须写进 content（或待办【到期：YYYY年M月D日+时段】），不要抹掉时间。
 - 【具体词】事记里已有的具体词必须原样带进 items（布洛芬≠止痛药；地名/店名/物品名同理）；可补概括，但不能只用概括替换原词。
 - 同一事实只写一条；没有可留的就 items 空数组。禁止编造。`;
@@ -563,7 +565,7 @@ function formatForPrompt(char, userText = '') {
     const hits = recallDays(char.id, userText, tz);
     if (hits.length) {
       const body = hits.map((h) => `【${h.date}】\n${h.slots.map((s) => `· ${s.time} ${s.activity}${(s.life || s.lived) ? `：${s.life || s.lived}` : ''}`).join('\n')}`).join('\n');
-      parts.push(`【被问到的日子】对方在问过去。按这些天实际发生的回答，可先写 [怎么看]…[/怎么看][什么感觉]…[/什么感觉]（用户看不见），再开口。不要念时间表，对不上就承认记不清。\n${body}`);
+      parts.push(`【被问到的日子】对方在问过去。按这些天实际发生的回答，先照常在心里过一遍（用户看不见），再开口。不要念时间表，对不上就承认记不清。\n${body}`);
     } else {
       parts.push('【被问到的日子】对方在问过去，近几天的时间轴里没有能对上的一段。按人设承认记不清，不要编。');
     }

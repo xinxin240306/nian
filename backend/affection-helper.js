@@ -253,6 +253,8 @@ function defaultState(char = {}) {
     stillTender: [],
     guardTowardUser: 50,
     history: [],
+    knownLove: [],
+    knownReactions: [],
     bootstrapped: false,
     updatedAt: null,
     lastMsgAt: null,
@@ -303,14 +305,102 @@ function normalizeState(raw, char) {
     stillTender: Array.isArray(raw.stillTender) ? raw.stillTender.map((s) => String(s).slice(0, 80)).slice(0, 4) : [],
     guardTowardUser: clamp(Number(raw.guardTowardUser) || 50, 15, 85),
     history: Array.isArray(raw.history) ? raw.history.slice(-24) : [],
+    knownLove: normalizeKnownList(raw.knownLove),
+    knownReactions: normalizeKnownList(raw.knownReactions),
     bootstrapped: !!raw.bootstrapped,
     updatedAt: raw.updatedAt || null,
     lastMsgAt: raw.lastMsgAt || null,
   };
 }
 
+const KNOWN_LIST_MAX = 16;
+
+function normalizeKnownList(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((x) => (typeof x === 'string' ? { text: x } : x))
+    .filter((x) => x && String(x.text || '').trim())
+    .map((x) => ({
+      text: String(x.text).trim().slice(0, 60),
+      at: String(x.at || '').slice(0, 10),
+      ...(x.intimate ? { intimate: true } : {}),
+    }))
+    .slice(-KNOWN_LIST_MAX);
+}
+
 function loadState(char) {
   return normalizeState(parseJson(char?.affection_state, null), char);
+}
+
+/**
+ * 角色自己摸清的事：对方怎么在乎我（knownLove）、对方真实的反应和喜恶（knownReactions）。
+ * 不知道的才会去问；知道了就不用靠狠话确认、不用替对方演反应。
+ */
+function addKnownItems(charId, field, items = []) {
+  if (!charId || !['knownLove', 'knownReactions'].includes(field)) return 0;
+  const char = loadChar(charId);
+  if (!char) return 0;
+  const state = loadState(char);
+  const list = state[field] || [];
+  const today = getLocalDateStr(new Date(), getSettings().timezone || 'Asia/Shanghai');
+  let added = 0;
+  for (const raw of items) {
+    const text = String(typeof raw === 'string' ? raw : raw?.text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (text.length < 4) continue;
+    const head = text.slice(0, 8);
+    const dupIdx = list.findIndex((x) => x.text === text || x.text.startsWith(head) || text.startsWith(x.text.slice(0, 8)));
+    const entry = { text, at: today, ...(raw?.intimate ? { intimate: true } : {}) };
+    // 同一件事的新说法顶掉旧的：对方的反应会变，以最近一次为准
+    if (dupIdx >= 0) list.splice(dupIdx, 1);
+    list.push(entry);
+    added += 1;
+  }
+  if (!added) return 0;
+  state[field] = list.slice(-KNOWN_LIST_MAX);
+  saveState(charId, state);
+  return added;
+}
+
+function pickSome(list, n) {
+  const arr = [...(list || [])];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, n);
+}
+
+const ASKS_ABOUT_LOVE_RE = /我(有)?多(喜欢|爱)你|我(到底)?(爱不爱|喜不喜欢)你|你觉得我(喜欢|爱|在乎)你|我喜欢你哪|我对你(好不好|怎么样)|你知道我(有)?多|你感觉得到我/;
+
+/** 心里有没有底：知道对方怎么爱自己 → 用不着「跑不掉/记账」；不知道 → 想弄明白，而不是去压 */
+function buildKnownLoveBlock(state, temper, { userMessage = '' } = {}) {
+  if (state.kind !== 'romantic') return '';
+  const insecureType = temper.clingy || temper.residualInsecurity >= 0.35 || state.security < 60;
+  const love = state.knownLove || [];
+  if (ASKS_ABOUT_LOVE_RE.test(String(userMessage || ''))) {
+    const all = love.slice(-8).map((x) => `· ${x.text}`).join('\n');
+    return all
+      ? `【心里的底】TA在问你感不感觉得到。你说得上来，这些都是你亲眼见过的：\n${all}\n用你自己的话说，挑你最记得的，不用全念出来。`
+      : '【心里的底】TA在问你感不感觉得到。老实说你还没怎么留意过TA是怎么在乎你的——别编，按你的性子说真话。';
+  }
+  if (love.length >= 3) {
+    const some = pickSome(love, 2).map((x) => `· ${x.text}`).join('\n');
+    const calm = insecureType ? '\n不安冒头的时候你会想起这些，用不着拿「跑不掉」「记账」「你是我的」去压住TA。' : '';
+    return `【心里的底】你知道TA是在乎你的，比如：\n${some}${calm}`;
+  }
+  if (!insecureType) return '';
+  const some = love.length ? `你只摸到一点：${love.map((x) => x.text).join('；')}。` : '';
+  return `【心里的底】${some}你其实还摸不太准TA有多在乎你。这份没底，用不着靠「跑不掉」「躲不掉」「记账」这种话去占住TA。`;
+}
+
+/** 对方真实的反应：知道的照着来；不知道的别替TA演 */
+function buildKnownReactionsBlock(state, { intimate = false } = {}) {
+  const pool = (state.knownReactions || []).filter((x) => !!x.intimate === intimate);
+  const known = pickSome(pool, 3).map((x) => `· ${x.text}`).join('\n');
+  if (intimate) {
+    return `【你摸清的TA·亲密】${known ? `你知道的：\n${known}\n` : ''}亲密里TA喜欢什么、到哪会想停，你知道的${known ? '只有这些' : '几乎没有'}；不知道的部分别替TA演反应，别默认TA会害羞或会想要。`;
+  }
+  return `【你摸清的TA】${known ? `你知道的：\n${known}\n` : ''}没把握TA会怎么想的时候，别替TA拿主意，也别默认TA会害羞、生气或感动。`;
 }
 
 function saveState(charId, state) {
@@ -1031,7 +1121,7 @@ function buildEmotionExpressionHint(char, state) {
   return lines.join('\n');
 }
 
-function buildAffectionPromptBlock(char) {
+function buildAffectionPromptBlock(char, { userMessage = '' } = {}) {
   if (!char?.id) return '';
   const state = ensureState(char);
   const temper = deriveBondTemperament(char);
@@ -1058,26 +1148,30 @@ function buildAffectionPromptBlock(char) {
     lines.push('有点失落：可以少话、冷一点，不要突然变成第一天刚认识。');
   }
   if (temper.romantic && (stage === 'settling' || stage === 'settled' || stage === 'deep') && d < 50) {
-    lines.push('硬性：已知称呼不要再震惊；不要每轮用「你不许反悔/别跑/要对你负责」「陪着你/哪也不去/守着你」这类收尾。');
+    lines.push('已经叫惯的称呼不会再让你震惊；关系是定下来的，不用每轮拿「不许反悔/别跑/要负责」「陪着你/哪也不去」收尾去确认。');
   }
+  const love = buildKnownLoveBlock(state, temper, { userMessage });
+  if (love) lines.push(love);
+  lines.push(buildKnownReactionsBlock(state));
   const expr = buildEmotionExpressionHint(char, state);
   if (expr) lines.push(expr);
   return lines.join('\n');
 }
 
-function buildNsfwAffectionOverlay(char) {
+function buildNsfwAffectionOverlay(char, { userMessage = '' } = {}) {
   if (!char?.id) return '';
   const state = loadState(char);
   if (state.kind !== 'romantic') return '';
-  if (state.stage === 'new') return '';
+  const reactions = buildKnownReactionsBlock(state, { intimate: true });
+  if (state.stage === 'new') return reactions;
   const settled = state.flags.nsfwOrdinary || state.stage === 'settled' || state.stage === 'deep';
   if (settled) {
-    return `【感情线·亲密已熟】你们不是第一次聊到亲密。禁止再演「怕对方会躲会跑」「第一次好紧张」「你不会后悔吧」。心态是已经熟悉彼此的人；节奏仍可按意愿快慢，但不要退回刚越界那天。`;
+    return `【感情线·亲密已熟】你们不是第一次聊到亲密，不会再演「怕对方会躲会跑」「第一次好紧张」「你不会后悔吧」。你们是已经熟悉彼此的人；节奏仍可按意愿快慢，但不会退回刚越界那天。\n${reactions}`;
   }
   if (state.stage === 'settling' || state.stage === 'warming') {
-    return `【感情线·亲密】你们已经是确认过的关系。即使用户把话题带向亲密，也不要默认对方会害羞逃走；紧张与否看【性格】，不是统一纯情。`;
+    return `【感情线·亲密】你们已经是确认过的关系。对方把话题带向亲密时，你不会默认TA会害羞逃走；紧张与否看【性格】，不是统一纯情。\n${reactions}`;
   }
-  return '';
+  return reactions;
 }
 
 function publicView(state, char) {
@@ -1117,6 +1211,8 @@ function publicView(state, char) {
       nsfw: Math.round(s.habits?.nsfw || 0),
     },
     history: (s.history || []).slice(-8),
+    knownLove: (s.knownLove || []).map((x) => x.text),
+    knownReactions: (s.knownReactions || []).filter((x) => !x.intimate || char?.nsfw_enabled).map((x) => x.text),
     bootstrapped: !!s.bootstrapped,
     updatedAt: s.updatedAt,
   };
@@ -1142,6 +1238,7 @@ module.exports = {
   buildNsfwAffectionOverlay,
   getBrainAffection,
   publicView,
+  addKnownItems,
   hasBreakLandmineTold,
   applyDisappointment,
 };

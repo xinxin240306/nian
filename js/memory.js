@@ -464,7 +464,7 @@ function splitIntoSentenceGroups(text, keepPeriod = false) {
 /** 去掉 AI 从历史里学来的 [文字]/[语音] 标记；并剥心里话草稿标记、通道标签抄写 */
 export function stripAiContextLabels(text) {
   if (!text) return '';
-  const mindTag = '怎么看这件事|怎么想这件事|决定做什么|决定不说什么|决定怎么说|怎么看|什么感觉|怎么想|怎么做';
+  const mindTag = '在聊什么|T[Aa]为什么(?:说这个|这么说|说这些)|我怎么想|想知道的|怎么看这件事|怎么想这件事|决定做什么|决定不说什么|决定怎么说|怎么看|什么感觉|怎么想|没说出口|怎么做';
   return String(text)
     .replace(/\r\n/g, '\n')
     .replace(new RegExp(`[\\[【［]\\s*(?:${mindTag})\\s*[\\]】］][\\s\\S]*?[\\[【［]\\s*\\/\\s*(?:${mindTag})\\s*[\\]】］]`, 'gi'), '')

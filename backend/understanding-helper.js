@@ -311,9 +311,9 @@ const UNDERSTANDING_SYS = `你是角色内心的理解层，只输出 JSON，不
 - skip：本轮不用
 规则：
 - 没把握时：性格/情绪反应类 → background_only；与本轮无关的事件 → skip。
-- 印象：性格/情绪反应用来读懂这轮 → background_only；喜好/样子等跟当前话题是同一点 → usable_now。
+- 印象：性格/情绪反应用来读懂这轮 → background_only；对方这句亲口说到的那一点 → usable_now；只是聊到同一类话题（都在说吃的、都在说睡觉）→ skip，别每次都翻出同一条。
 - 生理/体能类观察不要用在情绪疲惫语境（如「心累」对不上「走两步就喘」）→ skip。
-- 脑海/记忆树：对方本轮话明显点到旧事（同一件事/关键词重合）→ 必须 usable_now，禁止 skip；擦边相关 → background_only；完全无关 → skip。
+- 脑海/记忆树：对方本轮就在说这件事本身 → usable_now；只是撞到一个词、话题其实不是它 → background_only；完全无关 → skip。宁可少提：一个人不会每句话都扯回旧事。
 - 候选上的 rule= 是规则层初判。对方词命中且 rule=usable_now 时不要降到 skip；硬旁路（对方点名记得/说你忘了）不要降到 skip。
 - allow_speak_memory：本轮是否允许角色明说任何旧事；存在 usable_now 事件时为 true。
 - 反话/嘴硬：字面没事、挺好、晚安但语气冷/敷衍时标 contradiction。
@@ -497,6 +497,7 @@ async function applyBrainUnderstanding(char, settings, promptOpts = {}) {
     impressionPick = cron.pickImpressionCandidates(char.id, contextText, {
       max: Math.min(IMPRESSION_SEND_MAX, cfg.IMPRESSION_CANDIDATE_MAX),
       includeStanding,
+      focusText: userMessage,
     });
   } catch (e) {
     console.warn('[brain] pick impressions', e.message);
@@ -576,25 +577,21 @@ async function applyBrainUnderstanding(char, settings, promptOpts = {}) {
     }
   }
 
+  // 模型降不掉的只有：对方正接着聊的那件事、对方亲口点到的印象
+  const protectKeys = new Set(
+    (impressions || [])
+      .filter((p) => p.directHit)
+      .map((p) => String(p.id))
+      .concat(
+        Object.entries(ruled.reasons || {})
+          .filter(([, reason]) => reason === 'same_topic')
+          .map(([id]) => id),
+      ),
+  );
   const merged = (!skipModel && modelRaw)
     ? gate.mergeModelModes(ruled.modeById, understanding, {
       forceSpeak: ruled.forceSpeak,
-      protectKeys: new Set(
-        (prepared.flashCandidates || [])
-          .filter((c) => c.kwHit || c.keywordHit)
-          .map((c) => c.key || `mem:${c.id}`)
-          .concat(
-            (impressions || [])
-              .filter((p) => p.keywordHit || (p.score && p.score >= 5))
-              .map((p) => String(p.id)),
-            (prepared.narratives || [])
-              .filter((n) => n.kwHit)
-              .map((n) => `narr:${n.id}`),
-            Object.entries(ruled.reasons || {})
-              .filter(([, reason]) => reason === 'same_topic')
-              .map(([id]) => id),
-          ),
-      ),
+      protectKeys,
     })
     : new Map(ruled.modeById);
 
@@ -605,13 +602,8 @@ async function applyBrainUnderstanding(char, settings, promptOpts = {}) {
     && Object.prototype.hasOwnProperty.call(modelRaw, 'allow_speak_memory')
     && asBool(modelRaw.allow_speak_memory, true) === false
   ) {
-    const protectKw = new Set(
-      (prepared.flashCandidates || [])
-        .filter((c) => c.kwHit || c.keywordHit)
-        .map((c) => c.key || `mem:${c.id}`),
-    );
     for (const [id, mode] of [...merged.entries()]) {
-      if (mode === 'usable_now' && /^(mem:|ep:|narr:)/.test(String(id)) && !protectKw.has(String(id))) {
+      if (mode === 'usable_now' && /^(mem:|ep:|narr:)/.test(String(id)) && !protectKeys.has(String(id))) {
         merged.set(id, 'background_only');
       }
     }
@@ -658,12 +650,19 @@ async function applyBrainUnderstanding(char, settings, promptOpts = {}) {
   });
 
   promptOpts.memoryBlock = prependLived(char, promptOpts, flashBody);
-  promptOpts.impressionBlock = impressionPick
+  const impBody = impressionPick
     ? cron.formatImpressionCandidates(impFinal, impressionPick.voice, {
       usageHint: gate.MEMORY_USAGE_HINT,
       fuzzy: true,
     })
     : '';
+  let selfReview = '';
+  try {
+    selfReview = require('./self-review-helper').buildSelfReviewBlock(char, userMessage);
+  } catch (e) {
+    console.warn('[brain] self review', e.message);
+  }
+  promptOpts.impressionBlock = [impBody, selfReview].filter(Boolean).join('\n\n');
   promptOpts.understandingBlock = (skipModel && !hasPerceptionCue)
     ? ''
     : formatUnderstandingPromptBlock(understanding);

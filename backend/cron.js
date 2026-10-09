@@ -59,21 +59,22 @@ function buildThinkAsSelfBlock(char, { forDiary = false, forTheater = false } = 
 [动手]里必须写清：接触部位（哪只手/嘴/身体哪一块）、具体怎么动（按/滑/扣/舔/咬/顶等）、力度与方向；想好本轮要给读者看的一处特写再落笔。手跟着感觉走（爱抚是常态，全身都可碰，不要连续多轮只盯下半身）。禁止把本段标题、说明写进回复。
 ${lens}`;
   }
-  const after = forDiary
-    ? '两行标记是心事底稿：日记正文要把它们展开写透，不是另起「今天干了啥再补一句感想」。禁止把本段标题、说明写进日记。'
-    : `标记写完再开口。禁止把本段任何标题、说明、条目写进回复。
-标记里的判断禁止改写或坦白进开口；这个人嘴上不会说的就别说。
-${livingHint}`;
-  return forDiary
-    ? `【心里话·草稿】只写下面两行标记（不要抄本段说明），再写日记正文：
+  if (forDiary) {
+    return `【心里话·草稿】只写下面两行标记（不要抄本段说明），再写日记正文：
 [怎么想]…[/怎么想]
 [没说出口]…[/没说出口]
-${after}
-${lens}`
-    : `【心里话·草稿】只写下面两行标记（不要抄本段说明），再另起开口：
-[怎么看]…[/怎么看]
-[什么感觉]…[/什么感觉]
-${after}
+两行标记是心事底稿：日记正文要把它们展开写透，不是另起「今天干了啥再补一句感想」。禁止把本段标题、说明写进日记。
+${lens}`;
+  }
+  return `【心里话·草稿】开口前先在心里过一遍，写成下面四个标记（用户看不见，每个一两句，不要抄本段说明）：
+[在聊什么]这一段（不只最后这句）到底在聊什么、聊到哪了[/在聊什么]
+[TA为什么说这个]你猜TA为什么跟你说这些、这会儿什么心情，可以不确定[/TA为什么说这个]
+[我怎么想]你自己看到这些是什么感受、什么念头——不是「该怎么应对」，是你这个人真实的反应[/我怎么想]
+[想知道的]你拿不准、好奇、想弄明白的地方；没有就空着[/想知道的]
+写完再开口。怎么接跟着这四步和你的性子走：可以接住、可以逗、可以反问；想知道的可以直接问，可以绕着问，也可以先放着，不是每次都同一种方式。
+上面那些记忆、印象、日程，是你恰好知道的背景：先读懂TA，再看用不用得上；用不上就放着。TA今天不一定是印象里那样。
+禁止把本段标题、说明写进回复；标记里的判断不要原样坦白进开口，这个人嘴上不会说的就别说。
+${livingHint}
 ${lens}`;
 }
 
@@ -1826,7 +1827,8 @@ function isPlausibleReviewText(s) {
   return true;
 }
 
-const SCHEDULE_CONTEXT_GUIDE = '【行程】这是你此刻自己的日子，不是任务清单，也不是守着手机等回。今天的时段已经定死，不要把正在做的事改成另一件；只有聊天里明确改了计划，这一档才变。正在做的事会占你的心神和回复节奏；做完即空闲。已经说过在做/做完的，不要再报「要去/正要去/刚做完」。还没到点的「下一项」只是将要去做，禁止当成已经到场/已经在做。聊天里刚说过自己在哪，改地方必须有过渡，禁止瞬移，禁止改口说「一直」在新地方。勿播报行程、勿催用户。';
+const SCHEDULE_PLAN_ASK_RE = /待会|等会|等下|一会|接下来|之后|今晚|明天|后天|周末|去哪|安排|计划|有空|忙不忙|忙吗|几点|什么时候/;
+const SCHEDULE_CONTEXT_GUIDE = '【行程】这是你此刻自己的日子，不是任务清单，也不是守着手机等回。日子是在过的，不是拿来讲的：对方没问起时，你的安排不是话题，顶多顺口带一句，不会三句不离接下来要去哪。今天的时段已经定死，不要把正在做的事改成另一件；只有聊天里明确改了计划，这一档才变。正在做的事会占你的心神和回复节奏；做完即空闲。已经说过在做/做完的，不要再报「要去/正要去/刚做完」。还没到点的「下一项」只是将要去做，禁止当成已经到场/已经在做。聊天里刚说过自己在哪，改地方必须有过渡，禁止瞬移，禁止改口说「一直」在新地方。勿播报行程、勿催用户。';
 
 /** 近期聊天里角色自称的所在/状态（比钟点日程更贴近对方刚听过的事实） */
 function inferRecentChatPresence(history, opts = {}) {
@@ -2311,7 +2313,10 @@ function getSchedulePromptBlocks(char, settings, userMessage = '', opts = {}) {
       parts.push('空闲中（自由安排）');
     }
   }
-  if (next) {
+  // 每轮都挂着「下一项/明天去哪」，角色就会每轮念叨要去哪；快到点了或对方问起才放
+  const asksPlans = SCHEDULE_PLAN_ASK_RE.test(String(userMessage || ''));
+  const nextSoon = next && Number.isFinite(next.mins) && next.mins - nowMins >= 0 && next.mins - nowMins <= 45;
+  if (next && (asksPlans || nextSoon || presenceConflict?.kind === 'teleport_next_early')) {
     const place = sanitizeRegionPlace(next.place);
     const nextLine = `下一项：${next.time || ''} ${next.activity}${place ? `（在${place}）` : ''}`.replace(/\s+/g, ' ').trim();
     if (presenceConflict?.kind === 'teleport_next_early') {
@@ -2345,7 +2350,7 @@ function getSchedulePromptBlocks(char, settings, userMessage = '', opts = {}) {
   if (moodFoot) parts.push(moodFoot);
   try {
     // 未来去向锁要进聊天，避免「明天去哪」现编；生活补全文不进此刻块
-    const lock = require('./life-fill-helper').promptLockLine(char.id, today);
+    const lock = asksPlans ? require('./life-fill-helper').promptLockLine(char.id, today) : '';
     if (lock) parts.push(lock);
   } catch { /* ignore */ }
 
@@ -4735,7 +4740,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
   const relationshipGuide = (!isDream && !forGame) ? buildRelationshipEngagementGuide(char) : '';
   let affectionBlock = '';
   if (!isDream && !forGame && !forDiaryPeek) {
-    try { affectionBlock = affectionHelper.buildAffectionPromptBlock(char) || ''; } catch {}
+    try { affectionBlock = affectionHelper.buildAffectionPromptBlock(char, { userMessage: opts.userMessage || '' }) || ''; } catch {}
   }
 
   // 生日 / 纪念日 / 公共节日：当天一句；平时仅关键词命中才注入日期（见 relationshipDatesBlock）
@@ -4834,7 +4839,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
     }
     if (char.nsfw_note) nsfwBlock += `\n角色侧补充：${char.nsfw_note}`;
     try {
-      const nsfwAff = affectionHelper.buildNsfwAffectionOverlay(char);
+      const nsfwAff = affectionHelper.buildNsfwAffectionOverlay(char, { userMessage: opts.userMessage || '' });
       if (nsfwAff) nsfwBlock += `\n${nsfwAff}`;
     } catch {}
   }
@@ -5037,8 +5042,9 @@ ${selfAddrLock ? `· ${selfAddrLock}\n` : ''}· 调侃/损人/撒娇的分寸看
     ].filter(Boolean).join('\n\n');
   }
 
+  const thinkAtEnd = !forTheater;
   return [
-    thinkAsSelf,
+    thinkAtEnd ? '' : thinkAsSelf,
     immersionLock,
     personLock,
     theaterStateBlock,
@@ -5144,6 +5150,7 @@ ${selfAddrLock ? `· ${selfAddrLock}\n` : ''}· 调侃/损人/撒娇的分寸看
     presetsBlock,
     meetupEchoNote,
     extra,
+    thinkAtEnd ? thinkAsSelf : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -5613,6 +5620,72 @@ function buildMemorySummaryPriorContext(charId) {
   return lines.length ? `\n${lines.join('\n')}\n` : '';
 }
 
+/** 总结用的对话行：标明说话人是「我」还是「对方」，行内原话的我/你保持说话人视角 */
+function memoryTranscriptLine(m, charName, userLabel, tz) {
+  const name = m.role === 'user' ? `${userLabel}·对方` : `${charName}·我`;
+  return `【${name}】（${formatMemoryContextTimestamp(m.timestamp, tz)}）：${formatMessageForAi(m)}`;
+}
+
+function memoryTranscriptPersonRule(charName, userLabel) {
+  let actorRule = '';
+  try { actorRule = require('./memory-brain-helper').MEMORY_ACTOR_RULE; } catch { /* ignore */ }
+  return `【原话换人称·逐行做】对话每行开头的【…·我】【…·对方】标明说话人；行内原话的「我/你」是说话人自己的说法：
+- 【${userLabel}·对方】那行：原话的「我」→ 写成「对方」，原话的「你」→ 写成「我」
+- 【${charName}·我】那行：原话的「我」→ 还是「我」，原话的「你」→ 写成「对方」
+例：【${userLabel}·对方】「我给你买了热水袋」→ 记成「对方给我买了热水袋」，不是「我给对方买了热水袋」。
+${actorRule}`;
+}
+
+/**
+ * 按轮切窗的接缝：上一窗已经记下的事 + 切口前几句原话。
+ * 没有这一块，跨窗没聊完的话题会被当成新事再记一遍，而且两次说法不一样。
+ */
+function buildMemorySummaryBridge(charId, msgs, tz, formatLine) {
+  const firstId = msgs[0]?.id;
+  if (!firstId) return { text: '', episodeIds: new Set() };
+  const firstTs = parseMsgTimestamp(msgs[0].timestamp).getTime();
+  const lines = [];
+  const episodeIds = new Set();
+  try {
+    const eps = db.prepare(
+      `SELECT id, title, gist, date FROM memory_episodes
+       WHERE character_id=? AND msg_id_to IS NOT NULL AND msg_id_to < ?
+       ORDER BY id DESC LIMIT 4`
+    ).all(charId, firstId);
+    const firstDay = getLocalDateStr(new Date(firstTs), tz);
+    const recent = eps.filter((ep) => {
+      const d = String(ep.date || '').slice(0, 10);
+      return !d || !firstDay || d >= shiftDateStr(firstDay, -1);
+    }).reverse();
+    if (recent.length) {
+      lines.push('【上一窗已记下·同一件事的后续必须接在这里】');
+      for (const ep of recent) {
+        episodeIds.add(Number(ep.id));
+        const gist = String(ep.gist || '').replace(/\s+/g, ' ').trim();
+        const shown = gist.length > 260 ? `${gist.slice(0, 110)}……${gist.slice(-140)}` : gist;
+        lines.push(`- episode#${ep.id}「${String(ep.title || '').slice(0, 24)}」：${shown}`);
+      }
+    }
+  } catch { /* ignore */ }
+  try {
+    let tail = db.prepare(
+      `SELECT id, role, content, timestamp, type, media_meta FROM messages
+       WHERE character_id=? AND is_dream=0 AND recalled=0 AND id < ?
+       AND (type IS NULL OR type != 'system')
+       ORDER BY id DESC LIMIT 6`
+    ).all(charId, firstId).reverse();
+    tail = filterOutTheaterMessages(tail).filter((m) => {
+      const gap = firstTs - parseMsgTimestamp(m.timestamp).getTime();
+      return Number.isFinite(gap) && gap < 3 * 3600 * 1000;
+    });
+    if (tail.length) {
+      lines.push('【切口前的几句·只用来看懂本窗开头，里面的事不要再记】');
+      lines.push(...tail.map(formatLine));
+    }
+  } catch { /* ignore */ }
+  return { text: lines.length ? `\n${lines.join('\n')}\n` : '', episodeIds };
+}
+
 async function generateMemorySummary(charId, options = {}) {
   const settings = getSettings();
   const char = db.prepare('SELECT * FROM characters WHERE id=?').get(charId);
@@ -5656,15 +5729,15 @@ async function generateMemorySummary(charId, options = {}) {
       getLocalDateStr(parseMsgTimestamp(m.timestamp), tz) === options.dateFilter
     );
   } else {
-    const limit = options.keywordTriggered ? Math.max(n * 2, 20) : n * 2;
+    const limit = Math.min(60, options.keywordTriggered ? Math.max(n * 3, 24) : n * 3);
     if (lastMsgId > 0) {
+      // 从游标往后按顺序取：积压超过一窗时剩下的留给下一次，不能只取最新一段把中间整段跳过
       msgs = db.prepare(
         `SELECT id, role, content, timestamp, type, media_meta FROM messages
          WHERE character_id=? AND is_dream=0 AND recalled=0 AND id > ?
          AND (type IS NULL OR type != 'system')
-         ORDER BY id DESC LIMIT ?`
+         ORDER BY id ASC LIMIT ?`
       ).all(charId, lastMsgId, limit);
-      msgs.reverse();
     } else {
       msgs = db.prepare(
         `SELECT id, role, content, timestamp, type, media_meta FROM messages
@@ -5676,11 +5749,12 @@ async function generateMemorySummary(charId, options = {}) {
     }
   }
 
+  const fetchedMaxId = msgs.length ? msgs[msgs.length - 1].id : 0;
   msgs = filterOutTheaterMessages(msgs);
 
   if (msgs.length < minMsgs) {
-    // 本批若几乎全是小剧场扮演，仍推进游标，避免记忆任务反复空跑
-    const rawMax = db.prepare(
+    // 本批若几乎全是小剧场扮演，仍推进游标，避免记忆任务反复空跑；只推到这一窗末尾，后面的留给下一次
+    const rawMax = fetchedMaxId || db.prepare(
       `SELECT MAX(id) AS m FROM messages WHERE character_id=? AND is_dream=0 AND recalled=0 AND id > ? AND (type IS NULL OR type != 'system')`
     ).get(charId, lastMsgId)?.m;
     if (rawMax && !options.rounds && !options.dateFilter) {
@@ -5706,14 +5780,13 @@ async function generateMemorySummary(charId, options = {}) {
       openTodoBlock = `\n【已有未完成待办/约定·勿重复新建】下面这些已经在库里。同到期日、同动作（拍/发/提醒等）只需保留一条；本窗若只是又提了一遍 → 不要再写新的 memories 待办。已履行的也不要再建。\n${openTodos.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n`;
     }
   } catch { /* ignore */ }
-  const chatStr = msgs.map(m => {
-    const name = m.role === 'user' ? (settings.username || '旅人') : char.name;
-    const body = formatMessageForAi(m);
-    const ts = formatMemoryContextTimestamp(m.timestamp, tz);
-    return `${name}（${ts}）：${body}`;
-  }).join('\n');
+  const userLabel = settings.username || '旅人';
+  const nsfwOn = char.nsfw_enabled === 1 || char.nsfw_enabled === '1' || char.nsfw_enabled === true;
+  const formatTranscriptLine = (m) => memoryTranscriptLine(m, char.name, userLabel, tz);
+  const chatStr = msgs.map(formatTranscriptLine).join('\n');
 
-  const priorBlock = buildMemorySummaryPriorContext(charId);
+  const bridge = buildMemorySummaryBridge(charId, msgs, tz, formatTranscriptLine);
+  const priorBlock = buildMemorySummaryPriorContext(charId) + bridge.text;
   const mindSlice = [
     char.personality && `性格：${String(char.personality).slice(0, 220)}`,
     char.behavior && `行为：${String(char.behavior).slice(0, 160)}`,
@@ -5725,8 +5798,9 @@ async function generateMemorySummary(charId, options = {}) {
   "skip": false,
   "topics": [
     {
+      "continues_episode_id": "是【上一窗已记下】里某件事的后续就填那个数字 id，否则 null",
       "episode_title": "8字内标题，只写这一件事",
-      "episode_gist": "100-180字：只含【导火索/背景→关键转折→结果/现状】",
+      "episode_gist": "新事 100-180字：只含【导火索/背景→关键转折→结果/现状】；续写时 30-120字，只写本窗新增",
       "keywords": ["关键词3-8个"],
       "memories": [
         {"category":"约定|待办|重要时刻|偏好与习惯|情感状态|日常点滴","content":"60-120字，只写关键锚点或增量","weight":0.0-1.0,"importance":0.0-1.0,"emotion":{"valence":-1~1,"arousal":0~1,"label":"可选情绪词"}}
@@ -5738,7 +5812,9 @@ async function generateMemorySummary(charId, options = {}) {
   ],
   "self_views": [
     {"category":"性格|行为习惯|喜好|经历|变化","content":"第一人称短句","related_facts":["同一张卡的相关观察，可空"],"note":"可选，一句自我感想，称自己为TA"}
-  ]
+  ],
+  "love_signs": ["对方在乎我的样子，8-30字，可空"],
+  "reactions_learned": [{"text":"对方真实的反应或喜恶，8-40字"${nsfwOn ? ',"intimate":false' : ''}}]
 }
 
 【你是谁·记账口吻】
@@ -5763,7 +5839,10 @@ ${mindSlice}
 - 仅当存在**独立可追踪**的第二事实（例如：情感结果 + 一条到期待办）才写第 2 条；最多 2 条
 - 禁止：把 gist 再扩写成几乎一样的 memories；禁止两条 memories 互相复述同一段起因/经过
 
-【跨窗·只写增量·硬性】若本窗是某事后续：一句点题即可，正文只写本窗**新出现**的转折/结果/承诺；禁止把上一窗已清楚的导火索、双方旧态度再完整复述一遍。
+【跨窗·接着写·硬性】总结是按轮数切的，切口经常落在一件事中间。
+- 本窗开头若是【上一窗已记下】里某件事的继续 → 该 topic 填 continues_episode_id；episode_gist 只写本窗**新出现**的转折/结果/承诺，不复述上一窗已有的导火索和旧态度，也不要换个说法重讲一遍；memories 只写新锚点，上一窗记过的事实不要再记。
+- 【切口前的几句】只是帮你看懂上下文，里面的事都已经记过了。
+- 本窗最后几句如果话题明显还没聊完，只记已经发生的部分，结果写「还没定 / 还没说完」，不要猜结局。
 
 【分流·硬性】memories=发生过的事；impressions=用户侧稳定 trait；self_views=${char.name}对自己的习惯/喜好/经历看法。禁止把同一事件同时写进两边；禁止把事件写进 impressions 或 self_views。
 
@@ -5807,6 +5886,12 @@ ${mindSlice}
 【待办·已完成·硬性】若本窗对话里事项已履行（已发图/已拍/已提醒/已说做完/已发你了），不要再新建同主题待办或约定；gist 可写「已履行」。已完成的旧待办不要当成还欠着的事。
 【跨世界·禁止当约定】会合、过来找、回去找不能写成约定或待办；gist 里顶多当随口一提，不要单独成条去推进。
 【人称·硬性】episode_gist 与 memories.content 用角色第一人称：「我」= ${char.name}；用户只用「对方」或「${settings.username || '旅人'}」。禁止用「你」指用户；禁止第三人称客观旁白（如「${char.name}答应…」「用户说…」）；禁止「你/我」指代搅混。例：「晚上对方提起加班，我答应明天中午提醒对方休息。」
+${memoryTranscriptPersonRule(char.name, userLabel)}
+【我摸清的对方 love_signs / reactions_learned】这是我自己心里慢慢攒下的底，默认空数组。
+- love_signs：这窗里对方让我感觉到被在乎的地方——亲口说的（想我、喜欢我哪里）或做出来的（累了先来找我、记得我说过的事）。只写真发生的，不写我自己的猜测。例：「对方说一天里最想听到的是我的声音」。
+- reactions_learned：这窗里我看到/问到的对方**真实**反应和喜恶，尤其是我原本会想当然的地方（以为TA会害羞其实没有、以为TA会生气其实只是累了）。例：「被我夸的时候对方会嘴硬岔开，其实挺高兴」。${nsfwOn ? '\n- 亲密相关的反应和喜恶（喜欢什么、不喜欢什么、到哪会想停）也写进 reactions_learned，标 "intimate":true；其余标 false。' : ''}
+- 两项都写成「对方…」的完整一句，不要和 impressions 重复同一件事。
+- 就算这窗整体 skip=true，这两项有就照样写。
 【条数】每个 topic 一条 gist；该 topic 的 memories 默认 1 条、最多 2 条。信息不足再 skip。
 【分类】约定=明确承诺（可无死线）；待办=有具体到期时点的提醒事项；重要时刻=关键事件；偏好与习惯=用户或${char.name}明确说出的长期偏好/习惯；情感状态=有因果的情绪/关系变化；日常点滴=其他确有信息量且有前因后果的
 ${openTodoBlock}${priorBlock}只输出 JSON。`;
@@ -5823,10 +5908,29 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
     : options.keywordTriggered ? 'salient'
     : 'consolidated';
 
+  const saveKnownFromParsed = (parsed) => {
+    try {
+      const aff = require('./affection-helper');
+      const toText = (x) => (typeof x === 'string' ? x : x?.text || '');
+      const love = (Array.isArray(parsed?.love_signs) ? parsed.love_signs : [])
+        .map((x) => ({ text: toText(x) }))
+        .filter((x) => x.text.includes('对方') || x.text.includes(userLabel));
+      const reactions = (Array.isArray(parsed?.reactions_learned) ? parsed.reactions_learned : [])
+        .map((x) => ({ text: toText(x), intimate: nsfwOn && !!x?.intimate }))
+        .filter((x) => x.text);
+      const nLove = love.length ? aff.addKnownItems(charId, 'knownLove', love) : 0;
+      const nReact = reactions.length ? aff.addKnownItems(charId, 'knownReactions', reactions) : 0;
+      if (nLove || nReact) console.log(`[affection] char#${charId}: +${nLove} love signs, +${nReact} reactions`);
+    } catch (e) {
+      console.warn('[affection] known items', e.message);
+    }
+  };
+
   try {
     const raw = await callChatAPIComplete(settings, systemPrompt, chatStr, 'memory');
     const parsed = parseMemoryEpisodePayload(raw);
     if (parsed?.skip === true) {
+      saveKnownFromParsed(parsed);
       db.prepare('UPDATE characters SET memory_last_msg_id=? WHERE id=?').run(maxId, charId);
       console.log(`[memory] char#${charId}: skip (nothing worth remembering)`);
       return { ok: true, saved: 0, skipped: true };
@@ -5875,11 +5979,29 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
             );
           }
         }
-        const epKws = JSON.stringify((topic.keywords || parsed.keywords || []).slice(0, 8));
+        const topicKwList = (topic.keywords || parsed.keywords || []).slice(0, 8);
+        const epKws = JSON.stringify(topicKwList);
         const epSal = Math.max(0.4, Math.min(1, parseFloat(topic.salience || parsed.salience) || 0.65));
-        topicEpisodeId = db.prepare(
-          `INSERT INTO memory_episodes (character_id, title, gist, keywords, msg_id_from, msg_id_to, date, salience, source) VALUES (?,?,?,?,?,?,?,?,?)`
-        ).run(charId, epTitle, epGist, epKws, minMsgId, maxId, memoryDate, epSal, episodeSource).lastInsertRowid;
+        const contId = parseInt(String(topic.continues_episode_id ?? '').replace(/\D/g, ''), 10);
+        const contEp = Number.isFinite(contId) && bridge.episodeIds.has(contId)
+          ? db.prepare('SELECT id, gist, keywords FROM memory_episodes WHERE id=? AND character_id=?').get(contId, charId)
+          : null;
+        if (contEp) {
+          // 续写只追加本窗新增，不改写旧 gist；太长时留起因和最近几段
+          let lines = [...String(contEp.gist || '').split('\n').filter(Boolean), epGist];
+          while (lines.length > 4 && lines.join('\n').length > 1200) lines.splice(1, 1);
+          let oldKws = [];
+          try { oldKws = JSON.parse(contEp.keywords || '[]'); } catch { /* ignore */ }
+          const mergedKws = JSON.stringify([...new Set([...(Array.isArray(oldKws) ? oldKws : []), ...topicKwList])].slice(0, 12));
+          db.prepare(
+            `UPDATE memory_episodes SET gist=?, keywords=?, msg_id_to=MAX(COALESCE(msg_id_to,0), ?), salience=MAX(COALESCE(salience,0), ?) WHERE id=?`
+          ).run(lines.join('\n'), mergedKws, maxId, epSal, contEp.id);
+          topicEpisodeId = contEp.id;
+        } else {
+          topicEpisodeId = db.prepare(
+            `INSERT INTO memory_episodes (character_id, title, gist, keywords, msg_id_from, msg_id_to, date, salience, source) VALUES (?,?,?,?,?,?,?,?,?)`
+          ).run(charId, epTitle, epGist, epKws, minMsgId, maxId, memoryDate, epSal, episodeSource).lastInsertRowid;
+        }
         episodeIds.push(topicEpisodeId);
         if (!episodeId) episodeId = topicEpisodeId;
       }
@@ -5990,6 +6112,7 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
       } catch (e) {
         console.warn('[self-view] memory merge', e.message);
       }
+      saveKnownFromParsed(parsed);
       // 记忆总结后不再自动刷秘密簿（避免每轮总结都写备忘/心事）；秘密簿改由每日 cron / 手动补写
       console.log(`[memory] char#${charId}: episode#${episodeIds.join(',') || episodeId} + ${saved} entries (up to msg#${maxId})`);
       try {
@@ -6000,6 +6123,7 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
       push('memory_updated', { characterId: charId });
       return { ok: true, saved, episodeId };
     } else {
+      saveKnownFromParsed(parsed);
       db.prepare('UPDATE characters SET memory_last_msg_id=? WHERE id=?').run(maxId, charId);
       console.log(`[memory] char#${charId}: batch processed, nothing saved (filtered or empty)`);
       return { ok: true, saved: 0 };
@@ -6078,13 +6202,10 @@ async function captureSalientMoment(charId, userMsgId, trigger = 'keyword') {
   if (!msgs.length) return;
   if (trigger === 'keyword' && msgs.length < 2) return;
 
-  const chatStr = msgs.map(m => {
-    const name = m.role === 'user' ? (settings.username || '旅人') : char.name;
-    const ts = formatMemoryContextTimestamp(m.timestamp, tz);
-    return `${name}（${ts}）：${formatMessageForAi(m)}`;
-  }).join('\n');
+  const salientUser = settings.username || '旅人';
+  const chatStr = msgs.map((m) => memoryTranscriptLine(m, char.name, salientUser, tz)).join('\n');
 
-  const systemPrompt = trigger === 'plan'
+  const systemPrompt = `${trigger === 'plan'
     ? `用户提到了出行/近期安排/具体计划（如旅游、出差、考试、搬家等）。仅当对话中有**具体、可长期引用**的时间或事实（去哪儿、何时、做什么）时，输出 JSON：
 {"episode_title":"…","episode_gist":"80-160字，含日期时段+核心安排","keywords":["…"],"memories":[{"category":"约定|待办|重要时刻|偏好与习惯","content":"60-120字，只写关键锚点","weight":0.85}]}
 content 必须以「YYYY年M月D日+时段（清晨/上午/中午/下午/晚上/夜里/夜深了），」开头（说话当天）。人称：「我」=${char.name}，用户称「对方」或「${settings.username || '旅人'}」；禁止用「你」指用户，禁止第三人称旁白。
@@ -6111,7 +6232,8 @@ content 必须以「YYYY年M月D日+时段（清晨/上午/中午/下午/晚上/
 只写：提出情境、约定内容、是否确认。memories 默认 1 条，禁止与 gist 互相复述。
 【具体词】用户亲口说的具体词（药名、地名、店名、物品名、品牌、数字与约定原文等）必须原样留下；可补概括，但不能只用概括替换原词。
 【偏好与习惯】对方明确说出的用「对方」；我自己明确说出的用「我」。禁止「好像喜欢」类无根据猜测。
-禁止记录：单纯情绪、玩笑、无前后文的一句。若无实质信息 → {"skip":true}。只输出 JSON。`;
+禁止记录：单纯情绪、玩笑、无前后文的一句。若无实质信息 → {"skip":true}。只输出 JSON。`}
+${memoryTranscriptPersonRule(char.name, salientUser)}`;
 
   const url = (settings.memory_api_url || settings.chat_api_url || '').trim();
   const apiKey = (settings.memory_api_key || settings.chat_api_key || '').trim();
@@ -7144,11 +7266,8 @@ async function extractDailyReminderTodos(charId, targetDate) {
       openHint = `\n【已有待办】勿重复：\n${openTodos.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n`;
     }
   } catch { /* ignore */ }
-  const chatStr = msgs.map(m => {
-    const name = m.role === 'user' ? (settings.username || '旅人') : char.name;
-    const ts = formatMemoryContextTimestamp(m.timestamp, tz);
-    return `${name}（${ts}）：${formatMessageForAi(m)}`;
-  }).join('\n');
+  const todoUser = settings.username || '旅人';
+  const chatStr = msgs.map((m) => memoryTranscriptLine(m, char.name, todoUser, tz)).join('\n');
 
   const systemPrompt = `你是待办提炼助手。只从对话中提取「有明确到期时点的提醒/约定要做的事」。
 输出 JSON（不要 markdown）：
@@ -7164,7 +7283,8 @@ ${openHint}【时间规则·极重要】
    例：对话在 2026年7月27日，用户说「明天中午记得拍给我看」→
    「2026年7月27日晚上，对方让我在【到期：2026年7月28日中午】拍照片发给对方，我表示会记得。」
 3）禁止正文只留「明天中午」而不写具体年月日。
-【人称】「我」=${char.name}；用户称「对方」或「${settings.username || '旅人'}」。禁止用「你」指用户，禁止第三人称旁白。
+【人称】「我」=${char.name}；用户称「对方」或「${todoUser}」。禁止用「你」指用户，禁止第三人称旁白。
+${memoryTranscriptPersonRule(char.name, todoUser)}
 若当天没有任何待办 → {"skip":true,"todos":[]}。只输出 JSON。`;
 
   const url = (settings.memory_api_url || settings.chat_api_url || '').trim();
@@ -8998,10 +9118,12 @@ function pickImpressionCandidates(charId, contextText = '', {
   max = IMPRESSION_PROMPT_MAX,
   perCat = IMPRESSION_PROMPT_PER_CAT,
   includeStanding = false,
+  focusText = null,
 } = {}) {
   try { expandLegacyImpressions(charId); } catch {}
   const ctx = String(contextText || '');
   const ctxLower = ctx.toLowerCase();
+  const focusLower = focusText != null ? String(focusText).toLowerCase() : null;
   const cluster = require('./portrait-cluster-helper');
   try { cluster.ensureClusterColumns(); } catch {}
   const voice = cluster.getVoiceCtx(charId);
@@ -9073,11 +9195,17 @@ function pickImpressionCandidates(charId, contextText = '', {
       if (score <= 0) continue;
       if (row.confirmed !== 0) score += 1;
       const note = String(row.note || '').trim();
+      // 对方这一句亲口说到了卡里的词；只是同类话题（都在聊吃的）不算
+      const directHit = focusLower == null ? null : (
+        kws.some((k) => { const kk = String(k).toLowerCase(); return kk.length >= 2 && focusLower.includes(kk); })
+        || facts.some((t) => t.length >= 2 && focusLower.includes(t.toLowerCase()))
+      );
       scored.push({
         cat, facts, note, score, confirmed: row.confirmed !== 0, id: row.id,
         standing: isStandingPortraitItem(cat, blob),
         vecScore: vec,
         keywordHit: !!(keywordHit || semanticHit || topicAloneOk),
+        directHit,
       });
     }
   }
@@ -9139,10 +9267,11 @@ function formatCatImpressionLines(items) {
   }).join('\n');
 }
 
-/** 印象注入：只给事实，不套「你想起来她」句式 */
+/** 印象注入：只给事实，不套「你想起来她」句式；同卡相关事实一起给，免得一条顶替整类 */
 function formatFuzzyImpressionLines(items) {
   return items.map((p) => {
-    const fact = String((p.facts && p.facts[0]) || p.content || '').trim();
+    const facts = (Array.isArray(p.facts) && p.facts.length ? p.facts : [p.content]).map((f) => String(f || '').trim()).filter(Boolean);
+    const fact = facts.slice(0, 3).join('；');
     if (!fact) return '';
     const soft = fact
       .replace(/^(她|他|TA|Ta|ta|对方|用户)\s*/u, '')
@@ -9165,7 +9294,7 @@ function formatImpressionCandidates(picked, voice, opts = {}) {
     const lines = formatFuzzyImpressionLines(picked);
     if (!lines) return '';
     const parts = [
-      `【相关印象】这轮话勾起的；点到了就接上，别装不记得，别念档案。`,
+      `【你对TA的了解】这是你目前知道的一点点，不是TA的全部——TA喜欢的、在意的远比这些多。别拿这几条去套TA，也不用每次聊到相关的都搬出来；对方这会儿要是说了新的，那才是你想记住的。`,
       lines,
     ];
     if (usageHint) parts.push(usageHint);
@@ -9173,7 +9302,7 @@ function formatImpressionCandidates(picked, voice, opts = {}) {
   }
   const readThru = picked.filter((p) => p.standing || p.cat === '性格' || p.injectMode === 'background_only');
   const topical = picked.filter((p) => !(p.standing || p.cat === '性格' || p.injectMode === 'background_only'));
-  const parts = [`【相关印象】这轮话勾起的；点到了就接上，别装不记得，别念档案。`];
+  const parts = [`【你对TA的了解】这是你目前知道的一点点，不是TA的全部。别拿这几条去套TA，也不用每次聊到相关的都搬出来。`];
   if (readThru.length) {
     parts.push(formatCatImpressionLines(readThru));
   }
@@ -9539,7 +9668,7 @@ function startCronJobs(interactFn, npcInteractFn, ownerNpcReplyFn) {
     }
   });
 
-  // 夜里：聊天碎片 → 整天事记 → 有用讯息 + 画像；日程经过 → 自我看法
+  // 夜里：聊天碎片 → 整天事记 → 有用讯息 + 画像；日程经过 → 自我看法 → 自我审视（了解TA多少/哪里想当然/白天的别扭）
   schedule('20 3 * * *', async () => {
     console.log('[cron] 消化昨天：事记 + 画像 + 自我看法');
     try {
@@ -9567,6 +9696,12 @@ function startCronJobs(interactFn, npcInteractFn, ownerNpcReplyFn) {
           if (cog?.ok) console.log(`[cron] cognition char#${c.id} user=${cog.user} self=${cog.self}`);
         } catch (e) {
           console.warn(`[cron] cognition char#${c.id}`, e.message);
+        }
+        try {
+          const sr = await require('./self-review-helper').runSelfReview(c.id, yesterday, { settings });
+          if (sr?.ok) console.log(`[cron] self review char#${c.id} gaps=${sr.gaps} misreads=${sr.misreads} conflict=${sr.conflict}`);
+        } catch (e) {
+          console.warn(`[cron] self review char#${c.id}`, e.message);
         }
         try {
           const leaf = lifeFill.leafIdleChat(c.id, yesterday);

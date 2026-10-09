@@ -361,7 +361,9 @@ async function digestNarrative(charId, narrative, reason, evidenceFrags = []) {
 3）此拍心境：用两三句话写此刻你对这件事怎么想（不要只写一个词，不要长篇宣泄）
 4）整条线心境：再用两三句话写整根主枝现在怎么看；若是续挂，更新这一段，旧拍的心境留在时间线里
 心情必须写成「心情：${moodZh}。」（官方心情词只这一个：${moodList}。它决定这根枝枯得快慢，不要换成花词或别的词。）
-纪律：有碎片依据的事实才写；用户称「${userName}」亦可，但主体视角是你（${char.name}）在回忆。
+纪律：有碎片依据的事实才写；用户称「对方」或「${userName}」，「我」只指你（${char.name}），主体视角是你在回忆。
+${require('./memory-brain-helper').MEMORY_ACTOR_RULE}
+- 旧正文和证据碎片说法冲突时，以证据碎片为准，不要沿用旧正文里的方向。
 【忌流水账·硬性】融合成一条发展线，不要把证据碎片原文拼接；同一导火索/同一句态度/同一个结果只出现一次；只留关键转折，省略琐碎过程。
 落笔前先在心里回答（不要把问答写进正文）：
 1. 这条新碎片跟哪个旧记忆点最相关？（语境判断，不是关键词匹配）
@@ -677,7 +679,8 @@ id 必须用给定的真实 id。`,
 {"kind":"event|daily|affection","title":"8字内编名","content":"①这件事是什么 ②时间线关键节点 ③我现在怎么看（短），共${CONTENT_SOFT_MAX}字内","components":[{"key":"core","name":"主题短名","type":"core|person|thing|place","aliases":["别称"]}]}
 kind 三选一：event=有后续发展的事；daily=反复日常习惯（运动/通勤/作息），无强剧情；affection=关系起伏（表白/冷战/和好）。不要用 user/self（画像另走）。
 必须有一项 type=core。其余只写证据里出现的人/物/场景。同类零件必须拆开（两个同事不要合成一项）。aliases 不要用能套到另一个零件上的泛称。
-用户可称「${userName}」。延续事件必须写进同一点，禁止拆成多件事；勿写成日记宣泄。`,
+用户称「对方」或「${userName}」，「我」只指你自己。延续事件必须写进同一点，禁止拆成多件事；勿写成日记宣泄。
+${require('./memory-brain-helper').MEMORY_ACTOR_RULE}`,
       keepFrags.map((f) => `- [#${f.id}] ${f.content}`).join('\n'),
       'memory'
     );

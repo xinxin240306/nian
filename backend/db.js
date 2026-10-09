@@ -604,6 +604,7 @@ async function initDB() {
     `ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'current'`,
     `ALTER TABLE memories ADD COLUMN source TEXT DEFAULT 'chat'`,
     `ALTER TABLE characters ADD COLUMN affection_state TEXT DEFAULT ''`,
+    `ALTER TABLE characters ADD COLUMN self_review TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN vocal_clips TEXT DEFAULT '[]'`,
     `ALTER TABLE characters ADD COLUMN voice_id_nsfw TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN call_video TEXT DEFAULT ''`,

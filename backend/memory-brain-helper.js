@@ -9,6 +9,25 @@ const HEALTH_BODY_RE = /头疼|头痛|头晕|难受|不舒服|生病|感冒|发�
 const HEALTH_MED_CUE_RE = /布洛芬|止痛药|退烧药|感冒药|消炎药|吃了?.{0,6}药|吃药|服药|药效|例假|姨妈|月经|痛经|生理期/;
 const HEALTH_MED_EXPAND = ' 布洛芬 止痛药 吃药 药 例假 姨妈 痛经 生理期 肚子难受';
 
+/** 所有改写记忆的提示词共用：模型最常犯的是词都对、谁对谁弄反 */
+const MEMORY_ACTOR_RULE = `【谁对谁·硬性】
+- 每个分句都要有明确主语（我 / 对方），不许省略主语让人猜。
+- 给、送、拍给、发给、答应、提醒、道歉、生气、喜欢这类有方向的动作，必须写清谁发出、给了谁；照抄材料里的方向，绝不能对调。
+- 材料里已经写好的「我=角色、对方=用户」只照搬，不要重新换算人称。
+- 拿不准方向的那句宁可不写，也不要猜。`;
+
+/** 在句子边界截断：先找句号类，再找逗号类，实在没有才硬切 */
+function clipAtClause(text, max) {
+  const s = String(text || '').replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  const head = s.slice(0, max);
+  const strong = Math.max(head.lastIndexOf('。'), head.lastIndexOf('！'), head.lastIndexOf('？'), head.lastIndexOf('；'));
+  if (strong >= max * 0.45) return head.slice(0, strong + 1);
+  const weak = Math.max(head.lastIndexOf('，'), head.lastIndexOf('、'), head.lastIndexOf(','));
+  if (weak >= max * 0.6) return `${head.slice(0, weak)}…`;
+  return `${head}…`;
+}
+
 function expandHealthRetrievalCue(text) {
   const t = String(text || '');
   if (!t.trim()) return t;
@@ -44,6 +63,9 @@ const FLASH_MAX = 2;
 /** 送给理解层的脑海候选可略多于最终注入条数（一簇 gist + 细节） */
 const FLASH_CANDIDATE_CAP = 6;
 const CLUSTER_DETAIL_MAX = 2;
+/** 记忆句 60-120 字 + 「三天前，」前缀；上限太短会切掉后半句的结果和宾语 */
+const FLASH_LINE_MAX = 140;
+const EPISODE_LINE_MAX = 170;
 const PREF_KNOW_SLOTS = 3;
 const DUE_TODO_SLOTS = 3;
 /** 闲聊零携带：相关度门槛抬高，擦边不闪 */
@@ -293,6 +315,24 @@ function todoActionStem(content) {
   return t.slice(0, 18);
 }
 
+const TODO_ACT_RE = /拍|发|自拍|打卡|提醒|吃药|买|回消息|打电话|联系|交|提交|叫.{0,2}起床|陪|接|送|带/;
+
+/** 待办由谁来做：char=我、user=对方，判断不了返回空 */
+function todoActor(content) {
+  const t = String(content || '')
+    .replace(/【到期[：:][^】]+】/g, '')
+    .replace(/\d{4}年\d{1,2}月\d{1,2}日[^，,]{0,10}[，,]?\s*/g, '');
+  const at = t.search(TODO_ACT_RE);
+  if (at < 0) return '';
+  const lead = t.slice(0, at).split(/[，。！？；,]/).pop() || '';
+  let userName = '';
+  try { userName = String(getSettings().username || '').trim(); } catch { /* ignore */ }
+  const userAt = Math.max(lead.lastIndexOf('对方'), lead.lastIndexOf('用户'), userName ? lead.lastIndexOf(userName) : -1);
+  const charAt = lead.lastIndexOf('我');
+  if (userAt < 0 && charAt < 0) return '';
+  return userAt > charAt ? 'user' : 'char';
+}
+
 function todosAreSimilar(a, b) {
   const ca = String(a || '');
   const cb = String(b || '');
@@ -301,6 +341,9 @@ function todosAreSimilar(a, b) {
   const dueA = parseTodoDueDate(ca);
   const dueB = parseTodoDueDate(cb);
   if (dueA && dueB && dueA !== dueB) return false;
+  const actorA = todoActor(ca);
+  const actorB = todoActor(cb);
+  if (actorA && actorB && actorA !== actorB) return false;
   const stemA = todoActionStem(ca);
   const stemB = todoActionStem(cb);
   if (!stemA || !stemB) return false;
@@ -1584,20 +1627,19 @@ function pickIncidentalFlash(char, cue, opts = {}) {
     };
   }
   const title = String(best.n.title || '').trim();
-  const stance = String(best.n.stance || best.n.content || '').replace(/\s+/g, ' ').trim().slice(0, 72);
-  return { cue, line: [title, stance].filter(Boolean).join(' · ').slice(0, 90) };
+  const stance = clipAtClause(bindFlashPersons(String(best.n.stance || best.n.content || ''), char.name, settings.username || '旅人'), 100);
+  return { cue, line: clipAtClause([title, stance].filter(Boolean).join(' · '), FLASH_LINE_MAX) };
 }
 
-/** 脑海人称：存稿「我」=角色、用户=对方；旧稿第三人称角色名→「你」。禁止用「自己」——模型会把对方的「自己」读成角色。 */
+/** 脑海人称：存稿「我」=角色、用户=对方；旧稿第三人称角色名也落成「我」。禁止用「自己」——模型会把对方的「自己」读成角色。 */
 function bindFlashPersons(text, charName, username) {
   let body = String(text || '');
   if (!body) return '';
   const user = username || '旅人';
-  // 旧第三人称存稿：角色名 → 你（聊天系统里你=角色）
-  if (charName) body = body.split(charName).join('你');
+  // 同一块里角色只能有一个称呼：新稿是「我」，旧稿的角色名也换成「我」，不能一半「我」一半「你」
+  if (charName) body = body.split(charName).join('我');
   if (user) body = body.split(user).join('对方');
   body = body.replace(/用户/g, '对方');
-  // 新第一人称存稿保留「我」——【脑海】是心里闪过的私货，第一人称更贴；不要把「我」改成「你」以免和旧稿搅在一起
   body = body.replace(/对方(.{0,8})自己/g, '对方$1TA');
   body = body.replace(/第三人称客观叙述[：:]?/g, '');
   body = body.replace(/人称·硬性[：:]?/g, '');
@@ -1611,10 +1653,22 @@ function toMindFlashLine(mem, todayStr, charName, username) {
   // 偏好/关系/心事是「一直知道」的事，不要加「三天前」——加了就像在念日记
   const ongoing = cat === '偏好与习惯' || cat === '人物关系' || cat === '秘密/心事'
     || cat === '待办' || cat === '约定';
-  if (ongoing) return body.replace(/\s+/g, ' ').slice(0, 90);
+  if (ongoing) return clipAtClause(body, FLASH_LINE_MAX);
   const when = relativeDayLabel(String(mem.date || '').slice(0, 10), todayStr);
   const line = when && when !== '今天' ? `${when}，${body}` : body;
-  return line.replace(/\s+/g, ' ').slice(0, 90);
+  return clipAtClause(line, FLASH_LINE_MAX);
+}
+
+/** 续写过的 episode 是「起因\n后来…」多行：起因和最新进展都要留，中间可省 */
+function episodeFlashLine(gist, charName, username) {
+  const parts = String(gist || '').split('\n')
+    .map((s) => bindFlashPersons(stripMemoryDatePrefix(s), charName, username).trim())
+    .filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return clipAtClause(parts[0], EPISODE_LINE_MAX);
+  const first = clipAtClause(parts[0], Math.round(EPISODE_LINE_MAX * 0.45));
+  const last = clipAtClause(parts[parts.length - 1], Math.round(EPISODE_LINE_MAX * 0.55));
+  return `${first} 后来：${last}`;
 }
 
 /** 闪回：系统筛出 → 心里当背景 → 心里草稿再决定说不说 */
@@ -1708,6 +1762,8 @@ function collectFlashCandidates(char, selected, opts = {}) {
             id: pinned.m.id,
             block: '脑海',
             kind: 'memory',
+            episodeId: pinned.m.episode_id || null,
+            category: pinned.m.category || '',
             clusterId: memCluster.get(Number(pinned.m.id)) || `mem:${pinned.m.id}`,
             text: line,
             score: pinned.score + 1,
@@ -1742,7 +1798,7 @@ function collectFlashCandidates(char, selected, opts = {}) {
         && String(m.episode_id) === String(ep.id));
       if (!uses) continue;
     }
-    const line = bindFlashPersons(stripMemoryDatePrefix(gist), char.name, username);
+    const line = episodeFlashLine(gist, char.name, username);
     if (!line) continue;
     push({
       key: epCid,
@@ -1750,7 +1806,7 @@ function collectFlashCandidates(char, selected, opts = {}) {
       block: '脑海',
       kind: 'episode',
       clusterId: epCid,
-      text: line.slice(0, 90),
+      text: line,
       score: 1.0,
       vecScore: 0.55,
       kwHit: true,
@@ -1772,6 +1828,8 @@ function collectFlashCandidates(char, selected, opts = {}) {
       id: m.id,
       block: '脑海',
       kind: 'memory',
+      episodeId: m.episode_id || null,
+      category: m.category || '',
       clusterId: cid,
       text: line,
       score,
@@ -1841,7 +1899,7 @@ function formatShortTermBlock(charId, todayStr, charName, username, contextText 
     seen.add(key);
     keys.push(key);
     const time = extractMemoryTime(m) || String(m.created_at || '').slice(11, 16);
-    lines.push(`· ${time ? `${time} ` : ''}${body.replace(/\s+/g, ' ').slice(0, 80)}`);
+    lines.push(`· ${time ? `${time} ` : ''}${clipAtClause(body, 120)}`);
   }
   if (!lines.length) return { text: '', keys: [] };
   return {
@@ -1852,10 +1910,7 @@ function formatShortTermBlock(charId, todayStr, charName, username, contextText 
 
 function compactNarrativeGist(n, charName, username) {
   const title = String(n?.title || n?.stance || '').replace(/\s+/g, ' ').trim().slice(0, 24);
-  const body = bindFlashPersons(stripMemoryDatePrefix(String(n?.content || '')), charName, username)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
+  const body = clipAtClause(bindFlashPersons(stripMemoryDatePrefix(String(n?.content || '')), charName, username), 160);
   if (title && body && !body.startsWith(title)) return `${title}：${body}`;
   return body || title;
 }
@@ -1929,16 +1984,23 @@ function formatMindFlashBlock(char, selected, opts = {}) {
   const backgroundFlashKeys = opts.backgroundFlashKeys instanceof Set ? opts.backgroundFlashKeys : null;
   const flashCandidates = collectFlashCandidates(char, selected, opts);
 
+  let narrativeShown = false;
   if (clusterCarry && narrSpeak.length) {
     for (const n of narrSpeak.slice(0, eventsMax)) {
       const gist = compactNarrativeGist(n, char.name, username);
-      if (gist) pushFlash(gist, flashes);
+      if (gist && pushFlash(gist, flashes)) narrativeShown = true;
     }
   }
 
+  // 同一件事只讲一个版本：叙事已讲过就不再放 episode 摘要；摘要已讲过就不再放同 episode 的复述，约定/待办原文除外
+  const shownEpisodes = new Set();
   const takeFlash = (c, into, cap) => {
     if (into.length >= cap) return false;
+    if (c.kind === 'episode' && narrativeShown) return false;
+    if (c.kind === 'memory' && c.episodeId && shownEpisodes.has(String(c.episodeId))
+      && c.category !== '待办' && c.category !== '约定') return false;
     if (!pushFlash(c.text, into)) return false;
+    if (c.kind === 'episode') shownEpisodes.add(String(c.id));
     if (c.kind === 'memory' && c.id != null && Number.isFinite(Number(c.id))) flashedIds.push(c.id);
     return true;
   };
@@ -1981,15 +2043,13 @@ function formatMindFlashBlock(char, selected, opts = {}) {
     const lines = [];
     const flashBodies = new Set([...flashes, ...bgFlashes].map((f) => f.slice(0, 20)));
     for (const m of prefKnow) {
-      const line = bindFlashPersons(stripMemoryDatePrefix(m.content || ''), char.name, username)
-        .replace(/\s+/g, ' ')
-        .slice(0, 72);
+      const line = clipAtClause(bindFlashPersons(stripMemoryDatePrefix(m.content || ''), char.name, username), 100);
       if (!line || line.length < 4) continue;
       if (flashBodies.has(line.slice(0, 20))) continue;
       lines.push(`· ${line}`);
     }
     if (lines.length) {
-      prefKnowPart = `【对方偏好·默记】心里知道即可，用来调整语气/态度。对方本轮没在说这件事时，不要主动点名翻出来；禁止「你说过喜欢…」念稿，禁止反复提亲密细节。
+      prefKnowPart = `【对方偏好·默记】你知道TA的这些小习惯，会不自觉地照顾到，但不会挂在嘴上；TA没在说这个时不点名翻出来，也不会说「你说过喜欢…」。这只是你知道的一部分。
 ${lines.join('\n')}`;
     }
   }
@@ -1998,7 +2058,7 @@ ${lines.join('\n')}`;
   if (narrBg.length) {
     try {
       const soft = narrBg.map((n) => {
-        const t = String(n.stance || n.title || n.content || '').replace(/\s+/g, ' ').slice(0, 48);
+        const t = clipAtClause(bindFlashPersons(String(n.stance || n.title || n.content || ''), char.name, username), 60);
         return t ? `· ${t}` : '';
       }).filter(Boolean);
       if (soft.length) bgFlashes.push(...soft.map((s) => s.replace(/^·\s*/, '')));
@@ -2007,16 +2067,16 @@ ${lines.join('\n')}`;
 
   let bgPart = '';
   if (bgFlashes.length) {
-    bgPart = `【心里有数】隐约记得这些，只影响语气和态度，这轮不要主动提起或点名翻旧账。
+    bgPart = `【心里有数】这些你隐约记得。对方自己说起时你接得上；对方没往这儿说，你也不会特意往这上面带。
 ${bgFlashes.map((f) => `· ${f}`).join('\n')}`;
   }
 
   let flashPart = '';
   if (flashes.length) {
-    flashPart = `【脑海】对方这轮话勾起的旧事（系统已筛过）：
+    flashPart = `【脑海】对方这句话让你想起的：
 ${flashes.map((f) => `· ${f}`).join('\n')}`;
     if (selected._healthResolved) {
-      flashPart += '\n【身体】对方说过已经没事了；除非这轮又主动提身体不舒服，否则不要再问还难受吗。';
+      flashPart += '\n对方说过身体已经没事了，你放下心了；除非TA又说不舒服，不会再追着问还难受吗。';
     }
   }
 
@@ -2038,6 +2098,7 @@ ${flashes.map((f) => `· ${f}`).join('\n')}`;
   const shortTermPart = shortTerm.text;
   if (!narrativeBlock && !flashPart && !incidentalPart && !shortTermPart && !prefKnowPart && !bgPart) return '';
   const parts = [shortTermPart, prefKnowPart, bgPart, narrativeBlock, flashPart, incidentalPart].filter(Boolean);
+  parts.unshift(`（下面是你自己心里记着的：里面的「我」是你自己，「对方」是${username}——和聊天里对方口中的「我」不是同一个人。）`);
   if (flashPart || incidentalPart || prefKnowPart || narrativeBlock || bgPart) parts.push(sayHint);
   return parts.join('\n\n');
 }
@@ -2910,6 +2971,8 @@ function getBrainTidy(charId) {
 }
 
 module.exports = {
+  MEMORY_ACTOR_RULE,
+  clipAtClause,
   SESSION_GAP_MS,
   getCharCorpus,
   invalidateCharCorpus,

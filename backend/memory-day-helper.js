@@ -95,6 +95,8 @@ async function splitDayIntoPoints(charId, day, frags, { settings, maxPoints, mod
     ? `\n- 这是「修剪」：这些碎片曾可能被错误焊进同一根枝。标题必须让人一眼看懂在说哪件事；禁止玄乎合成词\n- 仍然遵守「同一件事合成一个记忆点」：起因/经过/后续哪怕隔了别的话题也要并回\n- 只有两件独立的事碰巧被焊在一起时才拆开；不要把一件事的不同阶段拆成多根主枝`
     : '';
 
+  let actorRule = '';
+  try { actorRule = `\n${require('./memory-brain-helper').MEMORY_ACTOR_RULE}`; } catch { /* ignore */ }
   const allowedIds = new Set(use.map((f) => f.id));
   const listing = use
     .map((f) => `#${f.id} [${String(f.created_at || '').slice(11, 16) || '--:--'}][${f.category || ''}] ${f.content}`)
@@ -126,7 +128,8 @@ async function splitDayIntoPoints(charId, day, frags, { settings, maxPoints, mod
 - components 必须有且只有一项 type=core，那是「这件事本身」，name 用以后还能认出这件事的短名
 - 其余 components 写这件事牵涉到的人(person)、物(thing)、场景背景(place)，只写碎片里真出现过的
 - 同类必须拆开：两个不同的人不要合成「同事」；aliases 只写这个零件自己的别称，禁止用能套到别的零件上的泛称
-- memory_ids 必须用上面给的真实 id${pruneHint}`,
+- memory_ids 必须用上面给的真实 id
+- 【人称】碎片是角色第一人称：「我」=角色本人，「对方」=用户。summary 照这个写，不要换成名字或「你」${actorRule}${pruneHint}`,
       `【${day} 的碎片，按时间顺序】\n${listing}`,
       'memory'
     );

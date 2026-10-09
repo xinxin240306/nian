@@ -101,10 +101,9 @@ function relevanceOf(candidate) {
 }
 
 function modeFromRelevance(rel, cfg, { keywordHit = false } = {}) {
-  // 对方这轮话点到旧事（关键词命中）→ 允许进【脑海】想起，不能只闷在潜意识
-  if (keywordHit) return 'usable_now';
   if (rel >= cfg.T_speak) return 'usable_now';
-  if (rel >= cfg.T_retrieve) return 'background_only';
+  // 只擦到一个词：心里记得、对方说起来接得上，但不往外带
+  if (keywordHit || rel >= cfg.T_retrieve) return 'background_only';
   return 'skip';
 }
 
@@ -216,14 +215,13 @@ function ruleAssignModes({
       tag(key, rel >= cfg.T_retrieve ? 'background_only' : 'skip', 'topic_shift');
       continue;
     }
-    if (inCooldown(charId, key, cfg) && !kw) {
-      tag(key, 'background_only', 'cooldown');
+    if (inCooldown(charId, key, cfg)) {
+      tag(key, kw || rel >= cfg.T_retrieve ? 'background_only' : 'skip', 'cooldown');
       continue;
     }
     let mode = modeFromRelevance(rel, cfg, { keywordHit: kw });
-    // 对方点到的旧事不因明说预算被闷死
-    if (mode === 'usable_now' && budgetExhausted && !kw) mode = 'background_only';
-    tag(key, mode, budgetExhausted && mode === 'background_only' && !kw ? 'budget' : 'rule_score');
+    if (mode === 'usable_now' && budgetExhausted) mode = 'background_only';
+    tag(key, mode, budgetExhausted && mode === 'background_only' ? 'budget' : 'rule_score');
   }
 
   for (const n of narratives || []) {
@@ -244,12 +242,12 @@ function ruleAssignModes({
       tag(key, rel >= cfg.T_retrieve ? 'background_only' : 'skip', 'topic_shift');
       continue;
     }
-    if (inCooldown(charId, key, cfg) && !n.kwHit) {
-      tag(key, 'background_only', 'cooldown');
+    if (inCooldown(charId, key, cfg)) {
+      tag(key, n.kwHit || rel >= cfg.T_retrieve ? 'background_only' : 'skip', 'cooldown');
       continue;
     }
     let mode = modeFromRelevance(rel, cfg, { keywordHit: !!n.kwHit });
-    if (mode === 'usable_now' && budgetExhausted && !n.kwHit) mode = 'background_only';
+    if (mode === 'usable_now' && budgetExhausted) mode = 'background_only';
     tag(key, mode, 'rule_score');
   }
 
@@ -257,7 +255,7 @@ function ruleAssignModes({
     const key = String(p.id);
     const standing = !!(p.standing || p.cat === '性格');
     const rel = relevanceOf(p);
-    const kw = !!(p.keywordHit || (p.score && p.score >= 5));
+    const kw = p.directHit != null ? !!p.directHit : !!(p.keywordHit || (p.score && p.score >= 5));
     if (forceSpeak && (kw || rel >= cfg.T_retrieve)) {
       tag(key, standing ? 'background_only' : 'usable_now', 'hard_bypass');
       continue;
@@ -266,13 +264,13 @@ function ruleAssignModes({
       tag(key, 'background_only', 'standing');
       continue;
     }
-    if (inCooldown(charId, key, cfg) && !kw) {
+    if (inCooldown(charId, key, cfg)) {
       tag(key, 'skip', 'cooldown');
       continue;
     }
-    let mode = modeFromRelevance(rel, cfg, { keywordHit: kw });
-    // 话题印象：关键词点到 → 可想起；没点到且未过 speak 阈值 → skip
-    if (mode === 'background_only' && !kw) mode = 'skip';
+    // 话题印象：对方这句亲口说到这件事（kw=直接命中）才拿出来；只是聊到同一类话题不算
+    let mode = kw ? 'usable_now' : modeFromRelevance(rel, cfg);
+    if (mode === 'background_only') mode = 'skip';
     if (mode === 'usable_now' && budgetExhausted && !kw) mode = 'skip';
     tag(key, mode, 'rule_score');
   }
@@ -361,7 +359,7 @@ function capSpeakClusters(speakSet, clusterByKey, max) {
   return keep;
 }
 
-const MEMORY_USAGE_HINT = `对方点到的旧事要能接上，别装不记得；别念「你说过…」，别编没写到的。`;
+const MEMORY_USAGE_HINT = `这些是你心里本来就有的，不是要交代的事。对方说到了，你自然接得上；对方没往那儿说，就让它们待在心里——你眼下更在意的是对方现在这句话、现在这个人。不必为了显得记得而提起，也不会说「你说过…」；没记着的事就是不知道，不往里补。`;
 
 function logTurnDebug(payload) {
   try {
