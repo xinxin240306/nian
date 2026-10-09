@@ -106,7 +106,7 @@ function buildLivingSenseBlock(char, opts = {}) {
 
 /** 心里草稿：多想一层「日子/气候」，仍只两行标记，不增加可见套话 */
 function livingSenseThinkHint() {
-  return '【怎么看】里可带一句：我这边怎样、今天和对方怎样、这轮要不要理（续还是变了）。仍只写判断，禁止把说明抄进开口。';
+  return '心里可带一句：我这边怎样、今天和对方怎样、这轮要不要理（续还是变了）。仍只写进标记，禁止把说明抄进开口。';
 }
 
 module.exports = {
