@@ -252,8 +252,8 @@ function inferBeanFromCurrentMood(characterId) {
 }
 
 /**
- * 兜底：当天（或指定日）给所有角色贴心情豆。
- * 几乎没聊也贴——优先当天情绪日志，否则用此刻心情。
+ * 兜底：给指定日历日所有角色补心情豆（cron 只在次日凌晨补「昨天」）。
+ * 几乎没聊也贴——优先当日情绪日志，否则用此刻心情。
  * 不覆盖用户手动改过的角色贴。
  */
 function ensureAllCharsDayMood(dateStr) {

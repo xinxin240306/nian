@@ -312,19 +312,33 @@ async function consolidateDays(charId, { dateStr = '', settings, maxDays = CATCH
   let sideBranches = 0;
   let continued = 0;
 
+  // 当天要等次日凌晨再贴；整理任务若碰到「今天」的碎片，只挂树不贴豆
+  let localToday = '';
+  try {
+    const tz = String(s.timezone || 'Asia/Shanghai').trim() || 'Asia/Shanghai';
+    localToday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+  } catch {
+    localToday = new Date().toISOString().slice(0, 10);
+  }
+  const canStickMood = (day) => !localToday || String(day || '') < localToday;
+
   for (const { day, frags } of days) {
     const split = await splitDayIntoPoints(charId, day, frags, { settings: s });
     if (!split.points.length) {
       detail.push({ day, fragments: frags.length, points: 0, reason: split.reason });
       console.warn(`[memory-day] char#${charId} ${day}：${frags.length}条碎片没能分出记忆点（${split.reason}）`);
-      // 分不出记忆点也照样贴心情豆（按情绪日志 / 此刻心情）
-      try {
-        const stick = require('./day-mood-helper').autoStickCharDayMood(charId, day, { pointTitles: [] });
-        if (stick?.mood?.emojiCode) {
-          console.log(`[memory-day] char#${charId} ${day} 心情贴(无记忆点) → [${stick.mood.emojiCode}]`);
+      // 分不出记忆点也照样贴心情豆（按情绪日志 / 此刻心情）；仅已过去的日历日
+      if (canStickMood(day)) {
+        try {
+          const stick = require('./day-mood-helper').autoStickCharDayMood(charId, day, { pointTitles: [] });
+          if (stick?.mood?.emojiCode) {
+            console.log(`[memory-day] char#${charId} ${day} 心情贴(无记忆点) → [${stick.mood.emojiCode}]`);
+          }
+        } catch (e) {
+          console.warn('[memory-day] mood sticker', e.message);
         }
-      } catch (e) {
-        console.warn('[memory-day] mood sticker', e.message);
       }
       continue;
     }
@@ -349,16 +363,20 @@ async function consolidateDays(charId, { dateStr = '', settings, maxDays = CATCH
           : `延续(权重${r.score})`;
       console.log(`[memory-day] char#${charId} ${day}「${p.title}」→ ${label} 记忆点#${r.narrativeId}，${r.count}条`);
     }
-    // 当天整理成功 → 日历贴一颗角色心情小黄豆
-    try {
-      const titles = split.points.map((p) => p.title).filter(Boolean);
-      const stick = require('./day-mood-helper').autoStickCharDayMood(charId, day, { pointTitles: titles });
-      dayDetail.moodSticker = stick?.mood?.emojiCode || stick?.skipped || null;
-      if (stick?.mood?.emojiCode) {
-        console.log(`[memory-day] char#${charId} ${day} 心情贴 → [${stick.mood.emojiCode}]`);
+    // 整理成功 → 日历贴一颗角色心情小黄豆（仅已过去的日历日；当天等次日凌晨）
+    if (canStickMood(day)) {
+      try {
+        const titles = split.points.map((p) => p.title).filter(Boolean);
+        const stick = require('./day-mood-helper').autoStickCharDayMood(charId, day, { pointTitles: titles });
+        dayDetail.moodSticker = stick?.mood?.emojiCode || stick?.skipped || null;
+        if (stick?.mood?.emojiCode) {
+          console.log(`[memory-day] char#${charId} ${day} 心情贴 → [${stick.mood.emojiCode}]`);
+        }
+      } catch (e) {
+        console.warn('[memory-day] mood sticker', e.message);
       }
-    } catch (e) {
-      console.warn('[memory-day] mood sticker', e.message);
+    } else {
+      dayDetail.moodSticker = 'deferred_until_next_dawn';
     }
     detail.push(dayDetail);
   }

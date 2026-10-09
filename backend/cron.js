@@ -9523,8 +9523,8 @@ function startCronJobs(interactFn, npcInteractFn, ownerNpcReplyFn) {
     }
   });
 
-  // 日历心情豆兜底：几乎没聊也按此刻心情贴；不覆盖用户手改
-  const stickDayMoods = async ( whylabel ) => {
+  // 日历心情豆兜底：只贴「昨天」（当天要等次日凌晨再贴）；几乎没聊也按此刻心情补；不覆盖用户手改
+  schedule('15 3 * * *', async () => {
     try {
       const dayMood = require('./day-mood-helper');
       const settings = getSettings();
@@ -9532,16 +9532,12 @@ function startCronJobs(interactFn, npcInteractFn, ownerNpcReplyFn) {
       const today = getLocalDateStr(new Date(), tz);
       const yesterday = shiftDateStr(today, -1);
       const a = dayMood.ensureAllCharsDayMood(yesterday);
-      const b = dayMood.ensureAllCharsDayMood(today);
-      const stuck = [...(a.results || []), ...(b.results || [])].filter((x) => x.emoji).length;
-      console.log(`[cron] day-mood stick (${whylabel}) yesterday=${yesterday} today=${today} stuck=${stuck}`);
+      const stuck = (a.results || []).filter((x) => x.emoji).length;
+      console.log(`[cron] day-mood stick (03:15) day=${yesterday} stuck=${stuck}`);
     } catch (e) {
       console.warn('[cron] day-mood stick', e.message);
     }
-  };
-  schedule('15 3 * * *', async () => { await stickDayMoods('03:15'); });
-  // 夜里再贴一次「今天」，白天打开日历也能看到
-  schedule('40 23 * * *', async () => { await stickDayMoods('23:40'); });
+  });
 
   // 夜里：聊天碎片 → 整天事记 → 有用讯息 + 画像；日程经过 → 自我看法
   schedule('20 3 * * *', async () => {
