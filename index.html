@@ -1448,14 +1448,28 @@ function setCtxItemVisible(id, visible) {
   if (el) el.style.display = visible ? '' : 'none';
 }
 
+/** 气泡入库 id：分段泡 data-id 是 hist_母id_序，编辑/删除要用母消息 id */
+function resolveChatBubbleDbId(wrap) {
+  if (!wrap) return '';
+  const msgId = String(wrap.dataset?.msgId || '').trim();
+  const rawId = String(wrap.dataset?.id || '').trim();
+  if (msgId && /^\d+$/.test(msgId)) return msgId;
+  if (rawId.startsWith('hist_')) {
+    const mid = msgId || rawId.split('_')[1] || '';
+    return /^\d+$/.test(mid) ? mid : '';
+  }
+  if (!rawId || rawId.startsWith('tmp') || rawId.startsWith('seg_')
+    || rawId.startsWith('vseg_') || rawId.startsWith('hist_')) return '';
+  return rawId;
+}
+
 /** 不依赖 chat-page 模块：文字气泡可编辑（纯图/卡除外） */
 function canEditChatBubbleWrap(wrap) {
   if (!wrap) return false;
   const role = wrap.dataset?.role || '';
   if (role !== 'user' && role !== 'assistant') return false;
-  const id = String(wrap.dataset?.msgId || wrap.dataset?.id || '');
-  if (!id || id.startsWith('tmp_') || id.startsWith('tmp') || id.startsWith('seg_')
-    || id.startsWith('vseg_') || id.startsWith('hist_')) return false;
+  const id = resolveChatBubbleDbId(wrap);
+  if (!id) return false;
   const text = (
     wrap.querySelector('.voice-transcript-inner')?.textContent
     || wrap.querySelector('.voice-text-src')?.textContent
@@ -1466,6 +1480,7 @@ function canEditChatBubbleWrap(wrap) {
   if (!text) return false;
   return true;
 }
+window.resolveChatBubbleDbId = resolveChatBubbleDbId;
 window.canEditChatBubbleWrap = canEditChatBubbleWrap;
 
 function openChatBubbleEditor(bubbleId, presetText) {
@@ -1637,8 +1652,7 @@ function bindContextMenuActions() {
     const item = e.target?.closest?.('.context-item');
     if (!item || !menu.contains(item)) return;
     if (item.style.display === 'none') return;
-    // 挡住长按松手误触；窗口已缩短，稍后点按即可
-    if (Date.now() < _ctxIgnoreUntil) return;
+    // 菜单项本身立刻可点；_ctxIgnoreUntil 只挡长按松手砸到气泡/遮罩，不能静默吞掉「编辑」
     e.preventDefault();
     e.stopPropagation();
     runCtxAction(item.dataset.ctxAction);
@@ -1653,7 +1667,8 @@ function showContextMenu(e, msgId, role) {
   e.stopPropagation?.();
   const wrap = getBubbleWrapFromEvent(e);
   ctxMsgEl = wrap;
-  ctxMsgId = wrap?.dataset?.id || msgId || null;
+  // 优先母消息 id，避免 hist_/seg_ 点编辑像没反应
+  ctxMsgId = resolveChatBubbleDbId(wrap) || wrap?.dataset?.id || msgId || null;
   ctxMsgRole = wrap?.dataset?.role || role || null;
   const menu = document.getElementById('context-menu');
   if (!menu) return;

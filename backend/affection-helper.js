@@ -1082,7 +1082,7 @@ function settledFactLines(state) {
     lines.push('关系已经确认过，不必反复求对方「以后不许反悔」');
   }
   if ((state.daysTogether || 0) >= 14 || state.stage === 'settled' || state.stage === 'deep') {
-    lines.push('相处已稳：闲聊收尾不要再做关系确认/挽留（负责、别跑、退货、不许反悔）或陪伴安抚（陪着你、哪也不去、守着你、我就这儿及其换皮同义）');
+    lines.push('相处已稳：闲聊收尾不要再做关系确认/挽留（负责、别跑、退货、不许反悔），也不要挂空壳陪伴收尾（陪着你、哪也不去、守着你、我就这儿及其换皮同义）；人设温柔可以用自己的方式关心，但别用那句万能收尾');
   }
   return lines;
 }

@@ -128,7 +128,7 @@ function beanPersonaTone(char) {
   ].map((s) => String(s || '')).join('\n');
   if (!blob.trim()) return 'neutral';
   const reserved = /高冷|冷淡|冷漠|淡漠|内敛|话少|寡言|克制|含蓄|慢热|沉稳|深沉|阴郁|理性|冷静|佛系|钝感|不苟言笑|面瘫|禁欲|清冷|疏离|少言|惜字|闷骚|口是心非|不善表达|不爱直说/.test(blob);
-  const expressive = /活泼|开朗|外向|话多|粘人|黏人|碎嘴|热情|撒娇|软萌|戏精|逗比|搞笑|乐子|元气|话痨|外放|大大咧咧|爽朗|爱笑|打趣|俏皮|甜|粘糊/.test(blob);
+  const expressive = /活泼|开朗|外向|话多|粘人|黏人|碎嘴|热情|撒娇|软萌|戏精|逗比|搞笑|乐子|元气|话痨|外放|大大咧咧|爽朗|爱笑|打趣|俏皮|甜|粘糊|温柔|柔和|体贴/.test(blob);
   if (reserved && !expressive) return 'reserved';
   if (expressive && !reserved) return 'expressive';
   if (reserved && expressive) return 'mixed';

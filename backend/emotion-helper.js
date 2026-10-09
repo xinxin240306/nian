@@ -110,7 +110,7 @@ function deriveTemperament(char = {}) {
     angerGain += 0.15;
     intimacyGain -= 0.15;
   }
-  if (has(/好哄|心软|怕吵架|耳根软|容易原谅/)) {
+  if (has(/好哄|心软|怕吵架|耳根软|容易原谅|温柔|柔和|温和|体贴|细腻/)) {
     recovery += 0.45;
     angerThreshold += 8;
     intimacyGain += 0.2;
@@ -180,7 +180,7 @@ function deriveEmotionInfluenceWeights(char = {}) {
   let selfW = 0.36;
   let schedW = 0.20;
 
-  if (has(/粘人|黏人|依恋|缺爱|安全感差|容易不安|恋爱脑|深情|玻璃心|敏感|好哄|心软|共情|体贴/)) {
+  if (has(/粘人|黏人|依恋|缺爱|安全感差|容易不安|恋爱脑|深情|玻璃心|敏感|好哄|心软|共情|体贴|温柔|柔和|温和|细腻/)) {
     userW += 0.14; selfW -= 0.10;
   }
   if (has(/淡漠|理性|冷静|佛系|钝感|高冷|冷淡|记仇|倔强|要面子|嘴硬/)) {
@@ -1093,7 +1093,7 @@ function scoreSilenceImpact(kind, idleMinutes, char) {
   if (has(/粘人|黏人|依恋|缺爱|安全感差|容易不安|多虑|恋爱脑|深情/)) sens += 0.55;
   if (has(/淡漠|佛系|钝感|理性|冷淡|高冷/)) sens -= 0.45;
   if (has(/要面子|倔强|记仇|易怒|暴躁/)) sens += 0.2;
-  if (has(/好哄|心软|乐观|开朗/)) sens -= 0.15;
+  if (has(/好哄|心软|乐观|开朗|温柔|柔和|体贴/)) sens -= 0.15;
   sens = clamp(sens, 0.25, 1.9);
 
   const hours = idleMinutes / 60;
@@ -1689,11 +1689,28 @@ function promptSafeMoodLabel(view = {}) {
   return 'calm';
 }
 
+/** 人设软硬：用于口吻/心情块门控——禁的是 AI 客服接情绪，不是角色自己的温柔 */
+const SOFT_PERSONA_RE = /温柔|柔和|温和|细腻|体贴|软萌|好说话|好脾气|暖心|会哄|照顾人|亲切|柔情|心软|共情|好哄/;
+const SHARP_PERSONA_RE = /毒舌|损人|爱损|冷淡|高冷|暴躁|火爆|刻薄|刺|嘴贱|阴阳|呛人|凶巴巴/;
+
+function characterToneProfile(char = {}) {
+  const blob = `${char.personality || ''} ${char.emotion_style || ''} ${char.behavior || ''} ${char.language_style || ''} ${char.intro || ''}`;
+  const soft = SOFT_PERSONA_RE.test(blob);
+  const sharp = SHARP_PERSONA_RE.test(blob);
+  return { soft, sharp, blob };
+}
+
 function buildReplyToneBlock(char, state, opts = {}) {
   if (!char) return '';
   const hasExamples = char.language_style && char.language_style.length > 50;
+  const tone = characterToneProfile(char);
+  const softHint = tone.soft
+    ? '人设偏温柔/软：可以轻声、给人留台阶、话软一点——但必须是你这个人的温柔，不是客服腔。'
+    : tone.sharp
+      ? '人设偏冲/淡：可以别扭、淡、损、懒得给好脸色。'
+      : '可以别扭、淡、损、懒得给好脸色，也可以轻声软一点——看【性格】。';
   const lines = [
-    `【心里已经有的】这是你现在自己的心情，会渗进这轮怎么说。按【性格】带出来：可以别扭、淡、损、懒得给好脸色，也可以压着不说。不要报心情，不要客服安抚，也不要因为对方开口就瞬间没事。${hasExamples ? '语感仍是你的，别照抄例句。' : ''}`,
+    `【心里已经有的】这是你现在自己的心情，会渗进这轮怎么说。按【性格】带出来：${softHint}也可以压着不说。不要报心情，不要切成心理咨询/万能陪伴式安抚，也不要因为对方开口就瞬间没事。${hasExamples ? '语感仍是你的，别照抄例句。' : ''}`,
   ];
 
   const userMsg = String(opts.userMessage || '').trim();
@@ -1729,9 +1746,17 @@ function buildReplyToneBlock(char, state, opts = {}) {
     const id = promptSafeMoodLabel({ primary: inferred.tone || inferred.label, label: inferred.label });
     if (id !== 'angry' || /我生气了|气死我了|火大了|烦死了|恨你|讨厌你/.test(userMsg)) {
       lines.push(`对方这轮偏 ${id}，接的时候要看见，但你自己的反应仍按性格，不要跟着演同一种。`);
+      lines.push(tone.soft
+        ? '对方情绪不好：用你自己的温柔短接一下就好（可以轻声、可以先顺着说一句），禁止滑成「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」这类 AI 接情绪。'
+        : '对方情绪不好：用你这个人会有的反应接（可以损一句再问、可以别扭地递台阶、也可以淡一句），禁止突然切成心理咨询/万能陪伴腔。');
     }
   } else if (!mundane && sensed && sensed !== 'neutral' && sensed !== 'angry') {
     lines.push(`对方这轮偏 ${sensed}，接的时候要看见，反应按性格。`);
+    if (/sad|hurt|anxious|lonely|低落|难过|委屈|不安|孤单/.test(sensed)) {
+      lines.push(tone.soft
+        ? '看见对方的情绪，用你自己的温柔接；禁止 AI 客服式安抚话术。'
+        : '看见对方的情绪，用性格接；禁止切成万能陪伴/心理咨询腔。');
+    }
   }
 
   if (lowEnergy) lines.push('身子或脑子发沉，没多少精神。');
@@ -1938,6 +1963,8 @@ module.exports = {
   getScheduleMoodFootnote,
   moodDisplayString,
   softLabel,
+  characterToneProfile,
+  SOFT_PERSONA_RE,
   topMoodTags,
   moodTagsToEmoji,
   scoreMessageImpact,

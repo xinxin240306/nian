@@ -2238,8 +2238,11 @@ function canEditBubbleWrap(wrap) {
   }
   if (!wrap || wrap.dataset.role === 'system') return false;
   if (wrap.dataset.role !== 'user' && wrap.dataset.role !== 'assistant') return false;
-  const bubbleId = wrap.dataset?.msgId || wrap.dataset?.id;
-  if (!bubbleId || String(bubbleId).startsWith('tmp_') || String(bubbleId).startsWith('seg_') || String(bubbleId).startsWith('vseg_') || String(bubbleId).startsWith('hist_')) return false;
+  const bubbleId = (typeof window.resolveChatBubbleDbId === 'function')
+    ? window.resolveChatBubbleDbId(wrap)
+    : (wrap.dataset?.msgId || wrap.dataset?.id);
+  if (!bubbleId || String(bubbleId).startsWith('tmp') || String(bubbleId).startsWith('seg_')
+    || String(bubbleId).startsWith('vseg_') || String(bubbleId).startsWith('hist_')) return false;
   return !!getBubbleTextForEdit(wrap);
 }
 window.canEditBubbleWrap = canEditBubbleWrap;
@@ -2382,15 +2385,23 @@ window.editBubbleMsg = async function(bubbleId) {
     window.showToast?.('这条不能编辑');
     return;
   }
-  const id = String(bubbleId);
-  const wrap = document.querySelector(`.bubble-wrap[data-id="${id}"], .bubble-wrap[data-msg-id="${id}"]`);
+  let id = String(bubbleId);
+  // 长按分段泡时可能仍带 hist_…，落到母消息 id
+  if (id.startsWith('hist_')) {
+    const mid = id.split('_')[1] || '';
+    id = /^\d+$/.test(mid) ? mid : id;
+  }
+  const wrap = document.querySelector(`.bubble-wrap[data-msg-id="${CSS.escape(id)}"], .bubble-wrap[data-id="${CSS.escape(id)}"]`)
+    || (bubbleId !== id ? document.querySelector(`.bubble-wrap[data-id="${CSS.escape(String(bubbleId))}"]`) : null);
   if (!wrap) {
     // chat-page 未接管时走页面内置编辑器
     window.openChatBubbleEditor?.(id);
     return;
   }
+  const saveId = (typeof window.resolveChatBubbleDbId === 'function' ? window.resolveChatBubbleDbId(wrap) : null)
+    || wrap.dataset.msgId || wrap.dataset.id || id;
   const current = getBubbleTextForEdit(wrap);
-  window.openChatBubbleEditor?.(wrap.dataset.msgId || wrap.dataset.id || id, current);
+  window.openChatBubbleEditor?.(saveId, current);
 };
 
 window.editBubbleMsgSave = async function(saveId, next, wrap) {

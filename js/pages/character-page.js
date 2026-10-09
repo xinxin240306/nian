@@ -99,13 +99,28 @@ window.onRealPlaceNamesChange = function() {
 };
 
 /* 人设文本框较小，字数一多不好改：点一下弹出放大编辑窗口，完成后同步回原文本框 */
-window.openTextExpand = function(el) {
+let _textExpandOpenAt = 0;
+window.openTextExpand = function(el, ev) {
   if (!el) return;
+  // 部分 WebView 上 readonly+onclick 会丢点击；pointerup 再拦一次滚动误触
+  if (ev) {
+    if (ev.cancelable) ev.preventDefault?.();
+    ev.stopPropagation?.();
+    // 刚拖过滚动就别开编辑
+    if (el.dataset?.expandMoved === '1') {
+      delete el.dataset.expandMoved;
+      return;
+    }
+  }
+  // onclick + pointerup 双触发时只开一次
+  const now = Date.now();
+  if (now - _textExpandOpenAt < 400) return;
+  _textExpandOpenAt = now;
   const label = el.closest('div')?.querySelector('.input-label, .settings-row-label')?.textContent?.trim() || '编辑';
   let overlay = document.getElementById('text-expand-overlay');
   if (!overlay) {
     document.body.insertAdjacentHTML('beforeend', `
-      <div id="text-expand-overlay" class="overlay fullscreen" style="z-index:400">
+      <div id="text-expand-overlay" class="overlay fullscreen" style="z-index:420">
         <div class="sheet-full">
           <div class="sheet-full-topbar">
             <span class="topbar-back" onclick="closeTextExpand()">‹</span>
@@ -130,6 +145,35 @@ window.openTextExpand = function(el) {
   overlay.classList.add('active');
   setTimeout(() => input.focus(), 200);
 };
+
+/** 给可放大文本框补上触摸手势，避免偶发点了没反应 */
+function bindTaExpandable(root = document) {
+  root.querySelectorAll?.('textarea.ta-expandable').forEach((ta) => {
+    if (ta.dataset.expandBound === '1') return;
+    ta.dataset.expandBound = '1';
+    let x0 = 0;
+    let y0 = 0;
+    let moved = false;
+    ta.addEventListener('pointerdown', (e) => {
+      x0 = e.clientX;
+      y0 = e.clientY;
+      moved = false;
+      delete ta.dataset.expandMoved;
+    }, { passive: true });
+    ta.addEventListener('pointermove', (e) => {
+      if (Math.hypot(e.clientX - x0, e.clientY - y0) > 10) {
+        moved = true;
+        ta.dataset.expandMoved = '1';
+      }
+    }, { passive: true });
+    ta.addEventListener('pointerup', (e) => {
+      if (moved) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      window.openTextExpand?.(ta, e);
+    });
+  });
+}
+window.bindTaExpandable = bindTaExpandable;
 
 window.closeTextExpand = function() {
   document.getElementById('text-expand-overlay')?.classList.remove('active');
@@ -375,25 +419,21 @@ async function renderCharEditor(charId) {
           </div>
           <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:16px">
             <label class="input-label">对话示例</label>
-            <textarea class="input ta-expandable" id="cf-lang-style" readonly onclick="openTextExpand(this)" style="min-height:80px" placeholder="贴 4～6 句短对话：用户一句 + 角色一句。同一张嘴，换不同情绪（平静/开心/不爽/吃醋），不要写万能陪伴腔：
+            <textarea class="input ta-expandable" id="cf-lang-style" readonly onclick="openTextExpand(this)" style="min-height:80px" placeholder="贴 4～6 句短对话：用户一句 + 角色一句。同一张嘴，换不同情绪；温柔就写你这个人的温柔，别写 AI 陪伴腔：
 
 平静
 你：今天回来好晚
 我：路上堵了一会儿。你吃饭了吗
 
-开心
-你：周末去海边吧
-我：行啊。你负责别把自己晒成虾。
+温柔（示例，按人设改）
+你：今天好累
+我：嗯，先歇会儿。要不要我陪你坐一下。
 
 不爽
 你：我忘了回你
 我：……哦。下次直接说一声就行。
 
-吃醋
-你：同事请我吃饭
-我：哈？哪位同事。还是说你故意让我猜。
-
-反例（不要当模板）：「我在听」「你累了就先休息」「我陪着你」">${escapeHtml(char.language_style||'')}</textarea>
+反例（空壳 AI，不要当模板）：「我在听」「我理解你的感受」「你的情绪是被允许的」「我陪着你」">${escapeHtml(char.language_style||'')}</textarea>
             <div style="font-size:12px;color:var(--text-secondary);line-height:1.5">学句长、软硬、口癖与标点；情绪只标温度，不另开一套腔。聊天时不会照抄原句。配合「性格」效果最好。</div>
           </div>
         </div>
@@ -694,6 +734,7 @@ async function renderCharEditor(charId) {
   renderCharCallVideo();
   syncCallVideoModeUi();
   renderCharSelfReads();
+  bindTaExpandable(page);
 };
 
 window.openAppearanceFromCharEdit = function() {

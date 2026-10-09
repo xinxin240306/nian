@@ -145,7 +145,7 @@ const PROCESS_KINDS = [
     userAskRe: /(?:睡|眯)完.{0,8}(?:告诉|回我|说一声)|醒了.{0,4}(?:告诉|叫)/,
     delayMin: [40, 90],
     soften: [
-      // 长词在前；不要裸匹配「醒了」，否则「睡醒了/等…醒了再说」会被撕成「还在睡」
+      // 长词在前；问对方「终于醒了？」等由 DEFERRED_DONE_SPAN_RE 掩住，不会进这里
       [/睡醒了/g, '还没醒'],
       [/(?<!睡)醒了/g, '还在睡'],
       [/起来了/g, '还在躺着'],
@@ -676,16 +676,56 @@ function shouldProactiveCallback(kind, userText, aiText) {
 }
 
 /**
+ * 从各过程 kind 的 done/soften 汇总「完工词」，避免手写白名单漏掉做饭/学习/运动等。
+ * 结构型替换（带句首捕获的「到了」）只抽核心词。
+ */
+function simplifyDoneSource(src) {
+  let s = String(src || '');
+  if (!s) return '';
+  // 旅行气泡结构型 / 环视：只抽核心完工词，避免把整段断言塞进白名单
+  if (s.includes('^|') || /\(\?\=/.test(s) || /\(\?\!/.test(s)) {
+    const m = s.match(/到了(?:\[[^\]]+\])?\??|抵达了?|到地方了|到目的地了?/);
+    return m ? m[0] : '';
+  }
+  s = s.replace(/\(\?<[=!][^)]*\)/g, '');
+  s = s.replace(/\(\?[=!][^)]*\)/g, '');
+  return s;
+}
+
+function buildDoneClaimWords() {
+  const parts = [];
+  const seen = new Set();
+  const push = (src) => {
+    const s = simplifyDoneSource(src);
+    if (!s || s.length < 2 || seen.has(s)) return;
+    seen.add(s);
+    parts.push(s);
+  };
+  push(GENERIC_DONE_RE.source);
+  for (const [re] of GENERIC_SOFTEN) push(re.source);
+  for (const kind of PROCESS_KINDS) {
+    if (kind.doneRe) push(kind.doneRe.source);
+    for (const [re] of (kind.soften || [])) push(re.source);
+  }
+  // 长词优先，减少「醒了」抢在「睡醒了」前匹配
+  parts.sort((a, b) => b.length - a.length);
+  return parts.join('|');
+}
+
+/**
  * 「等我睡醒了再说」「等你下班了回来」是预约/谈对方，不是角色宣称自己此刻已做完。
  * 用掩码去掉这些片段后再查 doneRe / 做 soften，避免气泡被改成「等你还没下班回来」。
+ * 「终于醒了？」「做好了吗」「下班了？」等问对方的话也要保住。
  */
-const DONE_CLAIM_WORDS = '睡醒了|醒了|起来了|午睡完了?|眯完了|睡好了|做完了|弄完了|吃完了|洗完了|泡完了|忙完了|处理好了|搞定了|加完班了?|开完会了?|忙完工作了?|弄完工作了?|处理完工作了?|下班了|完了|好了|到了|回来了|下了';
+const DONE_CLAIM_WORDS = buildDoneClaimWords();
 const DEFERRED_DONE_SPAN_RE = new RegExp(
   `等(?:我|他|她|你|您|TA|对方|着)?[^。！？\\n]{0,12}(?:${DONE_CLAIM_WORDS}).{0,10}(?:再|才|就|告诉|回|找|说|联系|发|叫|回来|到家)?`
-  + `|等(?:我|他|她|你|您|TA|对方)[^。！？\\n]{0,12}(?:睡醒了?|醒来|醒了|起来了?|做完|弄完|吃完|洗完|泡完|忙完|加完班|开完会|下班|到了|回来)`
-  + `|(?:睡醒了|醒了|起来了|做完了|弄完了|吃完了|洗完了|忙完了|处理好了|搞定了|下班了|加完班了?|好了|完了|到了|下了).{0,2}再(?:说|聊|回|找|联系|告诉|发)`
+  + `|等(?:我|他|她|你|您|TA|对方)[^。！？\\n]{0,12}(?:睡醒了?|醒来|醒了|起来了?|做完|弄完|吃完|洗完|泡完|忙完|加完班|开完会|下班|到了|回来|看完|学完|打完|玩完|跑完|练完|逛完|买完)`
+  + `|(?:${DONE_CLAIM_WORDS}).{0,2}再(?:说|聊|回|找|联系|告诉|发)`
   // 谈对方完工：「你下班了吗」≠ 角色自己下班
-  + `|(?:你|您|对方)(?:还)?[^。！？\\n]{0,8}(?:${DONE_CLAIM_WORDS})`,
+  + `|(?:你|您|对方)(?:还)?[^。！？\\n]{0,8}(?:${DONE_CLAIM_WORDS})`
+  // 问句/调侃对方：句内不含「我」且以吗/？收尾 → 不是自称此刻做完（睡觉/做饭/加班等同理）
+  + `|(?:^|[。！？\\n，,])[^。！？\\n我]{0,16}(?:${DONE_CLAIM_WORDS})\\s*[吗嘛呀啊吧呢？?]`,
   'g'
 );
 
