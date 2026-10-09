@@ -5126,8 +5126,16 @@ ${selfAddrLock ? `· ${selfAddrLock}\n` : ''}· 调侃/损人/撒娇的分寸看
       })
       : ''),
     (chatDirectiveOk && need.recall ? buildRecallPromptSection() : ''),
-    // 引用 / 拍一拍：常驻教用法。以前要 need.quote/need.poke 才塞，平时模型几乎不知道能用
-    (chatDirectiveOk ? buildQuoteReplyPromptSection() : ''),
+    // 引用：常驻轻教法；有连发/翻旧账/对上旧句等信号时再加强，近几条已用过则只留轻教法
+    (chatDirectiveOk
+      ? buildQuoteReplyPromptSection({
+        userText: opts.userMessage || opts.userText || '',
+        recentHistory: opts.recentHistory || [],
+        charId: char?.id,
+        isDream,
+      })
+      : ''),
+    // 拍一拍：常驻教用法（以前要 need.poke 才塞）
     (chatDirectiveOk ? buildPokePromptSection(settings) : ''),
     (chatDirectiveOk
       ? buildCallDirectivePromptSection({ userAsked: opts.userAskedCall || userRequestsPhoneCall(opts.userMessage) })

@@ -1655,9 +1655,205 @@ function buildRecallPromptSection() {
 刚说完改口：那句后面写 [撤回] 再接改口。例：是周四。[撤回]等等，是周五。`;
 }
 
-/** 引用回复：让 AI 能明确指向用户之前某一句话来回应或追问 */
-function buildQuoteReplyPromptSection() {
-  return `【引用】想点名对方之前某句（调侃、纠正、追问、翻旧账、接住没回完的话）时，回复开头写：[引用]原句照抄[/引用]再接你的话。原句尽量照抄最近聊天里的原文。一条只用一次；顺着刚说的上一句接话不必引用。`;
+/** 对方像在翻自己刚说过的话 / 点名某句 */
+const QUOTE_CALLBACK_RE = /你刚才说|你不是说|你说过|上面那句|刚才那句|你刚说|怎么又|你自己说的|你原话|我不是说|我刚才说|我说过|不是说好|说好的|明明说|你提过|我提过|那句/;
+
+/** 近窗里助手最近几条是否已带过引用条（冷却，防刷） */
+const QUOTE_COOLDOWN_ASSISTANT = 5;
+
+function clipQuoteCandidate(text, maxLen = 36) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  return t.length > maxLen ? `${t.slice(0, maxLen - 1)}…` : t;
+}
+
+function isUserTextBubble(m) {
+  if (!m || m.role !== 'user' || m.recalled) return false;
+  const typ = String(m.type || 'text');
+  if (typ && typ !== 'text' && typ !== 'voice') return false;
+  return String(m.content || '').replace(/\s+/g, ' ').trim().length > 0;
+}
+
+/** 适合被点名的用户句：太短（嗯/哦/你说呢）不当候选 */
+function isQuotableUserBubble(m) {
+  if (!isUserTextBubble(m)) return false;
+  const c = String(m.content || '').replace(/\s+/g, ' ').trim();
+  if (c.length < 4) return false;
+  if (/^[\[【]/.test(c) && c.length < 12) return false;
+  return true;
+}
+
+/** 自上次助手回复以来，用户连发了几条（含短句；≥2 时更适合点名更早那句） */
+function countUserBurstSinceAssistant(recentHistory = []) {
+  let n = 0;
+  for (let i = (recentHistory || []).length - 1; i >= 0; i--) {
+    const m = recentHistory[i];
+    if (!m) continue;
+    if (m.role === 'assistant') break;
+    if (isUserTextBubble(m)) n += 1;
+  }
+  return n;
+}
+
+function pickQuoteCandidates(recentHistory = [], { skipLatest = true, limit = 2 } = {}) {
+  const allUser = (recentHistory || []).filter(isUserTextBubble);
+  const users = (recentHistory || []).filter(isQuotableUserBubble);
+  if (!users.length) return [];
+  let pool = users;
+  if (skipLatest && allUser.length) {
+    const latest = allUser[allUser.length - 1];
+    // 连发时优先点名「更早那句」，不要钉最新一条（最新一句直接接话即可）
+    pool = users.filter((m) => m !== latest);
+  }
+  if (!pool.length && !skipLatest) pool = users;
+  const out = [];
+  for (let i = pool.length - 1; i >= 0 && out.length < limit; i--) {
+    const clip = clipQuoteCandidate(pool[i].content);
+    if (clip && !out.includes(clip)) out.push(clip);
+  }
+  return out;
+}
+
+/** 从用户句抽可对词（含 2～3 字滑窗，提高「对上旧句」命中） */
+function quoteMatchTerms(userText) {
+  const raw = String(userText || '')
+    .split(/[，。！？、；：\s\n\r\t\/\|·…—\-~～「」『』（）()\[\]【】]{1,}/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2 && s.length <= 16);
+  const extra = [];
+  for (const t of raw) {
+    if (!/[\u4e00-\u9fff]{3,}/.test(t)) continue;
+    for (let i = 0; i <= t.length - 2; i++) {
+      extra.push(t.slice(i, i + 2));
+      if (i + 3 <= t.length) extra.push(t.slice(i, i + 3));
+    }
+  }
+  return [...new Set([...raw, ...extra])]
+    .filter((t) => t.length >= 2 && t.length <= 12)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 10);
+}
+
+/** 当前话里的词能否对上「更早一条」用户话（且对不上最新一条）→ 适合点名旧句 */
+function earlierUserLineMatches(userText, recentHistory = []) {
+  const terms = quoteMatchTerms(userText);
+  if (!terms.length) return [];
+  const allUser = (recentHistory || []).filter(isUserTextBubble);
+  const earlier = (recentHistory || []).filter(isQuotableUserBubble)
+    .filter((m) => !allUser.length || m !== allUser[allUser.length - 1])
+    .slice(-6);
+  if (!earlier.length) return [];
+  const latest = allUser.length ? String(allUser[allUser.length - 1].content || '') : '';
+  const hits = [];
+  for (let i = earlier.length - 1; i >= 0 && hits.length < 2; i--) {
+    const c = String(earlier[i].content || '');
+    const hit = terms.some((t) => c.includes(t) && !latest.includes(t));
+    if (!hit) continue;
+    const clip = clipQuoteCandidate(c);
+    if (clip && !hits.includes(clip)) hits.push(clip);
+  }
+  return hits;
+}
+
+/** 你刚问了对方，对方没正面答、却带了更早话题 → 适合引用钉住 */
+function unansweredAskWithEarlierTopic(recentHistory = []) {
+  const hist = recentHistory || [];
+  if (hist.length < 3) return [];
+  let lastAi = null;
+  let lastAiIdx = -1;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    if (hist[i]?.role === 'assistant') {
+      lastAi = hist[i];
+      lastAiIdx = i;
+      break;
+    }
+  }
+  if (!lastAi || lastAiIdx < 0) return [];
+  const ask = String(lastAi.content || '');
+  if (!/[？?]|吗\s*$|嘛\s*$|呢\s*$|怎么样|如何|要不要|好不好/.test(ask)) return [];
+  const after = hist.slice(lastAiIdx + 1).filter(isUserTextBubble);
+  if (!after.length) return [];
+  // 对方有答，但近窗里还有更早可点名的句（跨过上一问）
+  const before = hist.slice(0, lastAiIdx).filter(isQuotableUserBubble).slice(-3);
+  return before.map((m) => clipQuoteCandidate(m.content)).filter(Boolean).slice(0, 2);
+}
+
+function recentAssistantUsedQuote(charId, isDream = false, lookback = QUOTE_COOLDOWN_ASSISTANT) {
+  const id = Number(charId);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  try {
+    const rows = db.prepare(
+      `SELECT reply_preview FROM messages
+       WHERE character_id=? AND is_dream=? AND role='assistant' AND recalled=0
+         AND (type IS NULL OR type IN ('text','voice'))
+       ORDER BY id DESC LIMIT ?`
+    ).all(id, isDream ? 1 : 0, Math.max(1, lookback));
+    return rows.some((r) => String(r.reply_preview || '').trim());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 引用「该不该加强提醒」：常驻轻教法之外，有信号才 nudge。
+ * @returns {{ nudge: boolean, reason: string, candidates: string[] }}
+ */
+function assessQuoteReplyNudge({
+  userText = '',
+  recentHistory = [],
+  charId = null,
+  isDream = false,
+} = {}) {
+  if (recentAssistantUsedQuote(charId, isDream)) {
+    return { nudge: false, reason: 'cooldown', candidates: [] };
+  }
+  const text = String(userText || '').trim();
+  if (QUOTE_CALLBACK_RE.test(text)) {
+    return {
+      nudge: true,
+      reason: 'callback',
+      candidates: pickQuoteCandidates(recentHistory, { skipLatest: false, limit: 2 }),
+    };
+  }
+  const burst = countUserBurstSinceAssistant(recentHistory);
+  if (burst >= 2) {
+    const candidates = pickQuoteCandidates(recentHistory, { skipLatest: true, limit: 2 });
+    if (candidates.length) {
+      return { nudge: true, reason: 'burst', candidates };
+    }
+  }
+  const earlier = earlierUserLineMatches(text, recentHistory);
+  if (earlier.length) {
+    return { nudge: true, reason: 'earlier', candidates: earlier };
+  }
+  const dangling = unansweredAskWithEarlierTopic(recentHistory);
+  if (dangling.length) {
+    return { nudge: true, reason: 'unanswered', candidates: dangling };
+  }
+  return { nudge: false, reason: 'none', candidates: [] };
+}
+
+/**
+ * 引用回复教法：
+ * - 常驻：知道格式，自然时用、别刷
+ * - nudge：本轮有值得点名的信号时加强（仍非强制）
+ */
+function buildQuoteReplyPromptSection(opts = {}) {
+  const assessed = opts.nudge != null
+    ? {
+      nudge: !!opts.nudge,
+      reason: opts.reason || '',
+      candidates: opts.candidates || [],
+    }
+    : assessQuoteReplyNudge(opts);
+  const base = `【引用】像微信点名某句：调侃、纠正、追问、翻旧账、接住没回完的话时，回复开头写：[引用]原句照抄[/引用]再接你的话。原句照抄近窗原文。一条只用一次；别连着刷；纯顺着最新一句接话就不必引。`;
+  if (!assessed.nudge) return base;
+  const samples = (assessed.candidates || []).slice(0, 2).map((c) => `「${c}」`).join('或');
+  const hint = samples
+    ? `这轮很适合引用。可钉：${samples}。钉住再接话；若其实只是顺着最新一句，就别硬引。`
+    : `这轮很适合用引用钉住对方之前某句，再接你的话；对不上就别硬引。`;
+  return `${base}
+【引用·本轮】${hint}`;
 }
 
 function latestUserMessageIsEmoji(characterId) {
@@ -2913,6 +3109,7 @@ module.exports = {
   findQuoteSourceId,
   stripResidualDirectiveTags,
   buildRecallPromptSection,
+  assessQuoteReplyNudge,
   buildQuoteReplyPromptSection,
   buildPokePromptSection,
   buildCallDirectivePromptSection,
