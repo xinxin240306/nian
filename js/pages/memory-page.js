@@ -2500,6 +2500,7 @@ window.showAllMemoryDates = function() {
 
 window.openAddMemory = function() {
   editingMemId = null;
+  _editingLivedMem = false;
   document.getElementById('mem-modal-title').textContent = '添加记忆';
   document.getElementById('mem-content').value = '';
   document.getElementById('memory-edit-overlay').classList.add('active');
@@ -2507,11 +2508,26 @@ window.openAddMemory = function() {
 
 window.editMemory = function(id) {
   editingMemId = id;
+  _editingLivedMem = false;
   const mem = allMemories.find(m => m.id === id);
   if (!mem) return;
   document.getElementById('mem-modal-title').textContent = '编辑记忆';
-  document.getElementById('mem-category').value = mem.category;
+  ensureMemCategoryOption(mem.category);
   document.getElementById('mem-content').value = mem.content;
+  document.getElementById('memory-edit-overlay').classList.add('active');
+};
+
+window.editLivedMemory = function(id) {
+  const mem = findLivedMemory(id);
+  if (!mem) {
+    window.showToast?.('找不到这条事记');
+    return;
+  }
+  editingMemId = Number(mem.id);
+  _editingLivedMem = true;
+  document.getElementById('mem-modal-title').textContent = mem.source === 'day_story' ? '编辑整天事记' : '编辑事记';
+  ensureMemCategoryOption(mem.category || '日常点滴');
+  document.getElementById('mem-content').value = mem.content || '';
   document.getElementById('memory-edit-overlay').classList.add('active');
 };
 
@@ -2521,15 +2537,22 @@ window.saveMemory = async function() {
   const category = document.getElementById('mem-category').value;
   const content  = document.getElementById('mem-content').value.trim();
   if (!content) { window.showToast?.('内容不能为空'); return; }
+  const fromLived = _editingLivedMem;
   try {
     if (editingMemId) {
-      await api.updateMemory(editingMemId, { category, content, weight: CATEGORIES[category]?.weight || 0.5 });
+      const existing = fromLived ? findLivedMemory(editingMemId) : allMemories.find((m) => m.id === editingMemId);
+      const weight = CATEGORIES[category]?.weight
+        || Number(existing?.weight)
+        || 0.5;
+      await api.updateMemory(editingMemId, { category, content, weight });
     } else {
       await api.createMemory({ characterId: charId, category, content, weight: CATEGORIES[category]?.weight || 0.5 });
     }
     document.getElementById('memory-edit-overlay').classList.remove('active');
     window.showToast?.('已保存');
-    await loadMemories(_memFilterCat);
+    _editingLivedMem = false;
+    if (fromLived || _expSurface === 'lived') await loadLivedMemory();
+    else await loadMemories(_memFilterCat);
   } catch(e) { window.showToast?.(e.message); }
 };
 
@@ -2541,6 +2564,17 @@ window.deleteMemory = async function(id) {
     renderMemoryList(_memFilterCat);
     window.showToast?.('已删除');
   } catch(e) { window.showToast?.(e.message); }
+};
+
+window.deleteLivedMemory = async function(id) {
+  if (!confirm('确定删除这条事记？')) return;
+  try {
+    await api.deleteMemory(id);
+    window.showToast?.('已删除');
+    await loadLivedMemory();
+  } catch (e) {
+    window.showToast?.(e.message || '删除失败');
+  }
 };
 
 /* ═══════════════════════════════════════════
@@ -3710,6 +3744,32 @@ let _livedData = null;
 let _livedPastDate = '';
 let _livedPastDay = null;
 let _livedDigestBusy = false;
+let _editingLivedMem = false;
+
+function collectLivedMemories() {
+  const rows = [];
+  if (_livedData?.todayMemories?.length) rows.push(..._livedData.todayMemories);
+  if (_livedPastDay?.memories?.length) rows.push(..._livedPastDay.memories);
+  return rows;
+}
+
+function findLivedMemory(id) {
+  const nid = Number(id);
+  return collectLivedMemories().find((m) => Number(m.id) === nid) || null;
+}
+
+function ensureMemCategoryOption(cat) {
+  const sel = document.getElementById('mem-category');
+  if (!sel || !cat) return;
+  const exists = [...sel.options].some((o) => o.value === cat);
+  if (!exists) {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    sel.appendChild(opt);
+  }
+  sel.value = cat;
+}
 
 function renderMemoryCards(rows, emptyText) {
   if (!rows?.length) {
@@ -3720,11 +3780,19 @@ function renderMemoryCards(rows, emptyText) {
       : m.source === 'day_digest' ? (m.category || '有用讯息')
       : m.source === 'life' ? '自己的生活'
       : (m.category || '和你');
+    const id = Number(m.id) || 0;
+    const actions = id
+      ? `<div class="brain-card-actions" style="display:flex;gap:4px;margin-left:auto">
+          <button type="button" class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:13px" title="编辑" onclick="event.stopPropagation();editLivedMemory(${id})">✎</button>
+          <button type="button" class="btn btn-danger btn-sm" style="padding:4px 8px;font-size:13px" title="删除" onclick="event.stopPropagation();deleteLivedMemory(${id})">🗑</button>
+        </div>`
+      : '';
     return `
-    <div class="brain-card">
+    <div class="brain-card" data-mem-id="${id || ''}">
       <div class="brain-card-head">
         <span class="brain-card-label">${escapeHtml(label)}</span>
         ${m.date ? `<span class="brain-card-meta">${escapeHtml(m.date)}</span>` : ''}
+        ${actions}
       </div>
       <div class="brain-card-body">${escapeHtml(m.content || '')}</div>
     </div>`;

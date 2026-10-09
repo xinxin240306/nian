@@ -576,7 +576,7 @@ function formatForPrompt(char, userText = '') {
 function memoriesByDate(charId, dateStr, limit = 40) {
   try {
     const rows = db.prepare(
-      `SELECT date, category, content, weight, source, status FROM memories
+      `SELECT id, date, category, content, weight, source, status FROM memories
        WHERE character_id=? AND date=? AND COALESCE(archived,0)=0
        AND COALESCE(source,'') NOT IN ('schedule','schedule_day')
        AND COALESCE(status,'current')='current'
