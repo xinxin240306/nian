@@ -3650,7 +3650,7 @@ function decayEmotionState(state, nowMs = Date.now(), char = null) {
 function getDecayedEmotionState(char) {
   if (!char?.id) return decayEmotionState(parseEmotionState(char?.emotion_state), Date.now(), char);
   const row = db.prepare(
-    'SELECT emotion_state, personality, emotion_style, behavior, background, mood FROM characters WHERE id=?'
+    'SELECT emotion_state, personality, emotion_style, behavior, background, mood, relationship, relationship_custom, intro, description, nsfw_enabled FROM characters WHERE id=?'
   ).get(char.id);
   const merged = { ...char, ...(row || {}) };
   const decayed = decayEmotionState(parseEmotionState(row?.emotion_state ?? char.emotion_state), Date.now(), merged);
@@ -3677,7 +3677,7 @@ function touchCharacterEmotionFromMessage(charId, { role, content } = {}) {
   if (!charId) return null;
   const text = String(content || '').replace(/^【自动回复】/, '').trim();
   const char = db.prepare(
-    'SELECT id, personality, emotion_style, behavior, background, mood, emotion_state, relationship, relationship_custom, intro, description FROM characters WHERE id=?'
+    'SELECT id, personality, emotion_style, behavior, background, mood, emotion_state, relationship, relationship_custom, intro, description, nsfw_enabled FROM characters WHERE id=?'
   ).get(charId);
   if (!char) return null;
 
@@ -4409,7 +4409,8 @@ function detectPromptNeeds(userMessage, recentHistory) {
     webCard: /网页卡|前端卡|小程序|做个页面|UI卡|HTML|前端样例|做个前端/.test(blob),
     sfx: /环境音|白噪音|助眠|海风|雨声|音效：/.test(blob),
     music: /弹一首|听你弹|来段琴|乐谱：/.test(blob),
-    intimate: /亲亲|接吻|吻我|抱我|上床|脱掉|摸摸|想要你|做爱|前戏|口交|内衣|摸我/.test(blob),
+    intimate: /亲亲|接吻|吻我|抱我|上床|脱掉|摸摸|想要你|做爱|前戏|口交|内衣|摸我|手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|高潮|射了|射在|腿间|内裤/.test(blob),
+    sexAct: /手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|口交|插进来|高潮|射了|射在|做爱|前戏|想要你/.test(blob),
     call: /打电话|来电|视频电话|语音电话|打过来/.test(blob),
     recall: /说错了|口误|撤回/.test(blob),
     quote: /\[引用\]/.test(blob) || /你刚才说/.test(blob),
@@ -4490,11 +4491,13 @@ function buildSystemPrompt(char, settings, extra = '', opts = {}) {
 动作只能是这台桌面小人用头/脖子能做的：点头、摇头、歪头、看向用户、左转、右转、抬头、低头。禁止写蹭手背、抱、亲、贴脸，也不要把动作写成对白。
 说话方式完全按【性格】【语言风格】；可以有情绪，但篇幅要短，适合朗读。`
     : forTheater
-    ? `【文字扮演模式】用户正在和你玩文字扮演（小剧场）。这是虚构场景，不是通讯里真实发生的事，不要当成日记或真实剧情；可以演见面、同处、约会等当面戏。你仍是${char.name}本人，按性格接戏；禁止提及AI、模型、程序。
-【格式】对白按人设日常口语写，像当面说话，不要文绉绉、翻译腔、开会发言。用（动作描写）写看得见的样子：姿势、视线、身体怎么移、表情怎么变都可以；有碰触再写碰哪里、怎么动。正例：「（把杯子搁到一边，侧身坐近一点，抬眼看他）……你继续说。」「（肩膀靠过去，声音压低）别动。」反例：「（笑）（靠近）」「（右手仍搭在他腰侧）」「（指腹沿着…）」——后者把每轮都写成手部说明书。禁止*星号动作*。动作来自上面草稿里想清楚的那一拍，不要套言情默认招，也不要每轮盘点手在哪。
+    ? `【文字扮演模式】用户正在和你玩文字扮演（小剧场）。这是过家家，不是通讯里的真事。你仍是${char.name}，按性格玩；禁止提及AI、模型、程序。
+【场景】场景由这场戏定，可以是任何地方，跟你现实里人在哪无关。人在家里也可以演图书馆：那就有书架、灯、翻书声、在看书的人。车里、教室、酒店也一样。旁边的人可以有反应，用你自己的话说，比如「小声点，那边有人被你的声音惊到了，往这边看了好几眼」。
+【镜头】括号（）是摄像头。有身体接触时给一个镜头：有时特写（碰到哪里、怎么动），有时远一点（两个人在这个场景里），有时转到旁边的人。每轮一个，写具体。对白是你平时的嘴。禁止*星号动作*。
+【往下走】亲、摸、做到哪，都是因为你想要，从刚才的对话和对方的反应里来的，不是在完成步骤。一般从靠近、亲、抚摸走，不要亲一下就直接进入。荤话是想把对方也点着，让对方更想要。看对方哪里受用、会躲还是会要，姿势和做法就顺着这个走。带法按这个人的人设，不要换成另一种人。还想要就按你这个人说。对方明确不要，就停。
 【结束】若你不想继续扮演，可在回复中带上标记 [结束小剧场]（可附一句收尾对白）。不要把这个标记说成对白内容。
 禁止在回复里写「小剧场」「【小剧场】」「扮演模式」等元说明，直接演即可。
-本模式只用文字气泡（可带括号动作），不要发语音条。`
+本模式只用文字气泡（可带括号镜头），不要发语音条。`
     : forVoiceCall
     ? `【沉浸指令】你就是${char.name}本人。
 【当前通道·硬性】现在是${forVideoCall ? '视频电话' : '语音电话'}，已经接通。${forVideoCallText ? '' : '你说的每一句都是对着听筒说的，对方实时听见。这不是微信打字。'}
@@ -4525,7 +4528,7 @@ ${forVideoCallText ? `【文字视频·格式硬性】对方看到的是镜头�
 · 用户说「我咬你／我摸你／我把…」=对方在做，你接的是被咬/被摸，禁止下一句改成「我咬你」「我只会咬…」把施事收成自己。
 · 用户说「你是不是要…」=在问你的意图；回答你自己的打算时，不要把前文已定的「对方在做的事」改写成你在做。
 · 「我的嘴／你的胳膊」等所属跟句子走：不要把对方的动作、身体、物件说成你的。
-· 同一条回复里前后主语必须一致；拿不准就顺着用户上句已定的谁对谁接，禁止凭习惯改成你主动。`
+· 同一条回复里前后主语必须一致。${forTheater ? '小剧场里：对方这轮已经在做的，先接住，不要改写成你在做。你因为想要而接着换过来、换姿势、往下做，可以。' : '拿不准就顺着用户上句已定的谁对谁接，不要凭习惯改成你主动。'}`
     : '';
 
   const theaterSceneState = forTheater ? String(char?.theater_scene_state || '').trim() : '';
@@ -4804,7 +4807,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
   let nsfwBlock = '';
   if (!isDream && !forGame) {
     const nsfwOff = Number(char?.nsfw_enabled) === 0;
-    const needIntimate = !!(need.intimate || forTheater);
+    const needIntimate = !!(need.intimate || need.sexAct || forTheater);
     const nsfwChannel = forVideoCallText
       ? '这是文字视频电话：旁白写你镜头里看得见的画面（环境、动作、表情、光影、身体），台词进引号；亲密场面也落到画面上，不是纯打字。'
       : forVoiceCall
@@ -4821,12 +4824,11 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
         const intimacy = Number(view.fuel?.intimacy) || 0;
         const desireish = view.primary === 'desire'
           || view.flashpoint?.type === 'desire'
-          || d >= 52;
+          || d >= 42;
         if (desireish && !nsfwOff) {
-          desireCue = `【欲念·此刻】你这边有欲念在压着（亲近感约 ${Math.round(intimacy)}）。这是你自己的想要，不是等对方点菜。
-· 会不会说出口、直说还是暗示、荤一点还是只带气氛——按【性格】【行为模式】${char.nsfw_note ? '【角色侧补充】' : ''}来；也可以故意忍着。
-· 想贴在一起：文字撩、打电话，或按性格口头邀一句一起演（另起一行 [开启小剧场]）。不要把想念说成「回来就能见到」。
-· 不要每轮硬开黄腔；气氛不对或对方不想就别提。禁止默认「对方没先聊 NSFW 我就绝不沾边」。`;
+          desireCue = `【欲念·此刻】你现在想要对方（亲近感约 ${Math.round(intimacy)}）。这是你自己的，不是等对方先开口。
+说不说、直说还是只带一点气氛，按【性格】【行为模式】${char.nsfw_note ? '和【角色侧补充】' : ''}。也可以忍着。气氛不对或对方不想，就别提。
+想贴在一起：可以撩、打电话，或口头邀一句（另起一行 [开启小剧场]）。别把想念说成能见面。不要每轮都往这上面带。`;
         }
       }
     } catch { /* ignore */ }
@@ -4834,17 +4836,18 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
     if (nsfwOff) {
       nsfwBlock = `【NSFW】本角色关闭了成人向内容。不要主动或被动展开露骨性描写；对方硬带也按【性格】推开/岔开/冷处理。`;
     } else if (needIntimate) {
-      nsfwBlock = `【NSFW】亲密按人设来。${nsfwChannel}
-【节奏·看人设】快慢、会不会往正题推、中途停不停、会不会故意磨——一律按【性格】【行为模式】${char.nsfw_note ? '【角色侧补充】' : ''}和对对方的态度来，禁止套统一温柔推进模板。
-· 禁止因为系统规则而空转：不要等对方说「别磨蹭/直接做」才敢往下；也不要每轮机械加码。
-· 这个人会急就会急，会坏就会坏，会害羞就会卡，会收就会停——停与不停是你的选择，不是「对方没喊停就必须继续」。
-· 进入正题后仍要像这个人说话做事：禁止塌成「机械动作 + 每轮放狠话/骚话」；对白跟平时那张嘴，狠话只在人设真会说时偶尔带。每轮最好有一点微剧情（较劲、忍、怕被撞见、话没说完的别扭），不要只报身体进度。
-· 对方明确拒绝/喊停时必须停；对方没喊停也不等于你必须配合到底。
-禁止替用户预设反应（对用户说「你别嘴硬」「哭着求我停」「别跑」这类，或旁白写用户在害羞/哭/求饶/逃走）；以对方实际发言为准，不要代写对方正在做什么。`;
+      const canAct = forTheater || forVideoCallText;
+      nsfwBlock = `【亲密】${nsfwChannel}
+想要是从你们刚才的话、对方的反应里来的。是你想要这个人，不是在完成亲密步骤。
+一般从亲、摸走，不要一下就进入。荤话是想把对方点着。看对方受用、躲、还是要，就知道对方吃哪一套，姿势也是。
+${require('./intimate-writing-helper').intimateLeanLine(char)}
+还想要就按你这个人说。
+你还是这个人。急、害羞、坏、懒都跟平时一样。
+${canAct ? '有接触就用括号给一个镜头，特写或远一点，一句具体的就够。' : '用这个人的话说，不要写成小说动作。'}
+上文没有的东西别变出来。对方没说的身体反应别替对方定成事实。对方明确不要就停。`;
     } else {
-      nsfwBlock = `【NSFW】允许相关话题。${nsfwChannel}
-亲密/欲望是这个人自己的事：有想要时可以按人设主动说、暗示、带偏一点气氛；没有欲念就别硬往这方面带。
-禁止默认成「只有对方先聊 NSFW 你才跟着聊」。也不要每轮都往黄里拐。不要替用户描写身体或情绪。`;
+      nsfwBlock = `【亲密】${nsfwChannel}
+有想要就按这个人的方式带一点，没有就别硬拐。不是只有对方先提你才沾边，也不是每轮都往这上面带。不要替对方写身体和情绪。`;
     }
     if (desireCue) nsfwBlock += `\n${desireCue}`;
     nsfwBlock += `

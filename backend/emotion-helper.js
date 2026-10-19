@@ -440,6 +440,10 @@ function scoreMessageImpact(text, role) {
     /亲亲|吻你|亲一下|抱紧|靠近点|靠过来|脸红|心跳加速|撩我|色色|贴贴|睡觉觉|好烫|想抱你|想亲亲/,
     1
   );
+  const sexAct = !hasConflict && hit(
+    /手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|口交|插进来|高潮|射了|射在|想要你|做爱/,
+    1
+  );
 
   if (warm && !hasConflict) {
     dV += 8 * warm; dA += 3; dAnger -= 8; dHurt -= 10; dLow -= 6;
@@ -465,6 +469,10 @@ function scoreMessageImpact(text, role) {
   if (flirty) {
     dDesire += 7; dA += 6; dIntimacy += 3; dV += 3; dYearning -= 1;
     note = note || '气氛往暧昧里偏了';
+  }
+  if (sexAct) {
+    dDesire += 12; dA += 8; dIntimacy += 4; dV += 2;
+    note = note || '已经在亲密里，想要是冲着对方的';
   }
 
   // 角色台词不回写负向燃料（D22）；用户侧负向照常计
@@ -827,7 +835,18 @@ function decayMood(mood, char, nowMs = Date.now(), lastUpdateIso) {
   const stuckBoost = nearCalm && (m.fuel.hurt > 22 || m.fuel.low > 22) && !m.lastSilenceKind ? 1.7 : 1;
   m.fuel.hurt = decayFuelTowardZero(m.fuel.hurt, hours, 6.6 * calmBoost * stuckBoost * silenceHold, temper.recovery);
   m.fuel.low = decayFuelTowardZero(m.fuel.low, hours, 6.2 * calmBoost * stuckBoost * silenceHold, temper.recovery);
-  m.fuel.desire = decayFuelTowardZero(m.fuel.desire, hours, 6.8 * calmBoost, temper.recovery);
+  // 恋人且开着成人向：空着的时候欲念会自己回到一条底线，不是只有对方先撩才有
+  const nsfwOff = Number(char?.nsfw_enabled) === 0;
+  const wantRest = (!nsfwOff && temper.closeRelationship && negMax < 34)
+    ? clamp(28 + Math.max(0, m.fuel.intimacy - 18) * 0.35, 28, 46)
+    : 0;
+  if (wantRest > 0) {
+    const gap = wantRest - (Number(m.fuel.desire) || 0);
+    const pull = Math.min(Math.abs(gap), hours * 1.5 * temper.desireGain);
+    m.fuel.desire = clamp((Number(m.fuel.desire) || 0) + (gap >= 0 ? pull : -pull), 0, 100);
+  } else {
+    m.fuel.desire = decayFuelTowardZero(m.fuel.desire, hours, 6.8 * calmBoost, temper.recovery);
+  }
   m.fuel.intimacy = clamp(m.fuel.intimacy - hours * (1.8 * temper.recovery), 0, 100);
   // 空窗：亲密还在时惦念压会涨；亲密掉了惦念也跟着塌
   const idleBoost = hours >= 1.5 && m.fuel.intimacy >= 26
@@ -836,10 +855,6 @@ function decayMood(mood, char, nowMs = Date.now(), lastUpdateIso) {
     : 0;
   const yearningDecay = hours * (2.2 * temper.recovery);
   m.yearning = clampYearningToIntimacy(m.yearning - yearningDecay + idleBoost, m.fuel.intimacy);
-  // 空窗略拱欲念：只在恋人/暧昧且已较久未聊时，且幅度很小
-  if (idleBoost > 1 && temper.closeRelationship && m.fuel.intimacy >= 35 && hours >= 6) {
-    m.fuel.desire = clamp(m.fuel.desire + hours * 0.04 * temper.desireGain, 0, 100);
-  }
 
   if (m.flashpoint && cooledFlashpoint(m.flashpoint, new Date(nowMs).toISOString())) {
     if (hours >= 1.2) m.flashpoint = null;
@@ -939,7 +954,7 @@ function syncCharacterMoodLabel(charId, mood) {
  */
 function touchMoodFromMessage(charId, state, { role, content, char } = {}) {
   const row = char || db.prepare(
-    'SELECT id, personality, emotion_style, behavior, background, mood, relationship, relationship_custom, intro, description FROM characters WHERE id=?'
+    'SELECT id, personality, emotion_style, behavior, background, mood, relationship, relationship_custom, intro, description, nsfw_enabled FROM characters WHERE id=?'
   ).get(charId);
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
@@ -974,6 +989,15 @@ function touchMoodFromMessage(charId, state, { role, content, char } = {}) {
   }
   const { mood: applied, flashed, dipped, rekindle } = applyImpact(mood, impact, temper, nowIso);
   mood = applied;
+
+  // 关系近、没在吵：平常相处也会慢慢有一点自己的想要，不必等对方先说荤话
+  const nsfwOff = Number(row?.nsfw_enabled) === 0;
+  if (!nsfwOff && temper.closeRelationship && role === 'user' && nextState.phase !== 'open') {
+    const neg = Math.max(mood.fuel.anger || 0, mood.fuel.hurt || 0);
+    if (neg < 28 && (impact?.dV || 0) >= 0 && (impact?.dDesire || 0) >= 0 && mood.fuel.desire < 36) {
+      mood.fuel.desire = clamp(mood.fuel.desire + 1.2 * temper.desireGain, 0, 36);
+    }
+  }
 
   // 冲突态：只有这轮确实在拱火，才微抬火气；闲聊不再越聊越怒
   if (nextState.phase === 'open' && (impact?.dAnger || 0) > 0) {
@@ -1809,30 +1833,40 @@ function buildReplyToneBlock(char, state, opts = {}) {
   const hurt = view.fuel?.hurt || 0;
   const low = view.fuel?.low || 0;
   const yearning = view.yearning || 0;
+  const desire = Number(view.fuel?.desire) || 0;
+  const nsfwOn = Number(char?.nsfw_enabled) !== 0;
+  const bits = [];
 
-  if (primary === 'angry' || anger >= 22) {
-    if (!(mundane && anger < 58 && !lingeringIgnore)) lines.push('火气还在。怎么带出来是你这个人的脾气。');
-  } else if (primary === 'bitter' || (anger >= 14 && hurt >= 14)) {
-    lines.push('心里别扭着，没那么快顺。');
-  } else if (primary === 'hurt' || hurt >= 22) {
-    lines.push('还有委屈，没过去。');
-  } else if (primary === 'lonely' || primary === 'anxious') {
-    lines.push(primary === 'anxious' ? '心里不安。' : '有点空落。');
-  } else if (!lingeringIgnore && (primary === 'low' || low >= 32)) {
-    lines.push('心里发空，提不太起劲。');
-  } else if (lingeringIgnore && (primary === 'longing' || yearning >= 36) && anger < 22 && hurt < 22) {
-    lines.push('惦念和别扭叠着。别把惦念说成去会合。');
-  } else if (!lingeringIgnore && (primary === 'longing' || yearning >= 48)) {
-    lines.push('心里惦着对方。别把惦念说成去会合。');
-  } else if (!lowEnergy && !lingeringIgnore && (primary === 'happy' || primary === 'excited' || primary === 'warm')) {
-    lines.push('心里松一点。');
-  } else if (!lowEnergy && !lingeringIgnore && primary === 'desire') {
-    lines.push('欲念在压着。说不说、怎么说按性格来——不必等对方先开黄腔。想贴在一起可邀小剧场，不要说回来就能见到。');
-  } else if (!lowEnergy && !lingeringIgnore && (Number(view.fuel?.desire) || 0) >= 52) {
-    lines.push('心里有点想要。带不带出来看性格；想亲近可邀小剧场。');
-  } else if (!lowEnergy && !lingeringIgnore && primary === 'calm') {
-    lines.push('心里没什么特别压着的。');
+  if ((primary === 'angry' || anger >= 22) && !(mundane && anger < 58 && !lingeringIgnore)) {
+    bits.push('火气还在');
   }
+  if ((primary === 'hurt' || hurt >= 18) && !(mundane && hurt < 36 && !lingeringIgnore && anger < 22)) {
+    bits.push('委屈还在，不是只剩发火');
+  }
+  if (primary === 'bitter' || (anger >= 14 && anger < 36 && hurt >= 12 && hurt < 36)) {
+    bits.push('懊恼、别扭，不只是在气对方');
+  }
+  if (primary === 'anxious') bits.push('心里不安');
+  else if (primary === 'lonely') bits.push('有点空落');
+  if (!lingeringIgnore && (primary === 'low' || low >= 32)) bits.push('提不太起劲');
+  if ((primary === 'longing' || yearning >= 36) && anger < 28) {
+    bits.push('惦着对方。别把惦念说成去会合');
+  }
+  if (!lingeringIgnore && anger < 18 && hurt < 18 && (primary === 'happy' || primary === 'excited' || (view.joy || 0) >= 32)) {
+    bits.push('开心。让人听得出来：话可以松、会笑、想把眼前的事分给对方，不必装平静，也不必每句报自己很开心');
+  } else if (!lingeringIgnore && anger < 18 && hurt < 18 && primary === 'warm') {
+    bits.push('心情暖，话可以软一点');
+  }
+  const sexNow = /手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|口交|高潮|射了|做爱|想要你/.test(userMsg);
+  if (nsfwOn && anger < 36 && (sexNow || desire >= 28)) {
+    if (sexNow) bits.push('还在做。想要的是对方，不是这一下做完就没了');
+    else if (primary === 'desire' || desire >= 42) bits.push('想要对方。说不说按性格，别每句都往这上面带');
+    else bits.push('对对方有欲望。可以只留在语气里');
+  }
+  if (!bits.length) {
+    bits.push(primary === 'calm' ? '心里没什么特别压着的' : '按现在的心情接，不要只演生气');
+  }
+  lines.push(`现在身上有这些：${bits.join('；')}。怎么露出来按性格，不要报心情名字。`);
 
   return lines.join('\n');
 }

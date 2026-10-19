@@ -972,7 +972,7 @@ export function setupBgVideo(video, url, crop, opts = {}) {
   video.muted = true;
   video.playsInline = true;
   video.setAttribute('playsinline', '');
-  video.preload = 'auto';
+  video.preload = opts.preload || 'auto';
 
   const allowPlay = () => {
     const ap = opts.allowPlay;

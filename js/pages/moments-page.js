@@ -9,6 +9,7 @@ import {
 import { pickCropAndUpload, momentsCoverAspect, applyMediaCrop, setupBgVideo } from '../media-crop.js';
 import { getDeviceCoordinates, formatLocationError } from '../app-permissions.js';
 import { ICON_MORE } from '../ui-icons.js';
+import { lsGet, lsSet } from '../storage.js';
 import {
   getMomentsUnread,
   markMomentsFeedSeen,
@@ -27,6 +28,7 @@ let _openOpsMenuId = null;
 let _momentReplyTarget = null;
 const _momentsCache = new Map();
 const _feedByView = new Map();
+const MOMENTS_FEED_STORE = 'moments_feed_v1';
 let _shellViewKey = null;
 let _momentsOpsListenerBound = false;
 let _loadMomentsPending = new Map();
@@ -35,8 +37,55 @@ function momentsViewKey(charId) {
   return charId ? `c:${charId}` : 'all';
 }
 
+function slimStoredMoment(m) {
+  const images = Array.isArray(m.images)
+    ? m.images.filter((u) => typeof u === 'string' && u.length < 500 && !u.startsWith('data:'))
+    : [];
+  const avatar = typeof m.char_avatar === 'string' && m.char_avatar.length < 500 && !m.char_avatar.startsWith('data:')
+    ? m.char_avatar
+    : '';
+  return {
+    id: m.id,
+    character_id: m.character_id,
+    role: m.role,
+    content: m.content || '',
+    images,
+    created_at: m.created_at,
+    location: m.location || '',
+    mentions: Array.isArray(m.mentions) ? m.mentions : [],
+    char_name: m.char_name || '',
+    char_avatar: avatar,
+    likes: Array.isArray(m.likes) ? m.likes : [],
+    comments: Array.isArray(m.comments) ? m.comments : [],
+  };
+}
+
+function readStoredFeed(viewKey) {
+  const all = lsGet(MOMENTS_FEED_STORE, null);
+  const row = all && all[viewKey];
+  if (!row || !Array.isArray(row.items) || !row.items.length) return null;
+  return { items: row.items, maxId: Number(row.maxId) || 0 };
+}
+
+function writeStoredFeed(viewKey, next) {
+  const all = lsGet(MOMENTS_FEED_STORE, {}) || {};
+  all[viewKey] = {
+    maxId: next.maxId,
+    items: next.items.slice(0, 30).map(slimStoredMoment),
+  };
+  lsSet(MOMENTS_FEED_STORE, all);
+}
+
 function getFeed(viewKey) {
-  return _feedByView.get(viewKey) || { items: [], maxId: 0 };
+  const mem = _feedByView.get(viewKey);
+  if (mem) return mem;
+  const stored = readStoredFeed(viewKey);
+  if (stored) {
+    _feedByView.set(viewKey, stored);
+    stored.items.forEach((m) => _momentsCache.set(m.id, { likes: m.likes || [], comments: m.comments || [] }));
+    return stored;
+  }
+  return { items: [], maxId: 0 };
 }
 
 function setFeed(viewKey, items) {
@@ -44,6 +93,7 @@ function setFeed(viewKey, items) {
   const next = { items: items.slice(0, 60), maxId };
   _feedByView.set(viewKey, next);
   items.forEach((m) => _momentsCache.set(m.id, { likes: m.likes || [], comments: m.comments || [] }));
+  writeStoredFeed(viewKey, next);
   return next;
 }
 
@@ -127,25 +177,28 @@ window.initMomentsPage = async function() {
     return;
   }
 
+  const cachedNow = getFeed(viewKey);
   let appSettings = window.getAppSettings?.() || {};
-  if (!appSettings.username && !appSettings.user_avatar) {
+  if (!cachedNow.items.length && !appSettings.username && !appSettings.user_avatar) {
     try { appSettings = await api.getSettings(); } catch {
       appSettings = window.getAppSettings?.() || {};
     }
   }
   let viewChar = null;
-  if (viewCharId) {
+  if (viewCharId && !cachedNow.items.length) {
     try { viewChar = await api.getCharacter(viewCharId); } catch {}
   }
   const username = viewChar
     ? (viewChar.display_name || viewChar.remark || viewChar.name || '角色')
-    : (appSettings.username || '旅人');
+    : (viewCharId
+      ? (cachedNow.items.find((m) => m.char_name)?.char_name || '角色')
+      : (appSettings.username || '旅人'));
   const userAvatar = viewChar
     ? (viewChar.avatar || '')
-    : (appSettings.user_avatar || '');
+    : (viewCharId ? '' : (appSettings.user_avatar || ''));
   const coverPhoto = viewChar
     ? (viewChar.moments_cover || '')
-    : (appSettings.moments_cover || '');
+    : (viewCharId ? '' : (appSettings.moments_cover || ''));
   const coverSrc = coverPhoto
     ? (window.resolveMediaUrl?.(coverPhoto) || coverPhoto)
     : '';
@@ -163,7 +216,7 @@ window.initMomentsPage = async function() {
   page.innerHTML = `
     <div class="moments-topbar" id="moments-topbar">
       <button type="button" class="topbar-back topbar-nav-back moments-topbar-back" onclick="goBack()" title="返回" style="color:#fff;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5))"></button>
-      <div style="flex:1;text-align:center;color:#fff;font-size:15px;font-weight:500;filter:drop-shadow(0 1px 3px rgba(0,0,0,.45))">${viewChar ? escapeHtml(username) + '的朋友圈' : ''}</div>
+      <div id="moments-topbar-title" style="flex:1;text-align:center;color:#fff;font-size:15px;font-weight:500;filter:drop-shadow(0 1px 3px rgba(0,0,0,.45))">${viewChar ? escapeHtml(username) + '的朋友圈' : ''}</div>
       ${viewChar ? '<div style="width:36px"></div>' : `<div onclick="openComposeMoment()" title="发动态" style="color:#fff;filter:drop-shadow(0 1px 3px rgba(0,0,0,.5));cursor:pointer;display:flex;align-items:center;justify-content:center;width:36px;height:36px">${ICON_MORE}</div>`}
     </div>
 
@@ -240,9 +293,37 @@ window.initMomentsPage = async function() {
   _shellViewKey = viewKey;
   window.onMomentNotify = handleMomentNotify;
   window.onNewMoment = handleNewMoment;
-  await loadMoments({ silent: !!getFeed(viewKey).items.length });
-  afterMomentsFeedReady();
+  if (cachedNow.items.length) {
+    paintFeed(cachedNow.items, username, userAvatar, viewCharId);
+  }
+  void loadMoments({ silent: !!cachedNow.items.length }).then(() => afterMomentsFeedReady());
   bindMomentsCoverMedia(coverSrc, coverIsVideo, coverCrop, canEditCover);
+  if (viewCharId && !viewChar) {
+    api.getCharacter(viewCharId).then((ch) => {
+      if (!ch || window._momentsViewCharId !== viewCharId) return;
+      const title = ch.display_name || ch.remark || ch.name || '';
+      if (!title) return;
+      const nameEl = document.getElementById('moments-cover-username');
+      if (nameEl) nameEl.textContent = title;
+      const head = document.getElementById('moments-topbar-title');
+      if (head) head.textContent = `${title}的朋友圈`;
+      const cover = ch.moments_cover || '';
+      if (!cover) return;
+      const src = window.resolveMediaUrl?.(cover) || cover;
+      const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(src);
+      const bg = document.getElementById('moments-cover-bg');
+      let media = document.getElementById('moments-cover-media');
+      if (!media && bg) {
+        bg.insertAdjacentHTML('afterbegin', isVideo
+          ? '<video class="moments-cover-img" id="moments-cover-media" playsinline muted loop></video>'
+          : '<img class="moments-cover-img" id="moments-cover-media" alt="">');
+        media = document.getElementById('moments-cover-media');
+      }
+      if (!media) return;
+      if (isVideo) setupBgVideo(media, src, null, { preload: 'metadata' });
+      else media.src = src;
+    }).catch(() => {});
+  }
 };
 
 function bindMomentsCoverMedia(coverSrc, isVideo, crop, canEdit) {
@@ -250,7 +331,7 @@ function bindMomentsCoverMedia(coverSrc, isVideo, crop, canEdit) {
   const media = document.getElementById('moments-cover-media');
   if (media && coverSrc) {
     if (isVideo) {
-      setupBgVideo(media, coverSrc, crop);
+      setupBgVideo(media, coverSrc, crop, { preload: 'metadata' });
     } else {
       applyMediaCrop(media, crop);
     }
@@ -375,7 +456,7 @@ function momentThumbHtml(moment) {
   }
   if (isMomentMediaVideo(first)) {
     const src = escapeHtml(window.resolveMediaUrl?.(first) || first);
-    return `<video class="moments-msg-thumb" src="${src}" muted playsinline preload="metadata"></video>`;
+    return `<video class="moments-msg-thumb" src="${src}" muted playsinline preload="none"></video>`;
   }
   const src = escapeHtml(window.resolveMediaUrl?.(first) || first);
   return `<img class="moments-msg-thumb" src="${src}" alt="">`;
@@ -586,7 +667,7 @@ function renderPost(m, username, userAvatar) {
     imgHtml = `<div class="moment-images ${colClass}">${imgs.map(img => {
       if (isMomentMediaVideo(img)) {
         const src = escapeHtml(window.resolveMediaUrl?.(img) || img);
-        return `<video class="moment-img moment-video" src="${src}" controls playsinline preload="metadata" style="width:100%;border-radius:6px;background:#000"></video>`;
+        return `<video class="moment-img moment-video" src="${src}" controls playsinline preload="none" style="width:100%;border-radius:6px;background:#000"></video>`;
       }
       const src = escapeHtml(window.resolveMediaUrl?.(img) || img);
       return `<img class="moment-img" src="${src}" alt="" onclick="viewMomentImage('${src}')" loading="lazy">`;
