@@ -938,6 +938,16 @@ function userAwayFromNian() {
   return d.inApp === false;
 }
 
+/** 'locked' 没在看手机 / 'other_app' 亮屏在用别的 / 'in_nian' 就在念里 / 'unknown' 拿不到 */
+function userPhonePresence() {
+  if (!phoneReachable()) return 'unknown';
+  const d = _snap.device || {};
+  if (d.screenOn === false || d.locked === true) return 'locked';
+  if (d.inApp === true) return 'in_nian';
+  if (d.inApp === false && d.screenOn === true) return 'other_app';
+  return 'unknown';
+}
+
 function enqueueIncomingCall(payload = {}) {
   const characterId = Number(payload.characterId);
   if (!characterId) return;
@@ -1477,6 +1487,7 @@ module.exports = {
   preferredScreenChatCharId,
   isPreferredScreenChatChar,
   userAwayFromNian,
+  userPhonePresence,
   userInNian,
   waitPhone,
 };

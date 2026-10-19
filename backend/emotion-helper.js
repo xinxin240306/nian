@@ -1179,6 +1179,22 @@ function scoreSilenceImpact(kind, idleMinutes, char) {
   };
 }
 
+/** 用户最后一句是在说自己去干嘛：这段空窗不是被晾，不再叠没理人的气 */
+const EXPLAINED_LEAVE_RE = /去洗澡|要洗澡|洗澡|泡澡|洗漱|冲个澡|去吃饭|吃饭去|我去吃|去吃午饭|去吃晚饭|我出门|要出门|出去一下|出去一趟|去上班|去开会|开会去|去上课|上课|去忙|先忙|晚安|去睡|要睡|我先睡|睡了|午觉|午睡|眯一会|打个盹/;
+
+function userExplainedThisAbsence(charId, beforeAiId) {
+  const row = db.prepare(`
+    SELECT content FROM messages
+    WHERE character_id=? AND is_dream=0 AND recalled=0 AND role='user'
+      AND type NOT IN ('system') AND id<?
+    ORDER BY id DESC LIMIT 1
+  `).get(charId, beforeAiId);
+  const raw = String(row?.content || '').replace(/^【自动回复】/, '').replace(/\s+/g, '');
+  if (!raw) return false;
+  const tail = raw.length > 80 ? raw.slice(-48) : raw;
+  return EXPLAINED_LEAVE_RE.test(tail);
+}
+
 /**
  * 定时检视沉默：主动消息未读 / 已读未回 → 按人设改心情。
  * 节流存在 mood.lastSilenceAt / lastSilenceKind。
@@ -1205,12 +1221,14 @@ function applySilenceMoodTick(charId, charRow = null) {
     ORDER BY id ASC LIMIT 1
   `).get(charId, lastAi.id);
   if (lastUserAfter) return null; // 已有回复，不算沉默
+  if (userExplainedThisAbsence(charId, lastAi.id)) return null;
 
   const idleMinutes = Math.max(0, (Date.now() - Date.parse(lastAi.timestamp)) / 60000);
   if (idleMinutes < 25) return null; // 太短不计入
 
+  // 锁屏/灭屏是没在看手机，不算「在刷手机不理你」
   let phoneIgnore = false;
-  try { phoneIgnore = !!require('./phone-llm-tools').userAwayFromNian(); } catch {}
+  try { phoneIgnore = require('./phone-state-helper').userPhonePresence() === 'other_app'; } catch {}
   const read = lastAi.is_read === 1 || lastAi.is_read === true || phoneIgnore;
   const kind = phoneIgnore ? 'phone_ignore' : (read ? 'read_no_reply' : 'unread');
   // 未读至少约 40 分钟；已读未回 / 人在刷手机约 25 分钟起算
@@ -1704,6 +1722,23 @@ function characterToneProfile(char = {}) {
   return { soft, sharp, lecture, blob };
 }
 
+function userTurnEmotionLine(inferred) {
+  const meaning = {
+    hostile: '话里带刺，冲着你。按性格接。',
+    angry: '在生气或烦。看见就行，反应按性格。',
+    hurt: '难过、委屈。看见就行，反应按性格，不要切成心理咨询。',
+    low: '累、没劲、低压。这是状态，不是生你的气，也不是出事了。不要追问「你怎么了」。',
+    warm: '开心或亲近。按平常接。',
+    apologetic: '在示好、缓和。按性格接。',
+    curious: '在问事。按问题接。',
+    brief: '话短。话短不等于不开心，按平常接。',
+  };
+  if (!inferred?.tone) return '';
+  const label = inferred.label || inferred.tone;
+  const note = meaning[inferred.tone] || '按这个结果接，不要再另补一层对方出事了。';
+  return `【对方这轮情绪】${label}。${note}`;
+}
+
 function buildReplyToneBlock(char, state, opts = {}) {
   if (!char) return '';
   const hasExamples = char.language_style && char.language_style.length > 50;
@@ -1748,23 +1783,11 @@ function buildReplyToneBlock(char, state, opts = {}) {
   const mundane = (!lingeringIgnore && !!opts.mundane)
     || (!lingeringIgnore && phoneTalk);
 
-  if (!mundane && inferred && inferred.tone !== 'brief' && inferred.tone !== 'curious') {
-    const id = promptSafeMoodLabel({ primary: inferred.tone || inferred.label, label: inferred.label });
-    if (id !== 'angry' || /我生气了|气死我了|火大了|烦死了|恨你|讨厌你/.test(userMsg)) {
-      lines.push(`对方这轮偏 ${id}，接的时候要看见，但你自己的反应仍按性格，不要跟着演同一种。`);
-      lines.push(tone.soft
-        ? '对方情绪不好：用你自己的温柔短接一下就好（可以轻声、可以先顺着说一句），禁止滑成「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」这类 AI 接情绪。'
-        : tone.sharp
-          ? '对方情绪不好：用你这个人会有的反应接（可以损一句再问、可以别扭地递台阶、也可以淡一句），禁止突然切成心理咨询/万能陪伴腔。'
-          : '对方情绪不好：用你这个人会有的反应接，禁止突然切成心理咨询/万能陪伴腔。');
-    }
-  } else if (!mundane && sensed && sensed !== 'neutral' && sensed !== 'angry') {
-    lines.push(`对方这轮偏 ${sensed}，接的时候要看见，反应按性格。`);
-    if (/sad|hurt|anxious|lonely|低落|难过|委屈|不安|孤单/.test(sensed)) {
-      lines.push(tone.soft
-        ? '看见对方的情绪，用你自己的温柔接；禁止 AI 客服式安抚话术。'
-        : '看见对方的情绪，用性格接；禁止切成万能陪伴/心理咨询腔。');
-    }
+  if (!mundane && sensed && /sad|hurt|anxious|lonely|低落|难过|委屈|不安|孤单/.test(sensed)) {
+    lines.push(`【对方这轮情绪】表情读到 ${sensed}。看见就行，反应按性格，不要切成心理咨询。`);
+  } else if (!mundane) {
+    const emotionLine = userTurnEmotionLine(inferred);
+    if (emotionLine) lines.push(emotionLine);
   }
 
   if (lowEnergy) lines.push('精力偏低（背景）：只体现在回得短、懒一点；不必说出来，禁止反复说累、头沉、身子沉。');

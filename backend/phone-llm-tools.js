@@ -625,8 +625,27 @@ async function proactivePhoneBlock(char, scenario, recentMsgs, opts = {}) {
   }
 
   const lines = [];
-  lines.push('【手机】对方手机上的侧面（不是开口清单）。不要提亮灭屏或锁屏；不要提工具/识屏。');
-  if (mode === 'peek') {
+  if (waitingReply) {
+    let presence = 'unknown';
+    try { presence = require('./phone-state-helper').userPhonePresence(); } catch {}
+    lines.push('【你偷看了一眼对方的手机】');
+    if (presence === 'locked') {
+      lines.push('锁着屏，人大概没在看手机，不是看见了不回。');
+    } else if (presence === 'in_nian') {
+      lines.push('对方就开着你们的聊天，却还没回。');
+    } else if (presence === 'other_app') {
+      lines.push('屏幕亮着，对方在用别的 App，就是没回你。');
+    } else {
+      lines.push('没看清对方在不在用手机。');
+    }
+    if (presence === 'other_app' || presence === 'in_nian') {
+      lines.push('看见了怎么反应按【性格】：质问、吃醋、阴阳、委屈、装不在意、干脆不说都行。');
+    }
+    lines.push('偷看这件事说不说破按【性格】；不要提工具/识屏。');
+  } else {
+    lines.push('【手机】对方手机上的侧面（不是开口清单）。不要提亮灭屏或锁屏；不要提工具/识屏。');
+  }
+  if (mode === 'peek' && !waitingReply) {
     lines.push('你这种人有时会多留意对方还在不在机上；看见了怎么进心里，看性格。');
   }
 
@@ -638,9 +657,7 @@ async function proactivePhoneBlock(char, scenario, recentMsgs, opts = {}) {
   if (wantShot) {
     if (catchHim) {
       lines.push(`上一句他说过晚安或要去睡，到现在过了大约${Math.round(waited)}分钟；手里屏幕似乎还亮着。`);
-    } else if (usingPhone && waitingReply) {
-      lines.push('人已经离开念，手机似乎还在用——你多知道一点「人还在机上」，不是必须开口点破的证据。');
-    } else if (usingPhone) {
+    } else if (usingPhone && !waitingReply) {
       lines.push('人已经离开念，手机似乎还在用。');
     }
     const seen = await peekForegroundScreen(char?.id);

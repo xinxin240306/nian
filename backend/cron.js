@@ -71,7 +71,7 @@ ${lens}`;
 [在聊什么]这段在聊什么[/在聊什么]
 [TA为什么说这个]猜TA为何说、什么心情[/TA为什么说这个]
 [我怎么想]你真实的感受念头[/我怎么想]
-[想知道的]好奇的；没有就空[/想知道的]
+[想知道的]你对TA真好奇、还不知道的（TA没说清的、TA的事）；为了接话凑的问题不算，没有就空[/想知道的]
 开口=四步合完后的一条反应；多句只是拆气泡。禁止抄本段、禁止原样坦白标记里的判断。
 ${livingHint}
 ${lens}`;
@@ -1037,64 +1037,73 @@ function buildUserAwayContextLine(recentMsgs) {
   return `用户最后一条：「${summary}」。若其中解释了暂时离开，按该事与【性格】接话；若无解释且沉默较久，追不追、怎么提只看【性格】——不要连环质问，也不要滑成万能关怀腔（人设温柔就按本人方式轻轻带一句即可）。`;
 }
 
-/** 被晾着：写成「看了眼手机」的处境，少规则多事实 */
-function buildWaitGlanceNarrative(char, idleMinutes, {
-  userReadIt, lastUserSummary, lastUserMsg, charSummary,
-} = {}) {
-  const idleStr = formatIdleDuration(idleMinutes);
-  const lines = [
-    `你看了眼手机。对方已经大约${idleStr}没回你。`,
-  ];
-  const last = String(lastUserSummary || '').trim();
-  const leaving = last && /要去|待会|等会|一会|忙一会|先去|等下|回头|去忙|有事|开会|上课|出门|洗澡|吃饭|睡觉|晚安|睡了/.test(last);
-  if (leaving) {
-    lines.push(`对方走前说过：「${last.slice(0, 72)}${last.length > 72 ? '…' : ''}」。`);
-  } else if (last && lastUserMsg && !isStaleLastTalk(lastUserMsg)) {
-    lines.push(`对方上一句是：「${last.slice(0, 72)}${last.length > 72 ? '…' : ''}」，之后没了，去向不清楚。`);
-  } else {
-    lines.push('对方去干嘛了你不清楚。');
+const SILENCE_ROUND_GAP_MS = 20 * 60 * 1000;
+const USER_LEFT_RE = /要去|待会|等会|一会|忙一会|先去|等下|回头|去忙|有事|开会|上课|上班|出门|洗澡|吃饭|睡觉|晚安|睡了|午觉/;
+
+/** 对方最后一句之后你发的消息，按隔开 20 分钟以上分轮。第一轮是你当时的回话，之后每轮是一次去找对方。 */
+function loadSilenceRounds(charId) {
+  const lastUser = db.prepare(
+    `SELECT id, content, type, timestamp FROM messages
+     WHERE character_id=? AND is_dream=0 AND recalled=0 AND role='user' AND (type IS NULL OR type != 'system')
+     ORDER BY id DESC LIMIT 1`
+  ).get(charId);
+  const ais = db.prepare(
+    `SELECT id, content, type, timestamp, is_read FROM messages
+     WHERE character_id=? AND is_dream=0 AND recalled=0 AND role='assistant' AND (type IS NULL OR type != 'system') AND id>?
+     ORDER BY id ASC`
+  ).all(charId, lastUser?.id || 0);
+  const rounds = [];
+  let prevMs = NaN;
+  for (const m of ais) {
+    const t = parseMsgTimestamp(m.timestamp).getTime();
+    if (!rounds.length || !Number.isFinite(prevMs) || !Number.isFinite(t) || t - prevMs > SILENCE_ROUND_GAP_MS) {
+      rounds.push({ at: t, msgs: [] });
+    }
+    rounds[rounds.length - 1].msgs.push(m);
+    if (Number.isFinite(t)) prevMs = t;
   }
-  if (userReadIt) {
-    lines.push('你那条显示已读，却一直没回音。');
-  } else {
-    lines.push('你那条好像还没被打开。');
-  }
-  const blob = `${char?.personality || ''} ${char?.emotion_style || ''} ${char?.behavior || ''}`;
-  const clingy = /粘人|黏人|依恋|缺爱|安全感|容易不安|多虑|恋爱脑|深情|敏感|玻璃心/.test(blob);
-  const cool = /淡漠|佛系|钝感|理性|冷淡|高冷|懒得管/.test(blob);
-  const unusualAfter = clingy ? 35 : cool ? 150 : 70;
-  if (Number(idleMinutes) >= unusualAfter) {
-    lines.push('以你们平时，这已经偏久了。');
-  }
-  if (charSummary) lines.push(`你上次发的是：「${charSummary}」。`);
-  return lines;
+  return { lastUser, rounds };
 }
 
-/** 角色上一条后用户未回：到点触发 → 处境一瞥，不是推送任务 */
-function buildAiUnrepliedProactiveBlock(char, settings, lastMsg, recentMsgs, idleMinutes, outreachAnchor = null) {
-  const userReadIt = lastMsg?.is_read === 1 || lastMsg?.is_read === true;
-  const anchorForSummary = outreachAnchor || lastMsg;
-  const charSummary = summarizeMsgContent(anchorForSummary);
-  const lastUserMsg = [...(recentMsgs || [])].reverse().find(m => m.role === 'user');
-  const lastUserSummary = (lastUserMsg && !isStaleLastTalk(lastUserMsg)) ? summarizeMsgContent(lastUserMsg) : '';
-  const awayHint = buildUserAwayContextLine(recentMsgs);
+function roundText(round) {
+  return round.msgs.map((m) => summarizeMsgContent(m)).filter(Boolean).join(' / ').slice(0, 140);
+}
 
-  const narrative = buildWaitGlanceNarrative(char, idleMinutes, {
-    userReadIt,
-    lastUserSummary,
-    lastUserMsg,
-    charSummary,
-  });
-  if (awayHint) narrative.push(awayHint);
+/** 对方没理你：你去找对方。每次都接着这段沉默往下走，不是每次重新开一轮情绪。 */
+function buildAiUnrepliedProactiveBlock(char, settings, lastMsg, recentMsgs, idleMinutes) {
+  const { lastUser, rounds } = loadSilenceRounds(char.id);
+  const now = Date.now();
+  const ago = (ms) => (Number.isFinite(ms) ? formatIdleDuration((now - ms) / 60000) : '');
+  const lines = [];
+
+  const userLine = lastUser ? summarizeMsgContent(lastUser) : '';
+  const userMs = lastUser ? parseMsgTimestamp(lastUser.timestamp).getTime() : NaN;
+  if (userLine) {
+    const left = USER_LEFT_RE.test(String(lastUser.content || ''));
+    lines.push(left
+      ? `对方${ago(userMs)}前说：「${userLine.slice(0, 80)}」，之后就没再说话。`
+      : `对方最后一句是${ago(userMs)}前的「${userLine.slice(0, 80)}」，之后没再说话，也没说去干嘛。`);
+  }
+
+  const pings = rounds.slice(1);
+  if (rounds[0]) lines.push(`你当时回的是：「${roundText(rounds[0])}」（${ago(rounds[0].at)}前）。`);
+  if (pings.length) {
+    lines.push(`之后你已经去找过对方${pings.length}次，都没回：`);
+    for (const r of pings.slice(-3)) lines.push(`· ${ago(r.at)}前：「${roundText(r)}」`);
+    lines.push('这次是同一段等待里的又一次。心里比上次更急、更气、更委屈，还是赌气不想理、或者干脆放下，按【性格】和【心里已经有的】往前走一步。不要像第一次找对方那样重新开头，也不要把上面的话换个说法再说一遍。');
+  } else {
+    lines.push('这是你第一次来找对方。');
+  }
+
+  const userReadIt = lastMsg?.is_read === 1 || lastMsg?.is_read === true;
+  lines.push(userReadIt ? '你最后那条显示已读。' : '你最后那条还没被点开。');
 
   return {
     title: '',
-    situational: narrative,
-    instruction: [
-      '心里怎样、开不开口、提不提「等多久」，只看【性格】和【心里已经有的】。',
-      '可以短；不要「在吗」「看到回一下」；不要复读你上一条；别把想念说成去会合。',
-    ].join('\n'),
-    userContent: `你看了眼手机：对方已经大约${formatIdleDuration(idleMinutes)}没回。随口发或不发都按你现在的心情——这不是任务。`,
+    situational: lines,
+    instruction: '只输出要发给对方的话，口语，可以很短，也可以连发几句。别把想念说成去会合。',
+    userContent: pings.length ? '（你又点开了和对方的对话框）' : '（你点开了和对方的对话框）',
+    pingCount: pings.length,
   };
 }
 
@@ -1102,10 +1111,8 @@ function buildProactiveEngagementGuide(char, recentMsgs, scenario, opts = {}) {
   const rel = buildRelationshipEngagementGuide(char);
   const away = buildUserAwayContextLine(recentMsgs);
   if (scenario === 'ai_unreplied') {
-    // 跟句场景正文已是「看了眼手机」，这里不再叠第二套主动话术
-    const lines = [rel, '别借机让人出门会合；回家/收工只是你自己那边的事。'];
-    if (away) lines.push(away);
-    return lines.join('\n');
+    // 跟句场景正文已有对方最后一句和你找过的几次，这里不再叠
+    return rel;
   }
   const lines = [
     rel,
@@ -1228,7 +1235,13 @@ function buildProactiveLifeShareExtra({
   }
   const grounding = buildLifeShareGrounding(char, settings, recentMsgs);
   const avoid = recentLifeShareAvoidBlock(recentMsgs);
-  return `你在过自己的日子，刚碰上点很小的事，想不想丢一句到对话框。
+  const motives = [
+    '你这边刚碰上件好玩、离谱或者想吐槽的事，第一个想到要讲给对方听。',
+    '你刚看到、听到或想到点什么，让你想起对方，想跟对方说。',
+    '你这边有件事想听听对方怎么看，或者就是想让对方知道。',
+  ];
+  const motive = motives[Math.floor(Math.random() * motives.length)];
+  return `你在过自己的日子。${motive}是你自己想找对方，不是谁让你发的。
 ${situational.join('\n')}
 ${grounding}
 ${offlineNote}
@@ -4496,7 +4509,7 @@ ${forVideoCallText ? `【文字视频·格式硬性】对方看到的是镜头�
     : `【沉浸指令】你就是${char.name}本人。按自己的性格、经历和此刻日子说话，不是在「陪聊值班」的客服，也不是情绪树洞机器人。
 禁止提及AI、模型、程序、虚拟、扮演、角色设定。
 你有自己的日程和私事，不是守着对话框等人回。情绪按【性格】本人处理。
-对方情绪不好时：看见，用你这个人会有的反应接——禁止突然切成心理咨询/万能陪伴腔（「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」）。
+有【对方这轮情绪】才按那一条接，里面写了什么就是什么。没有这条，就是没读到情绪，按平常聊，不要自己补成对方不开心或出事了。写的是难过或生气，才按那个反应，仍用你这个人的方式，禁止切成心理咨询（「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」）。
 【当前通道·硬性】现在是微信打字，不是电话。只有出现「通话开始/已接通」且还没有「通话结束」时，才算正在打电话。
 上文标 [通话] 的是已经打过的电话，当记录看，不要接着对着听筒说。禁止以「喂」开头，禁止问「能听见吗」「听得到吗」，禁止用语音条假装线路还通着。
 【背景 vs 输出·硬性】标题以「背景·」开头的块（此刻行程、过日子、时间感知、所在地），只进心里作对照，不是要复述进气泡的素材。你的来历、性格、记忆照常是你自己，对方问起可以聊。
@@ -4581,7 +4594,9 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
 · 重情绪、想念、认真解释、碎碎念或对方要听细节时可以多几句。禁止连续四五条把同一件事换说法再说一遍。
 · 去掉书面化表达，保留这个人的语气和玩笑。
 【好奇·内容驱动】对方话里含糊、情绪、计划、没说清的地方，按【性格】想多知道一点就自然接——可以软问、可以夹在中间问，问法跟这个人平时说话走——不是客服盘问，也不是每轮必问。
-· 不必每轮句末追问（你呢／然后呢／今天怎么样／怎么了）。
+· 禁止访谈腔收尾：先用中立口气把话题讲一遍（「X确实有不同的吃法」），再递一个调查对方偏好/习惯的问题（「那你平时是喜欢A还是B？」「那你煮的时候会加什么？」）。这是 AI 助手维持对话的套路，不是你这个人。
+· 你接话靠的是你自己：你的看法、你的经历、你的偏好、吐槽、抬杠、调侃、撒娇。说完就可以停，把话头留给对方。
+· 你真想知道才问，问法要是你的嘴（「煮的？那不得甜死」比「你平时会加什么」像人）。不要连着几轮都用问句收尾。
 · 禁止菜单式甩回：「你想聊什么」「聊点啥都行」「你说吧」。
 · ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: false }).replace(/^【禁止空壳陪伴收尾】/, '禁止空壳陪伴收尾：')}
 【找话题】你不是陪聊助手：有自己的兴趣、脾气和当下日子。
@@ -4889,7 +4904,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
   const softVoiceLine = toneProfile.soft
     ? '· 语气分寸看【性格】：人设温柔/软就按这个人的温柔说，不要为了「防 AI」把自己说硬。禁止的是空洞客服安抚与万能温和模板，不是温柔本身。'
     : '· 语气分寸完全看【性格】【语言风格】：人设怎么写就怎么说。禁止的是「万能温和/客服安抚」模板；人设没有的腔调不要硬套。';
-  const emotionVoiceLine = '· 对方情绪不好时：看见，用你这个人会有的反应接；禁止突然切成心理咨询/万能陪伴腔。';
+  const emotionVoiceLine = '· 没有【对方这轮情绪】就是没读到，按平常接，不要自己补成对方不开心。';
   // 训人腔（长本事了）：仅非 S/管教人设禁止；毒舌打趣≠管教爹味
   const lectureVoiceLine = toneProfile.lecture
     ? '· 人设带管教/支配/S 向：训人、压人、口吻按人设来即可（「长本事了」「胆子大了」这类可出现）。'
@@ -7824,12 +7839,12 @@ function computeUserReturnGap(characterId, isDreamMode = false) {
   }
 
   if (!charAnchor?.timestamp) {
-    return { minutes: 0, charAnchor: null, noteTargetUserId };
+    return { minutes: 0, charAnchor: null, noteTargetUserId, latestChar: null, minutesSinceLatest: 0 };
   }
 
   const charMs = parseMsgTimestamp(charAnchor.timestamp).getTime();
   if (!Number.isFinite(charMs)) {
-    return { minutes: 0, charAnchor, noteTargetUserId };
+    return { minutes: 0, charAnchor, noteTargetUserId, latestChar: null, minutesSinceLatest: 0 };
   }
 
   // 空窗终点：优先用「用户发到聊天页」的第一条待回复消息时间戳；
@@ -7840,7 +7855,21 @@ function computeUserReturnGap(characterId, isDreamMode = false) {
     if (Number.isFinite(userMs)) endMs = userMs;
   }
   const minutes = Math.max(0, Math.round((endMs - charMs) / 60000));
-  return { minutes, charAnchor, noteTargetUserId };
+
+  // 中间若有主动跟句，用户回的是最后那条，不能再把更早的首句当成「你上一条」
+  let latestChar = charAnchor;
+  if (awaiting.length > 0) {
+    const latest = getLastRealCharMessage(characterId, isDreamMode, awaiting[0].id);
+    if (latest?.id) latestChar = latest;
+  }
+  let minutesSinceLatest = minutes;
+  if (latestChar?.timestamp && Number(latestChar.id) !== Number(charAnchor.id)) {
+    const latestMs = parseMsgTimestamp(latestChar.timestamp).getTime();
+    if (Number.isFinite(latestMs)) {
+      minutesSinceLatest = Math.max(0, Math.round((endMs - latestMs) / 60000));
+    }
+  }
+  return { minutes, charAnchor, noteTargetUserId, latestChar, minutesSinceLatest };
 }
 
 /** 角色开口后用户一直不回：从你本轮第一句算起，不被后续追话重置 */
@@ -7873,7 +7902,7 @@ function buildReplyTimeNotePayload(settings, characterId, isDreamMode, opts = {}
   if (isDreamMode) {
     return { timeNote: '', noteTargetUserId: null, minutes: 0 };
   }
-  const { minutes, charAnchor, noteTargetUserId } = computeUserReturnGap(characterId, isDreamMode);
+  const { minutes, charAnchor, noteTargetUserId, latestChar, minutesSinceLatest } = computeUserReturnGap(characterId, isDreamMode);
 
   let userContent = String(opts.userMessage || '').trim();
   if (!userContent && noteTargetUserId) {
@@ -7883,16 +7912,24 @@ function buildReplyTimeNotePayload(settings, characterId, isDreamMode, opts = {}
     } catch { /* ignore */ }
   }
 
-  if (settings?.time_aware_enabled !== '1' || !charAnchor || minutes < USER_RETURN_GAP_NOTE_MIN) {
-    return { timeNote: '', noteTargetUserId, minutes };
+  // 同一轮拆开的气泡不算。隔开一段时间又发过的，不再把更早那句标成「你上一条」
+  let laterOutreach = false;
+  if (latestChar?.id && charAnchor?.id && Number(latestChar.id) !== Number(charAnchor.id)) {
+    const a = parseMsgTimestamp(charAnchor.timestamp).getTime();
+    const b = parseMsgTimestamp(latestChar.timestamp).getTime();
+    laterOutreach = Number.isFinite(a) && Number.isFinite(b) && (b - a) > 20 * 60 * 1000;
+  }
+  const gapMinutes = laterOutreach ? minutesSinceLatest : minutes;
+  if (laterOutreach || settings?.time_aware_enabled !== '1' || !charAnchor || gapMinutes < USER_RETURN_GAP_NOTE_MIN) {
+    return { timeNote: '', noteTargetUserId, minutes: gapMinutes };
   }
 
   const timeNote = buildChatTimeNote(settings, {
-    minutesSinceCharReply: minutes,
+    minutesSinceCharReply: gapMinutes,
     charLastContent: charAnchor.content || '',
     userContent,
   });
-  return { timeNote, noteTargetUserId, minutes };
+  return { timeNote, noteTargetUserId, minutes: gapMinutes };
 }
 
 /**
@@ -7937,7 +7974,7 @@ function loadSideChannelChatContext(charId, { limit = 14 } = {}) {
   };
 }
 
-/** 主动消息：模拟「隔一段时间看手机」——补回未读 / 轻跟沉默 */
+/** 主动消息：用户没回够久之后，角色这边再隔一段才发。不必接上一条话题。 */
 async function buildProactiveContext(char, settings, idleMinutes, scenario, lastMsg, awaitingReply = [], opts = {}) {
   settings = withCharChatPrefs(settings, char);
   const tz = settings.timezone || 'Asia/Shanghai';
@@ -7985,10 +8022,8 @@ async function buildProactiveContext(char, settings, idleMinutes, scenario, last
   const memoryCueText = lastUserFresh
     ? (summarizeMsgContent(lastUserFresh) || String(lastUserFresh.content || '').trim())
     : '';
-  const continuityNote = historyForApi.length
-    ? (memoryCueText
-      ? '【接上文】上方是你们刚聊过的原文近窗。开口必须接得上这段对话（或对方未回的那句），不要当成空白冷启动另起炉灶；找小事也要能挂在上文上。'
-      : '【接上文】上方是你们刚聊过的原文近窗。上一段若已隔开，可以换话头，但不要假装不认识刚才聊过的人/事。')
+  const continuityNote = (historyForApi.length && scenario === 'user_unreplied')
+    ? '【迟到的回复】上方近窗是对方发来、你还没回的话。这轮接那几句的具体内容。'
     : '';
 
   let extra;
@@ -8046,9 +8081,7 @@ ${lengthGuide || '口语短句即可，只输出要发的正文。'}`;
       recentMsgs,
     })}
 ${continuityNote}`;
-    userContent = memoryCueText
-      ? '你刚碰上点小事，想不想丢一句到对话框里——接得上上文最好（对方未必在看）。'
-      : '你刚碰上点自己才会碰上的小事，随手丢不丢一句到对话框，看心情（对方未必在看）。';
+    userContent = '（你点开了和对方的对话框）';
   } else if (scenario === 'travel_arrive' || scenario === 'process_done') {
     let pending = null;
     try { pending = require('./process-time-helper').getDueProcess(char.id); } catch {}
@@ -8082,8 +8115,8 @@ ${caretakerBan}`;
 ${continuityNote}
 ${offlineNote}
 ${nightEmotionNote}
-像真人随手点开聊天：有具体一点的东西就行，别空泛，别通知腔，别「好久不见/最近怎么样」。
-可以丢你这边的小事，也可以轻轻接上未了的话；不是跟进工单。
+像真人隔一阵才看手机：有具体一点的东西就行，别空泛，别通知腔，别「好久不见/最近怎么样」。
+可以丢你这边的小事，也可以轻轻提一句；不是跟进工单。
 ${caretakerBan}
 ${lengthGuide || '长度 1～2 句为主，口语化，只输出你要发的消息正文。'}`;
     userContent = nightEmotionNote
@@ -8340,7 +8373,7 @@ async function checkProactiveMessage() {
     // 空窗未到阈值时不占检查位，下一分钟还能再看；真正准备发了再记 lastCheck
     proactiveLastCheck.set(char.id, Date.now());
 
-    // 跟句/未读情境：先按人设把沉默写进情绪曲线，再生成主动消息
+    // 沉默越久心情越往前走；节流和「对方说过去干嘛」在 applySilenceMoodTick 里
     if (scenario === 'ai_unreplied') {
       try { emotionHelper.applySilenceMoodTick(char.id, char); } catch {}
     }
@@ -8360,8 +8393,8 @@ async function checkProactiveMessage() {
       contextText: contextText || '',
       sessionClosed: !memoryCueText,
       enableInlineDirectives: true,
-      // 夜间破例提示已含冲突余波，避免与 emotionalCarryover 双重堆叠导致车轱辘
-      suppressEmotionalCarryover: !!nightEmotionGate,
+      // 夜间破例、或这段沉默里已经发过：不要每条都把情绪余波再开成一轮新的气
+      suppressEmotionalCarryover: !!nightEmotionGate || charAlreadyFollowedUp(char.id),
     };
     try { await prefetchLocationWeather(char, settings, proactiveOpts); } catch {}
     const systemPrompt = buildSystemPrompt(char, settings, extra, proactiveOpts);

@@ -2657,10 +2657,64 @@ function stripCopiedLanguageExamples(text, languageStyle) {
   return kept.join(kept.length > 1 && kept.every((s) => /[。！？…!?]$/.test(s)) ? '' : '\n');
 }
 
+// 访谈腔收尾：顺着话题调查对方的偏好/习惯/做法（平时是A还是B、会加什么、一般怎么…）
+const INTERVIEW_TAIL_RE = /^(?:那|那么|所以)?(?:你|您)/;
+const INTERVIEW_HABIT_RE = /平时|一般|平常|通常|日常|习惯|偏爱|更爱|更喜欢|喜欢.{0,12}还是|会.{0,12}还是|会加|会放|会用|会配|会选/;
+
+function splitSentences(t) {
+  return String(t || '').split(/(?<=[。！？…!?])\s*|\n+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function lastSentence(t) {
+  const parts = splitSentences(t);
+  return parts[parts.length - 1] || '';
+}
+
+function isInterviewTailQuestion(sentence) {
+  const s = String(sentence || '').trim();
+  if (!/[？?]$/.test(s) || /[\[\]【】]/.test(s)) return false;
+  const core = s.replace(/[？?！!。…~～\s]+$/g, '').replace(/^[，,、\s]+/, '');
+  if (core.length > 40) return false;
+  return INTERVIEW_TAIL_RE.test(core) && INTERVIEW_HABIT_RE.test(core);
+}
+
+/**
+ * 上一轮你也是用访谈腔问句收尾、这轮又来：去掉这轮最后那句。
+ * 单句、只有偶尔一次的问句不动。
+ */
+function dropRepeatedInterviewTail(text, recentHistory) {
+  const t = String(text || '').trim();
+  if (!t || !/[？?]\s*$/.test(t)) return t;
+  if (looksLikeStandaloneHtml(t) || looksLikeWebCardPayload(t) || t.startsWith('{')) return t;
+  const parts = splitSentences(t);
+  if (parts.length < 2) return t;
+  const last = parts[parts.length - 1];
+  if (!isInterviewTailQuestion(last)) return t;
+
+  const hist = Array.isArray(recentHistory) ? recentHistory : [];
+  let prevAiTail = '';
+  let seenUser = false;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const m = hist[i];
+    if (!m || m.type === 'system') continue;
+    if (m.role === 'user') { seenUser = true; continue; }
+    if (m.role === 'assistant' && seenUser && (!m.type || m.type === 'text')) {
+      prevAiTail = lastSentence(m.content);
+      break;
+    }
+  }
+  if (!isInterviewTailQuestion(prevAiTail)) return t;
+
+  const at = t.lastIndexOf(last);
+  if (at <= 0) return t;
+  return t.slice(0, at).trim() || t;
+}
+
 function polishSpokenAiText(text, languageStyle, opts = {}) {
   let t = dropTruncatedSpeech(stripCopiedLanguageExamples(collapseRepeatedProse(text), languageStyle));
   if (!opts.theater) {
     try { t = require('./world-lock-helper').scrubMeetupLeakSpeech(t); } catch { /* ignore */ }
+    if (opts.recentHistory) t = dropRepeatedInterviewTail(t, opts.recentHistory);
   }
   return t;
 }

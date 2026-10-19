@@ -4483,7 +4483,7 @@ app.post('/api/messages/send', async (req, res) => {
     }
 
     if (!isDreamMode && !callVideoTextMode) {
-      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode });
+      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode, recentHistory: liveHistory });
     }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
@@ -5473,7 +5473,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
     }
 
     if (!isDreamMode && !callVideoTextMode) {
-      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode });
+      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode, recentHistory: retrySession.liveHistory });
     }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
