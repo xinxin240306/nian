@@ -465,6 +465,66 @@ function useNative() {
   return !!_deps?.useNativeCallAudio?.();
 }
 
+/**
+ * 页面被系统拆掉重载，但原生麦还在：把已接通的通话页接回来。
+ * 不重新拨号，也不再写一条「通话开始」。
+ */
+export async function resumeLiveCall(info) {
+  const cid = Number(info?.characterId) || 0;
+  if (!cid) return false;
+  if (getState().inCall) return true;
+  const peer = _deps?.getCharMeta?.(cid) || {};
+  const video = !!info?.video;
+  const name = info?.name || peer?.name || 'TA';
+  const avatar = info?.avatar || peer?.avatar || '';
+
+  unlockAudioPlayback();
+  void setNativeCallMediaAudio(true);
+  _deps?.bindCallChatLayout?.();
+  _deps?.ensureCallPipBound?.();
+  _callTranscript = [];
+  _playedSpeechIds.clear();
+  clearCallChatArea();
+
+  patchState({
+    inCall: true,
+    inVideoCall: video,
+    callDialing: false,
+    callCharId: cid,
+    callMinimized: false,
+    voiceMode: false,
+  });
+  syncFlags();
+  resetPresenceRuntime();
+  applyPresenceModeUi();
+
+  const screen = document.getElementById('call-screen');
+  screen?.classList.remove('is-minimized', 'is-dragging', 'is-speaking', 'is-dialing', 'is-cam-swapped', 'is-rear-cam');
+  screen?.classList.toggle('is-video', video);
+  _deps?.clearCallPipInlinePos?.();
+  screen?.classList.add('active');
+  showConnectedUi();
+  startCallTimer();
+  const startedAt = Number(info?.startedAt) || 0;
+  if (startedAt > 0) getState().callStartTime = startedAt;
+
+  const avatarEl = document.getElementById('call-avatar');
+  const nameEl = document.getElementById('call-name');
+  if (avatarEl && avatar) avatarEl.src = avatar;
+  if (nameEl) nameEl.textContent = name;
+
+  if (video) {
+    try { await _deps?.startCallCamera?.({ silent: true }); } catch {}
+    try { await _deps?.ensureCallVideosPlaying?.(); } catch {}
+  }
+  if (!getState().inCall) return false;
+  setVoiceMode(true);
+  _deps?.setIdleStatus?.();
+  syncWaveform();
+  _deps?.syncOverlay?.();
+  return true;
+}
+
 export function cancelDialingCall() {
   if (!getState().callDialing) return;
   const token = (getState().dialingToken || 0) + 1;

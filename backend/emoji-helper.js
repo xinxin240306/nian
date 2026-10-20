@@ -1350,16 +1350,28 @@ function buildWebCardPromptSection() {
 function findQuoteSourceId(characterId, isDream, quoteText) {
   if (!characterId || !quoteText) return null;
   const q = String(quoteText).trim();
-  if (!q) return null;
+  if (!q || q.length < 2) return null;
   const rows = db.prepare(
     `SELECT id, content FROM messages WHERE character_id=? AND is_dream=? AND recalled=0 ORDER BY id DESC LIMIT 40`
   ).all(characterId, isDream ? 1 : 0);
+  let best = null;
+  let bestScore = 0;
   for (const r of rows) {
-    const c = String(r.content || '').trim();
+    const c = String(r.content || '').replace(/\s+/g, ' ').trim();
     if (!c) continue;
-    if (c.includes(q) || q.includes(c)) return r.id;
+    const contained = c.includes(q);
+    const covers = q.length >= 8 && c.length >= 4 && q.includes(c);
+    if (!contained && !covers) continue;
+    // 后来说的话里常常复述旧句。取更像「原句」的那条，避免引用条钉到角色自己后一轮的复述上。
+    const score = contained ? q.length / c.length : c.length / q.length;
+    const closer = score > bestScore + 0.08
+      || (best && Math.abs(score - bestScore) <= 0.08 && r.id < best.id);
+    if (!best || closer) {
+      best = r;
+      bestScore = score;
+    }
   }
-  return null;
+  return best ? best.id : null;
 }
 
 /** 把引用预览挂到分段结果里第一条文字段上（多气泡时只有第一条带引用条） */
@@ -1716,24 +1728,15 @@ function pickQuoteCandidates(recentHistory = [], { skipLatest = true, limit = 2 
   return out;
 }
 
-/** 从用户句抽可对词（含 2～3 字滑窗，提高「对上旧句」命中） */
+/** 从用户句抽可对词。只用较长的整词，二字滑窗会把普通接话误判成在翻旧句。 */
 function quoteMatchTerms(userText) {
   const raw = String(userText || '')
     .split(/[，。！？、；：\s\n\r\t\/\|·…—\-~～「」『』（）()\[\]【】]{1,}/)
     .map((s) => s.trim())
-    .filter((s) => s.length >= 2 && s.length <= 16);
-  const extra = [];
-  for (const t of raw) {
-    if (!/[\u4e00-\u9fff]{3,}/.test(t)) continue;
-    for (let i = 0; i <= t.length - 2; i++) {
-      extra.push(t.slice(i, i + 2));
-      if (i + 3 <= t.length) extra.push(t.slice(i, i + 3));
-    }
-  }
-  return [...new Set([...raw, ...extra])]
-    .filter((t) => t.length >= 2 && t.length <= 12)
+    .filter((s) => s.length >= 4 && s.length <= 16);
+  return [...new Set(raw)]
     .sort((a, b) => b.length - a.length)
-    .slice(0, 10);
+    .slice(0, 8);
 }
 
 /** 当前话里的词能否对上「更早一条」用户话（且对不上最新一条）→ 适合点名旧句 */
@@ -1757,7 +1760,7 @@ function earlierUserLineMatches(userText, recentHistory = []) {
   return hits;
 }
 
-/** 你刚问了对方，对方没正面答、却带了更早话题 → 适合引用钉住 */
+/** 你刚问了对方，对方没正面答、却把更早那句又说了一遍 → 才适合引用钉住 */
 function unansweredAskWithEarlierTopic(recentHistory = []) {
   const hist = recentHistory || [];
   if (hist.length < 3) return [];
@@ -1775,9 +1778,19 @@ function unansweredAskWithEarlierTopic(recentHistory = []) {
   if (!/[？?]|吗\s*$|嘛\s*$|呢\s*$|怎么样|如何|要不要|好不好/.test(ask)) return [];
   const after = hist.slice(lastAiIdx + 1).filter(isUserTextBubble);
   if (!after.length) return [];
-  // 对方有答，但近窗里还有更早可点名的句（跨过上一问）
-  const before = hist.slice(0, lastAiIdx).filter(isQuotableUserBubble).slice(-3);
-  return before.map((m) => clipQuoteCandidate(m.content)).filter(Boolean).slice(0, 2);
+  const afterText = after.map((m) => String(m.content || '')).join('\n');
+  const askTerms = quoteMatchTerms(ask);
+  if (askTerms.some((t) => afterText.includes(t))) return [];
+  const before = hist.slice(0, lastAiIdx).filter(isQuotableUserBubble).slice(-4);
+  const echoed = [];
+  for (let i = before.length - 1; i >= 0 && echoed.length < 2; i--) {
+    const c = String(before[i].content || '');
+    const terms = quoteMatchTerms(c);
+    if (!terms.some((t) => afterText.includes(t))) continue;
+    const clip = clipQuoteCandidate(c);
+    if (clip && !echoed.includes(clip)) echoed.push(clip);
+  }
+  return echoed;
 }
 
 function recentAssistantUsedQuote(charId, isDream = false, lookback = QUOTE_COOLDOWN_ASSISTANT) {
@@ -1848,12 +1861,12 @@ function buildQuoteReplyPromptSection(opts = {}) {
       candidates: opts.candidates || [],
     }
     : assessQuoteReplyNudge(opts);
-  const base = `【引用】像微信点名某句：调侃、纠正、追问、翻旧账、接住没回完的话时，回复开头写：[引用]原句照抄[/引用]再接你的话。原句照抄近窗原文。一条只用一次；别连着刷；纯顺着最新一句接话就不必引。`;
+  const base = `【引用】像微信点名某句：调侃、纠正、追问、翻旧账、接住没回完的话时，回复开头写：[引用]原句照抄[/引用]再接你的话。原句照抄近窗原文。一条只用一次；别连着刷；纯顺着最新一句接话就不必引。正文必须回答对方刚刚这条，不要改去回答被点名的旧句。`;
   if (!assessed.nudge) return base;
   const samples = (assessed.candidates || []).slice(0, 2).map((c) => `「${c}」`).join('或');
   const hint = samples
-    ? `这轮很适合引用。可钉：${samples}。钉住再接话；若其实只是顺着最新一句，就别硬引。`
-    : `这轮很适合用引用钉住对方之前某句，再接你的话；对不上就别硬引。`;
+    ? `若你确实在点旧句，可钉：${samples}。钉完仍要接住对方刚刚这条；只是顺着最新一句，就别引。`
+    : `只有确实在翻旧句时才引用；对不上、或只是接最新一句，就别硬引。`;
   return `${base}
 【引用·本轮】${hint}`;
 }

@@ -14,6 +14,7 @@ import {
   acceptProactiveCall,
   endCall,
   cancelDialingCall,
+  resumeLiveCall,
   answerPendingCall,
   connectWhenOpenerReady,
   onRoleSpeechFinished,
@@ -51,6 +52,7 @@ export function installCallEngine(deps) {
   window.acceptProactiveCall = wrap(acceptProactiveCall);
   window.endCall = wrap(endCall);
   window.cancelDialingCall = wrap(cancelDialingCall);
+  window.resumeLiveCall = wrap(resumeLiveCall);
   window.setCallPresenceMode = (mode) => {
     setCallPresenceMode(mode);
     _pullFlags?.();

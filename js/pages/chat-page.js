@@ -1425,6 +1425,20 @@ async function reconcileOrphanNativeCall() {
 
     const wasVideo = !!st?.activeCallVideo;
     const startedAt = Number(st?.activeCallStartedAt) || 0;
+
+    // 渲染进程被回收后页面重载，但原生麦还在这个进程里：接回通话页，不要写成挂断。
+    if (callOn && charId > 0 && typeof window.resumeLiveCall === 'function') {
+      window.setActiveChar?.(charId);
+      window.navigateTo?.('chat');
+      const resumed = await window.resumeLiveCall({
+        characterId: charId,
+        video: wasVideo,
+        startedAt,
+        name: st?.activeCallName || '',
+      });
+      if (resumed) return;
+    }
+
     const durationSec = startedAt > 0
       ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
       : 0;

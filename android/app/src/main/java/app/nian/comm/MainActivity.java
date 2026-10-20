@@ -62,6 +62,8 @@ public class MainActivity extends BridgeActivity {
 
   public static void setKeepWebAlive(boolean on) {
     keepWebAlive = on;
+    MainActivity a = current;
+    if (a != null) a.applyWebViewRendererPriority();
   }
 
   public static void openAnswerIncoming(Context ctx, int characterId) {
@@ -190,6 +192,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onStart() {
     super.onStart();
+    applyWebViewRendererPriority();
     attachStatusBarBridge();
     attachShareBridge();
     attachMusicSyncBridge();
@@ -211,12 +214,40 @@ public class MainActivity extends BridgeActivity {
     }
     webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
     webView.setWebChromeClient(new NianWebChromeClient(bridge));
+    bridge.setWebViewClient(new NianWebViewClient(bridge));
+    applyWebViewRendererPriority();
     mediaChromeInstalled = true;
+  }
+
+  /**
+   * 切后台、锁屏时系统默认把 WebView 渲染进程降成「看不见就可以杀」。
+   * 渲染进程一死，Capacitor 的 onRenderProcessGone 返回 false，整个进程被干掉，
+   * 再点进来就是冷启动；通话中 onDestroy 还会把麦和通话球清掉。
+   * waivedWhenNotVisible=false：看不见也保持优先级。通话中再抬到 IMPORTANT。
+   */
+  private int appliedRendererPriority = Integer.MIN_VALUE;
+
+  private void applyWebViewRendererPriority() {
+    if (Build.VERSION.SDK_INT < 26) return;
+    try {
+      Bridge bridge = getBridge();
+      WebView wv = bridge != null ? bridge.getWebView() : null;
+      if (wv == null) return;
+      boolean call = keepWebAlive || ScreenShareOverlay.isCallOn() || NativeCallEngine.isRunning();
+      int priority = call ? WebView.RENDERER_PRIORITY_IMPORTANT : WebView.RENDERER_PRIORITY_BOUND;
+      if (priority == appliedRendererPriority) return;
+      wv.setRendererPriorityPolicy(priority, false);
+      appliedRendererPriority = priority;
+      android.util.Log.i("NianMain", "webview renderer priority=" + priority + " call=" + call);
+    } catch (Exception e) {
+      android.util.Log.w("NianMain", "renderer priority", e);
+    }
   }
 
   @Override
   public void onResume() {
     MAIN_HANDLER.removeCallbacks(keepCallWebTick);
+    applyWebViewRendererPriority();
     super.onResume();
     resumed = true;
     CapsuleOverlay.hide();
@@ -250,6 +281,7 @@ public class MainActivity extends BridgeActivity {
 
   @Override
   public void onPause() {
+    applyWebViewRendererPriority();
     hideSoftKeyboard();
     resumed = false;
     ScreenShareOverlay.onAppBackground(this);
@@ -365,13 +397,26 @@ public class MainActivity extends BridgeActivity {
 
   @Override
   public void onDestroy() {
+    boolean configChange = isChangingConfigurations();
     if (current == this) current = null;
-    // Activity 销毁时 WebView 已死：清通话运行态，保留 prefs 给下次启动写结束记录
-    if (keepWebAlive || ScreenShareOverlay.isCallOn()) {
+    // 转屏等配置变化会拆掉 Activity 但进程还在，不能当成挂断。
+    // 真正退出时 WebView 已死：清通话运行态，保留 prefs 给下次启动写结束记录。
+    if (!configChange && (keepWebAlive || ScreenShareOverlay.isCallOn())) {
       ScreenShareOverlay.abandonCallRuntime(this);
     }
-    keepWebAlive = false;
+    if (!configChange) keepWebAlive = false;
     super.onDestroy();
+  }
+
+  @Override
+  public void onDetachedFromWindow() {
+    // Capacitor 在这里无条件 webView.destroy()。部分机型锁屏/切后台也会 detach，
+    // 页面被拆掉，回来就是重新进。只有 Activity 真的结束才拆。
+    if (isFinishing() || isDestroyed() || isChangingConfigurations()) {
+      super.onDetachedFromWindow();
+      return;
+    }
+    android.util.Log.w("NianMain", "ignore window detach while activity still alive");
   }
 
   private void reportPhonePresence() {

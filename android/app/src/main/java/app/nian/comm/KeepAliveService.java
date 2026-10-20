@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
 public class KeepAliveService extends Service {
@@ -24,6 +25,7 @@ public class KeepAliveService extends Service {
   private static volatile KeepAliveService instance;
 
   private final Handler handler = new Handler(Looper.getMainLooper());
+  private PowerManager.WakeLock callWakeLock;
   private final Runnable tick = new Runnable() {
     @Override
     public void run() {
@@ -32,6 +34,7 @@ public class KeepAliveService extends Service {
       // 通话连麦：泵一下原生周期采样（锁屏后 WebView 定时器不可靠）
       if (callMedia) {
         try { NativeCallEngine.pumpAmbientSampleWatch(); } catch (Exception ignored) {}
+        holdCallWakeLock();
       }
       handler.postDelayed(this, TICK_MS);
     }
@@ -89,6 +92,7 @@ public class KeepAliveService extends Service {
     running = false;
     if (instance == this) instance = null;
     handler.removeCallbacks(tick);
+    releaseCallWakeLock();
     super.onDestroy();
   }
 
@@ -117,6 +121,27 @@ public class KeepAliveService extends Service {
     } catch (Exception e) {
       try { startForeground(NOTIF_ID, notif); } catch (Exception ignored) {}
     }
+    if (callMedia) holdCallWakeLock();
+    else releaseCallWakeLock();
+  }
+
+  /** 锁屏后部分机型会冻住没有唤醒锁的进程，麦和通话计时一起停。 */
+  private void holdCallWakeLock() {
+    try {
+      if (callWakeLock == null) {
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null) return;
+        callWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "nian:call");
+        callWakeLock.setReferenceCounted(false);
+      }
+      if (!callWakeLock.isHeld()) callWakeLock.acquire(6L * 60L * 60L * 1000L);
+    } catch (Exception ignored) {}
+  }
+
+  private void releaseCallWakeLock() {
+    try {
+      if (callWakeLock != null && callWakeLock.isHeld()) callWakeLock.release();
+    } catch (Exception ignored) {}
   }
 
   private Notification buildNotif() {

@@ -5,9 +5,12 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeWebChromeClient;
+import com.getcapacitor.BridgeWebViewClient;
 
 /**
  * Capacitor 默认会把 RECORD_AUDIO 和 MODIFY_AUDIO_SETTINGS 绑在一起申请。
@@ -67,5 +70,33 @@ public class NianWebChromeClient extends BridgeWebChromeClient {
       }
       super.onPermissionRequest(request);
     });
+  }
+}
+
+/**
+ * 渲染进程被系统回收时必须返回 true。
+ * Capacitor 默认返回 false，系统会把整个 App 进程一起杀掉，
+ * 表现为切走或锁屏后再进来整页重进，通话也被清掉。
+ */
+class NianWebViewClient extends BridgeWebViewClient {
+  private static long lastRecoverAt;
+
+  public NianWebViewClient(Bridge bridge) {
+    super(bridge);
+  }
+
+  @Override
+  public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+    super.onRenderProcessGone(view, detail);
+    boolean crashed = detail != null && detail.didCrash();
+    android.util.Log.e("NianMain", "webview renderer gone crashed=" + crashed);
+    long now = System.currentTimeMillis();
+    if (view != null && now - lastRecoverAt > 15000L) {
+      lastRecoverAt = now;
+      view.post(() -> {
+        try { view.reload(); } catch (Exception ignored) {}
+      });
+    }
+    return true;
   }
 }
