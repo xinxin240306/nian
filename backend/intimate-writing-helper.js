@@ -14,6 +14,9 @@ const INTIMATE_ACTION_VARIETY_NOTE = '';
 const THEATER_ACTION_DETAIL_NOTE = `【镜头】括号是摄像头。有接触时每轮一个：特写、远一点、或旁边的人。写具体，别写「（笑）（靠近）（继续）」。
 对方自己的身体反应，对方没写的不要替对方定成事实。旁边的人可以有反应。`;
 
+/** 成人向进行中：字面「停/不要」不等于这场结束 */
+const INTIMATE_REFUSAL_NOTE = `「不要」「停下」先分是不是真的。已经在这场里，同一句还在贴着、追问、喘、骂，人却没离场，多半是嘴上说说，按你这个人收放，不必整场刹车。真拒绝才停：跳出这场、连着认真说停、冷下来或害怕且没有接着演、点名某件事不要、这场还没开始就拒绝。分不清就慢一点，看下一句。`;
+
 /** 从性格/行为里看这个人亲密时会怎么带，不必人设里写明「调教」 */
 function intimateLeanLine(char = {}) {
   const blob = [
@@ -54,6 +57,10 @@ function theaterActionDetailNote() {
   return THEATER_ACTION_DETAIL_NOTE;
 }
 
+function intimateRefusalNote() {
+  return INTIMATE_REFUSAL_NOTE;
+}
+
 module.exports = {
   INTIMATE_ACTION_VARIETY_NOTE,
   INTIMATE_LOGIC_NOTE,
@@ -62,5 +69,6 @@ module.exports = {
   intimateLogicNote,
   intimateNarrativeNotes,
   theaterActionDetailNote,
+  intimateRefusalNote,
   intimateLeanLine,
 };
