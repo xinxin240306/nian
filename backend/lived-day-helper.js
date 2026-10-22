@@ -344,6 +344,7 @@ async function refineUsefulFromStory(char, dateStr, story, settings, callChatAPI
 规则：
 - 材料是已收成的整天事记，不要再扩成流水账。
 - 只留有用讯息：承诺/约定、到期待办、重要事件、稳定偏好、关系/情绪的关键结果。
+- 我自己有原因的负面情绪（委屈、生气、被冷落、吃醋、失望）记成「情感状态」：原因 + 我当时怎么难受 + 我因此怎么对对方。不要当成闲聊丢掉，也不要只写对方做了什么。
 - 闲聊、寒暄、无后果的玩笑 → 不要写进 items。
 - content 用第一人称；用户写「对方」或「${uname}」；不要用「你」指用户。
 ${require('./memory-brain-helper').MEMORY_ACTOR_RULE}

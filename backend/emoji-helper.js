@@ -2691,18 +2691,33 @@ function isInterviewTailQuestion(sentence) {
   return INTERVIEW_TAIL_RE.test(core) && INTERVIEW_HABIT_RE.test(core);
 }
 
+function endsWithQuestion(sentence) {
+  const s = String(sentence || '').trim();
+  if (!/[？?]\s*$/.test(s) || /[\[\]【】]/.test(s)) return false;
+  return true;
+}
+
+/** 中转站前缀无所谓，只认模型名里有没有这段。 */
+function modelPressesInterview(model) {
+  const raw = String(model || '').trim().toLowerCase();
+  if (!raw) return false;
+  const tail = raw.split(/[/:]/).filter(Boolean).pop() || raw;
+  return tail.includes('gemini4argon') || raw.includes('gemini4argon');
+}
+
 /**
- * 上一轮你也是用访谈腔问句收尾、这轮又来：去掉这轮最后那句。
- * 单句、只有偶尔一次的问句不动。
+ * 去掉这轮最后那句采访问。
+ * 默认：上一轮也是「你平时/A还是B」才剪。
+ * clamp：这类采访问出现就剪；任意问句则上一轮已以问号收尾才剪。整段只有一句时不动。
  */
-function dropRepeatedInterviewTail(text, recentHistory) {
+function dropRepeatedInterviewTail(text, recentHistory, { clamp = false } = {}) {
   const t = String(text || '').trim();
   if (!t || !/[？?]\s*$/.test(t)) return t;
   if (looksLikeStandaloneHtml(t) || looksLikeWebCardPayload(t) || t.startsWith('{')) return t;
   const parts = splitSentences(t);
   if (parts.length < 2) return t;
   const last = parts[parts.length - 1];
-  if (!isInterviewTailQuestion(last)) return t;
+  const habit = isInterviewTailQuestion(last);
 
   const hist = Array.isArray(recentHistory) ? recentHistory : [];
   let prevAiTail = '';
@@ -2716,7 +2731,9 @@ function dropRepeatedInterviewTail(text, recentHistory) {
       break;
     }
   }
-  if (!isInterviewTailQuestion(prevAiTail)) return t;
+  const habitRepeat = habit && isInterviewTailQuestion(prevAiTail);
+  const clampCut = clamp && (habit || (endsWithQuestion(last) && endsWithQuestion(prevAiTail)));
+  if (!habitRepeat && !clampCut) return t;
 
   const at = t.lastIndexOf(last);
   if (at <= 0) return t;
@@ -2727,7 +2744,9 @@ function polishSpokenAiText(text, languageStyle, opts = {}) {
   let t = dropTruncatedSpeech(stripCopiedLanguageExamples(collapseRepeatedProse(text), languageStyle));
   if (!opts.theater) {
     try { t = require('./world-lock-helper').scrubMeetupLeakSpeech(t); } catch { /* ignore */ }
-    if (opts.recentHistory) t = dropRepeatedInterviewTail(t, opts.recentHistory);
+    if (opts.recentHistory || opts.interviewClamp) {
+      t = dropRepeatedInterviewTail(t, opts.recentHistory, { clamp: !!opts.interviewClamp });
+    }
   }
   return t;
 }
@@ -3221,6 +3240,7 @@ module.exports = {
   extractLanguageStyleExamples,
   stripCopiedLanguageExamples,
   polishSpokenAiText,
+  modelPressesInterview,
   looksTruncatedUtterance,
   dropTruncatedSpeech,
   proseNearDuplicate,

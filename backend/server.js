@@ -16,7 +16,7 @@ const execFileAsync = promisify(execFile);
 
 const dbModule = require('./db');
 const { initWS, push, notifyBillingError } = require('./push');
-const { startCronJobs, buildSystemPrompt, buildCallExtraSystemPrompt, prefetchLocationWeather, buildDiaryPeekPrompt, generateMemorySummary, backfillMemoriesFromChat, summarizeTheaterSession, scheduleTheaterMemorySummary, maybeTriggerMemorySummary, maybeCaptureSalientFromMessage, maybeCaptureUserImpressionsFromMessage, messageTriggersMemoryKeyword, messageIndicatesSalientPlan, messageIndicatesSalientEmotion, messageIndicatesUserProfileShare, touchCharacterEmotionFromMessage, buildChatContextText, buildSleepContextNote, buildStatedIntentElapsedNote, buildRetryTimeAdvanceNote, buildReplyTimeNotePayload, computeUserReturnGap, parseMsgTimestamp, getUserMessagesNeedingRealReply, checkAiPeekDiaries, checkAiPeekSecrets, selectMemoriesForPrompt, isMemorySummaryEnabled, generateDailySchedule, generateWeeklySchedules, getLocalDateStr, shiftDateStr, maybeFinalizePastScheduleItems, rehomeWeeHoursScheduleItems, sortScheduleItemsByTime, clearCharacterOnline, mergeImpressionItems, expandLegacyImpressions, deriveImpressionKeywords, normalizeImpressionCategory, mapMemoryToImpressionCategory, resolveImpressionCategory, isJunkImpressionFact, scheduleLooksComplete, backfillYesterdayNightSleepConclusion, IMPRESSION_CATEGORIES, IMPRESSION_CATEGORY_HINTS, generateAIDiary, catchUpMissedDiaries, DREAM_NARRATIVE_SUFFIX, syncScheduleFromChatActivity, withCharChatPrefs, getMemoryTriggerN, getUserMomentChatCue, claimMomentChatAsk, formatMemoriesForPromptAsync } = require('./cron');
+const { startCronJobs, buildSystemPrompt, buildCallExtraSystemPrompt, prefetchLocationWeather, buildDiaryPeekPrompt, generateMemorySummary, backfillMemoriesFromChat, summarizeTheaterSession, scheduleTheaterMemorySummary, maybeTriggerMemorySummary, maybeCaptureEmotionFromReply, maybeCaptureUserImpressionsFromMessage, messageTriggersMemoryKeyword, messageIndicatesSalientPlan, messageIndicatesUserProfileShare, touchCharacterEmotionFromMessage, buildChatContextText, buildSleepContextNote, buildStatedIntentElapsedNote, buildRetryTimeAdvanceNote, buildReplyTimeNotePayload, computeUserReturnGap, parseMsgTimestamp, getUserMessagesNeedingRealReply, checkAiPeekDiaries, checkAiPeekSecrets, selectMemoriesForPrompt, isMemorySummaryEnabled, generateDailySchedule, generateWeeklySchedules, getLocalDateStr, shiftDateStr, maybeFinalizePastScheduleItems, rehomeWeeHoursScheduleItems, sortScheduleItemsByTime, clearCharacterOnline, mergeImpressionItems, expandLegacyImpressions, deriveImpressionKeywords, normalizeImpressionCategory, mapMemoryToImpressionCategory, resolveImpressionCategory, isJunkImpressionFact, scheduleLooksComplete, backfillYesterdayNightSleepConclusion, IMPRESSION_CATEGORIES, IMPRESSION_CATEGORY_HINTS, generateAIDiary, catchUpMissedDiaries, DREAM_NARRATIVE_SUFFIX, syncScheduleFromChatActivity, withCharChatPrefs, getMemoryTriggerN, getUserMomentChatCue, claimMomentChatAsk, formatMemoriesForPromptAsync } = require('./cron');
 const memoryNarrative = require('./memory-narrative-helper');
 const memoryBrain = require('./memory-brain-helper');
 const {
@@ -24,7 +24,7 @@ const {
 } = require('./secret-helper');
 const sharedMemo = require('./shared-memo-helper');
 const { callChatAPI, callChatAPIComplete, completeChatTurn, callTTS, generateImage, getLastGenerateImageError, getLastGenerateImageMeta, resolveImg2ImgConfig, resolveImg2VideoConfig, routeSettingsForMediaGen, inferChatMediaNsfwContext, normalizeSelfieAspect, normalizeVideoAspect, inferChatMediaAspect, normalizeImageRefGroups, selectSelfieReferenceUrls, resolveSelfieRefFlags, selectVideoReferenceUrl, selectHomeReferenceUrls, normalizeHomeRefs, homeRefsToJson, isObjectOrStillLifeScene, is80AiImageApi, fetch80AiImageModels, fetch80AiImageModelOptions, MINIMAX_SPEECH_MODELS, IMAGEN_MODELS, listKnownImageModels, listKnownImg2VideoModels, fetchImg2ImgModelsFromApi, fetchImg2VideoModelsFromApi, fetchUnsplashImage, generateChatContextImage, generateChatContextVideo, generateImageToVideo, getLastGenerateVideoError, fetchPexelsVideo, fetchPexelsVideoForChat, parseMomentContentAndImageQuery, extractImageQueryFromText, extractSelfieSceneQuery, buildSelfieGenerationPrompt, resolveCharacterHomeEnvironment, shouldAttachContextImage, shouldAttachContextVideo, replySuggestsShareImage, replySuggestsShareVideo, replyClaimsSentShareMedia, replyLooselyClaimsSentMedia, resolveClaimedMissingShare, replyAsksUserForImage, replyAsksUserForVideo, isHardUserImageAsk, isHardUserSelfieAsk, replyRefusesShareMedia, detectDrawingMediaIntent, normalizeMediaDirectiveLines, stripImageDirectiveFromSegments, buildHistoryApiMessages, detectAvatarChangeIntent, replyAcceptsAvatarChange, stripAvatarChangeMarker, buildAvatarChangeChoiceHint, toAbsoluteMediaUrl, formatApiBillingError, fetchApiBalance, fetchWithTimeout, describeUserAppearance, describeCallWatchScene } = require('./api-helper');
-const { processAiContentWithEmojis, saveAiReplySegments, stripAiContextLabels, stripModelLeakage, splitAiSegments, userRequestsVoiceMessage, userRequestsPhoneCall, resolveChatIncomingCall, insertCharacterPokeMessage, polishSpokenAiText, dedupeContinuationPiece, decorateEmojiRecord, resolveLiveEmojiUrl, healMissingEmojiFiles, mergeReplacementEmoji, invalidateEmojiLiveCache, emojiBasename, looksLikeStandaloneHtml, looksLikeWebCardPayload } = require('./emoji-helper');
+const { processAiContentWithEmojis, saveAiReplySegments, stripAiContextLabels, stripModelLeakage, splitAiSegments, userRequestsVoiceMessage, userRequestsPhoneCall, resolveChatIncomingCall, insertCharacterPokeMessage, polishSpokenAiText, modelPressesInterview, dedupeContinuationPiece, decorateEmojiRecord, resolveLiveEmojiUrl, healMissingEmojiFiles, mergeReplacementEmoji, invalidateEmojiLiveCache, emojiBasename, looksLikeStandaloneHtml, looksLikeWebCardPayload } = require('./emoji-helper');
 const robotHelper = require('./robot-helper');
 const robotVision = require('./robot-vision-helper');
 const robotMic = require('./robot-mic-helper');
@@ -4048,8 +4048,6 @@ app.post('/api/messages/send', async (req, res) => {
   if (!isDreamMode) {
     if (messageTriggersMemoryKeyword(content, char)) {
       maybeTriggerMemorySummary(characterId, { keywordTriggered: true, userMsgId });
-    } else if (messageIndicatesSalientEmotion(content)) {
-      maybeCaptureSalientFromMessage(characterId, userMsgId, {});
     } else if (messageIndicatesSalientPlan(content)) {
       maybeTriggerMemorySummary(characterId, { userMsgId });
     } else if (messageIndicatesUserProfileShare(content)) {
@@ -4483,7 +4481,13 @@ app.post('/api/messages/send', async (req, res) => {
     }
 
     if (!isDreamMode && !callVideoTextMode) {
-      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode, recentHistory: liveHistory });
+      aiContent = polishSpokenAiText(aiContent, char.language_style, {
+        theater: !!forTheaterMode,
+        recentHistory: liveHistory,
+        interviewClamp: !forTheaterMode && modelPressesInterview(
+          String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
+        ),
+      });
     }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
@@ -4653,6 +4657,15 @@ app.post('/api/messages/send', async (req, res) => {
     if (!isDreamMode && aiContent) {
       try { touchCharacterEmotionFromMessage(characterId, { role: 'assistant', content: aiContent }); } catch (e) {
         console.warn('[emotion] touch assistant', e.message);
+      }
+      try {
+        maybeCaptureEmotionFromReply(characterId, aiMsgId, {
+          userText: userContent,
+          assistantText: aiContent,
+          isDream: isDreamMode,
+        });
+      } catch (e) {
+        console.warn('[memory] own emotion capture', e.message);
       }
     }
     if (recalledMsg) {
@@ -5473,7 +5486,13 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
     }
 
     if (!isDreamMode && !callVideoTextMode) {
-      aiContent = polishSpokenAiText(aiContent, char.language_style, { theater: !!forTheaterMode, recentHistory: retrySession.liveHistory });
+      aiContent = polishSpokenAiText(aiContent, char.language_style, {
+        theater: !!forTheaterMode,
+        recentHistory: retrySession.liveHistory,
+        interviewClamp: !forTheaterMode && modelPressesInterview(
+          String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
+        ),
+      });
     }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
@@ -5626,6 +5645,15 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
     if (!isDreamMode && aiContent) {
       try { touchCharacterEmotionFromMessage(characterId, { role: 'assistant', content: aiContent }); } catch (e) {
         console.warn('[emotion] touch assistant', e.message);
+      }
+      try {
+        maybeCaptureEmotionFromReply(characterId, aiMsgId, {
+          userText: lastUserContent,
+          assistantText: aiContent,
+          isDream: isDreamMode,
+        });
+      } catch (e) {
+        console.warn('[memory] own emotion capture', e.message);
       }
     }
     if (recalledMsg) {
@@ -11049,7 +11077,10 @@ app.post('/api/impressions/:charId/generate', async (req, res) => {
     `${m.role === 'user' ? (settings.username || '旅人') : char.name}：${String(m.content || '').replace(/^【自动回复】/, '').slice(0, 200)}`
   ).join('\n');
 
-  const catsHint = (IMPRESSION_CATEGORY_HINTS || IMPRESSION_CATEGORIES || []).join('、');
+  const nsfwOn = !(char.nsfw_enabled === 0 || char.nsfw_enabled === '0' || char.nsfw_enabled === false);
+  const catsHint = (IMPRESSION_CATEGORY_HINTS || IMPRESSION_CATEGORIES || [])
+    .filter((c) => nsfwOn || c !== '亲密')
+    .join('、');
   let portraitCall = settings.username || '旅人';
   try {
     portraitCall = require('./portrait-cluster-helper').unifiedUserCall(char, settings, history.filter((m) => m.role === 'assistant'));
@@ -11068,6 +11099,7 @@ app.post('/api/impressions/:charId/generate', async (req, res) => {
 · 提到「${char.name}」一律写 TA，不要写角色本名
 · 每条 6～20 字完整短句；没把握就不写；最多 8 条
 · 【性格】稳定气质；【情绪】一生气/难过时会怎样；【想法】在意点/思维方式；【喜好】具体物偏好；【习惯】作息处事
+${nsfwOn ? '· 【亲密】只写亲热上的稳定偏好、厌恶、开发程度，句子里带「那方面」或「亲热」。不写过程。没聊到就不要写。' : ''}
 · 禁止把性格丢进习惯；禁止把「喜欢胡思乱想 / 不喜欢被冷落」丢进喜好
 · 禁止：日期、时段、因为/然后/聊了、半截话、提问、脑补、把用户写成爱抱怨/爱哭诉
 
@@ -13606,8 +13638,6 @@ app.post('/api/robot/chat', async (req, res) => {
 
   if (messageTriggersMemoryKeyword(text, char)) {
     maybeTriggerMemorySummary(characterId, { keywordTriggered: true, userMsgId });
-  } else if (messageIndicatesSalientEmotion(text)) {
-    maybeCaptureSalientFromMessage(characterId, userMsgId, {});
   } else if (messageIndicatesSalientPlan(text)) {
     maybeTriggerMemorySummary(characterId, { userMsgId });
   } else if (messageIndicatesUserProfileShare(text)) {
@@ -13728,6 +13758,11 @@ app.post('/api/robot/chat', async (req, res) => {
 
   try {
     if (speak) touchCharacterEmotionFromMessage(characterId, { role: 'assistant', content: speak });
+  } catch {}
+  try {
+    if (speak && aiMsgId) {
+      maybeCaptureEmotionFromReply(characterId, aiMsgId, { userText: text, assistantText: speak });
+    }
   } catch {}
 
   try {

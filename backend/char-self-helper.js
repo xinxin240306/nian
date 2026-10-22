@@ -1,7 +1,7 @@
 /** 角色自我认知：怎么看待自己的习惯 / 喜好 / 经历。角色卡是起点，相处会往上长。 */
 const db = require('./db');
 
-const SELF_CATEGORIES = ['行为习惯', '喜好', '经历', '性格', '变化', '其他'];
+const SELF_CATEGORIES = ['行为习惯', '喜好', '经历', '性格', '变化', '亲密', '其他'];
 const MAX_PER_CAT = 10;
 const MAX_LIVED_PER_CAT = 4;
 const PROMPT_PER_CAT = { 行为习惯: 3, 喜好: 3, 经历: 2 };
@@ -49,6 +49,7 @@ function ensureSelfViewsTable() {
 
 function normalizeSelfCategory(cat) {
   const c = String(cat || '').trim();
+  if (c === '亲密偏好' || c === '成人偏好') return '亲密';
   if (SELF_CATEGORIES.includes(c)) return c;
   if (LEGACY_CAT_MAP[c]) return LEGACY_CAT_MAP[c];
   if (/性格|脾气|气质/.test(c)) return '性格';
@@ -353,6 +354,7 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
   for (const it of items) {
     const cat = normalizeSelfCategory(it.category);
     if (!cat) continue;
+    const intimate = cat === '亲密';
     const facts = String(it.content || '')
       .split(/[；;\n]/)
       .map((s) => toSelfFact(s))
@@ -361,7 +363,7 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
     const rowSource = ['card', 'lived', 'manual'].includes(it.source) ? it.source : source;
     if (it.bundle) {
       const absorbs = facts.some((f) => cluster.wouldAbsorb('char_self_views', charId, cat, f));
-      if (!absorbs && rowSource === 'lived' && slow && !canInsertLived(charId, cat, mode)) continue;
+      if (!absorbs && rowSource === 'lived' && slow && !intimate && !canInsertLived(charId, cat, mode)) continue;
       const r = cluster.upsertPortraitCard({
         table: 'char_self_views',
         charId,
@@ -370,12 +372,12 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
         facts,
         note,
         keywords: parseKeywords(it.keywords, facts.join('、')),
-        confirmed: it.confirmed === 0 || it.confirmed === false || (slow && rowSource === 'lived') ? 0 : 1,
+        confirmed: intimate ? 1 : (it.confirmed === 0 || it.confirmed === false || (slow && rowSource === 'lived') ? 0 : 1),
         extra: {
           forceBundle: true,
           source: rowSource,
           auto_generated: it.auto_generated != null ? (it.auto_generated ? 1 : 0) : (rowSource === 'manual' ? 0 : 1),
-          strength: rowSource === 'lived' && slow ? NEW_LIVED_STRENGTH : (Number(it.strength) || 0.5),
+          strength: intimate ? CONFIRM_STRENGTH : (rowSource === 'lived' && slow ? NEW_LIVED_STRENGTH : (Number(it.strength) || 0.5)),
         },
       });
       if (r === 'inserted' || r === 'appended') merged++;
@@ -385,9 +387,10 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
       let confirmed = it.confirmed === 0 || it.confirmed === false ? 0 : 1;
       let fact = fact0.replace(/（\?）\s*$/, '').replace(/\(\?\)\s*$/, '').trim();
       if (/好像|或许|大概|似乎|可能|猜测/.test(fact)) confirmed = 0;
-      if (slow && rowSource === 'lived') confirmed = 0;
+      if (slow && rowSource === 'lived' && !intimate) confirmed = 0;
+      if (intimate) confirmed = 1;
       const absorbs = cluster.wouldAbsorb('char_self_views', charId, cat, fact);
-      if (!absorbs && rowSource === 'lived' && slow && !canInsertLived(charId, cat, mode)) continue;
+      if (!absorbs && rowSource === 'lived' && slow && !intimate && !canInsertLived(charId, cat, mode)) continue;
       const r = cluster.upsertPortraitCard({
         table: 'char_self_views',
         charId,
@@ -400,11 +403,11 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
         extra: {
           source: rowSource,
           auto_generated: it.auto_generated != null ? (it.auto_generated ? 1 : 0) : (rowSource === 'manual' ? 0 : 1),
-          strength: rowSource === 'lived' && slow ? NEW_LIVED_STRENGTH : (Number(it.strength) || 0.5),
+          strength: intimate ? CONFIRM_STRENGTH : (rowSource === 'lived' && slow ? NEW_LIVED_STRENGTH : (Number(it.strength) || 0.5)),
         },
       });
       if (r === 'inserted' || r === 'appended') merged++;
-      if (mode === 'auto' && rowSource === 'lived' && r === 'inserted') return merged;
+      if (mode === 'auto' && rowSource === 'lived' && r === 'inserted' && !intimate) return merged;
     }
   }
   try { cluster.compactPortraitCards(charId, 'char_self_views'); } catch { /* ignore */ }
@@ -423,6 +426,9 @@ function mergeSelfViewItems(charId, items, { source = 'lived', mode = 'auto' } =
 
 function guessSelfCategory(content) {
   const t = String(content || '');
+  try {
+    if (require('./portrait-cluster-helper').slotIntimateCategory('', t)) return '亲密';
+  } catch { /* ignore */ }
   if (/经历|这段|相处|关系里|认识后|在一起后|让自己|变得/.test(t)) return '经历';
   if (/以前会|现在会|开始会|变得更|变了/.test(t)) return '变化';
   if (/性格|脾气|内向|外向|敏感|慢热|别扭|嘴硬|好强|想很多|纠结|内耗/.test(t)) return '性格';
@@ -464,9 +470,12 @@ function parseSelfViewLines(text) {
 
 function selfViewItemsFromMemories(parsed, memoryItems, charName = '') {
   const items = [];
+  let cluster = null;
+  try { cluster = require('./portrait-cluster-helper'); } catch { cluster = null; }
   for (const sv of parsed?.self_views || []) {
-    const cat = normalizeSelfCategory(sv.category) || guessSelfCategory(sv.content);
+    let cat = normalizeSelfCategory(sv.category) || guessSelfCategory(sv.content);
     const content = toSelfFact(sv.content);
+    if (cluster?.slotIntimateCategory(sv.category, `${sv.content || ''}\n${content}`)) cat = '亲密';
     if (!cat || !content || isJunkSelfFact(content)) continue;
     const related = Array.isArray(sv.related_facts) ? sv.related_facts : [];
     const blob = [content, ...related.map((x) => toSelfFact(x)).filter(Boolean)].join('\n');
@@ -477,11 +486,13 @@ function selfViewItemsFromMemories(parsed, memoryItems, charName = '') {
       note: sv.note || '',
       keywords: sv.keywords || [],
       source: 'lived',
-      confirmed: 0,
+      confirmed: cat === '亲密' ? 1 : 0,
       bundle: related.length > 0,
     });
   }
-  return items.slice(0, 1);
+  const intimate = items.filter((it) => it.category === '亲密').slice(0, 1);
+  const rest = items.filter((it) => it.category !== '亲密').slice(0, 1);
+  return [...intimate, ...rest];
 }
 
 /**
@@ -503,7 +514,7 @@ function formatSelfViewsForPrompt(charId) {
   const sorted = [...rows].sort((a, b) => rank(b) - rank(a));
   for (const row of sorted) {
     const cat = normalizeSelfCategory(row.category);
-    if (!cat) continue;
+    if (!cat || cat === '亲密') continue;
     const text = toSelfFact(row.content);
     if (!text || isJunkSelfFact(text)) continue;
     const facts = (row.facts && row.facts.length) ? row.facts : [text];
@@ -600,7 +611,7 @@ ${storyLines ? `【记忆点摘录】\n${storyLines}` : ''}
 ${chatStr || '（对话很少，主要从角色卡抽出具体喜好/习惯，不要抄性格段）'}
 
 每条单独一行，格式严格：【大类】短句
-大类只能是：性格、行为习惯、喜好、经历、变化
+大类只能是：性格、行为习惯、喜好、经历、变化${(char.nsfw_enabled === 0 || char.nsfw_enabled === '0' || char.nsfw_enabled === false) ? '' : '、亲密'}
 不要再写小类。意思重复的只留一条。相关联的不要拆成多张卡。感想单独一行：TA：……
 
 硬规则：
@@ -610,7 +621,8 @@ ${chatStr || '（对话很少，主要从角色卡抽出具体喜好/习惯，�
 · 只写具体事实（爱喝什么、作息、某段相处后的变化），禁止「我性格温柔」「我很特别」这类空话
 · 习惯很难改：一次对话、一次整理都长不出一堆新习惯
 · 已有自我认知能对上的，不要另写一条
-· 禁止：用户侧画像、单次心情、日期时段、具体事件经过、AI/扮演字样`;
+· 禁止：用户侧画像、单次心情、日期时段、具体事件经过、AI/扮演字样
+${(char.nsfw_enabled === 0 || char.nsfw_enabled === '0' || char.nsfw_enabled === false) ? '' : '· 【亲密】只写自己在亲热上的偏好、厌恶、开发程度（生疏 / 能接受的范围 / 已经比较放开）。不写这一次的过程。没聊到就不要写。'}`;
 }
 
 async function generateSelfViews(charId, settings, callChatAPIComplete) {

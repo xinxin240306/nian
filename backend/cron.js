@@ -3,7 +3,7 @@ const dbModule = require('./db');
 const db = dbModule;
 const { callChatAPI, callChatAPIComplete, formatApiBillingError, fetchUnsplashImage, fetchUnsplashImageForMoment, generateChatContextImage, generateChatContextVideo, fetchPexelsVideoForMoment, generateMomentVideoViaAI, parseMomentContentAndImageQuery, replySuggestsContextImage, shouldAttachContextImage, shouldAttachContextVideo, normalizeMediaDirectiveLines, stripImageDirectiveFromSegments, resolveCharacterHomeEnvironment, extractSelfieSceneQuery, isObjectOrStillLifeScene, generateImage, buildSelfieGenerationPrompt, normalizeImageRefGroups, selectSelfieReferenceUrls, resolveSelfieRefFlags, selectHomeReferenceUrls, normalizeSelfieAspect, resolveImg2ImgConfig, toAbsoluteMediaUrl, getLastGenerateImageError, replyClaimsSentShareMedia, extractImageQueryFromText } = require('./api-helper');
 const { push, notifyBillingError } = require('./push');
-const { buildEmojiPromptSection, buildVoiceMessagePromptSection, buildLocationMessagePromptSection, buildLinkMessagePromptSection, buildWebCardPromptSection, buildRecallPromptSection, buildQuoteReplyPromptSection, buildPokePromptSection, buildCallDirectivePromptSection, buildTheaterInvitePromptSection, buildPostCallChatNote, userRequestsPhoneCall, processAiContentWithEmojis, saveAiReplySegments, formatMessageForAi, polishSpokenAiText, proseNearDuplicate } = require('./emoji-helper');
+const { buildEmojiPromptSection, buildVoiceMessagePromptSection, buildLocationMessagePromptSection, buildLinkMessagePromptSection, buildWebCardPromptSection, buildRecallPromptSection, buildQuoteReplyPromptSection, buildPokePromptSection, buildCallDirectivePromptSection, buildTheaterInvitePromptSection, buildPostCallChatNote, userRequestsPhoneCall, processAiContentWithEmojis, saveAiReplySegments, formatMessageForAi, polishSpokenAiText, modelPressesInterview, proseNearDuplicate } = require('./emoji-helper');
 const { queueAlbumSave, stripAlbumMarkersFromSegments } = require('./album-helper');
 const { buildInlineBeanPromptSection, sanitizeInlineBeans } = require('./inline-emoji-helper');
 const { buildMusicScorePromptSection } = require('./music-score-helper');
@@ -3875,6 +3875,17 @@ function messageIndicatesSalientEmotion(content) {
   return STRONG_EMOTION_RE.test(text);
 }
 
+/** 角色自己说出的、有关系分量的负面情绪。不计心情燃料，只用来决定要不要写成记忆。 */
+function messageIndicatesOwnNegativeEmotion(content) {
+  const text = String(content || '');
+  if (isTransientHealthConcernText(text) && !/委屈|生气|吵架|冷战|吃醋|失望|心寒|被冷落/.test(text)) return false;
+  try {
+    return require('./memory-tree-helper').utteranceShowsOwnNegativeEmotion(text);
+  } catch {
+    return false;
+  }
+}
+
 const DREAM_TRIVIAL_STATE_RE = /困了|好累|想睡|打哈欠|犯困|刚下班|在忙|忙着|吃饭去了|点外卖|在线|忙碌中|熬夜|好饿|刚醒|眯一会|睡一会|先睡/i;
 
 /** 从近期通讯提取可渗入梦境的强情绪线索（非琐碎状态） */
@@ -4409,7 +4420,7 @@ function detectPromptNeeds(userMessage, recentHistory) {
     webCard: /网页卡|前端卡|小程序|做个页面|UI卡|HTML|前端样例|做个前端/.test(blob),
     sfx: /环境音|白噪音|助眠|海风|雨声|音效：/.test(blob),
     music: /弹一首|听你弹|来段琴|乐谱：/.test(blob),
-    intimate: /亲亲|接吻|吻我|抱我|上床|脱掉|摸摸|想要你|做爱|前戏|口交|内衣|摸我|手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|高潮|射了|射在|腿间|内裤/.test(blob),
+    intimate: /亲亲|接吻|吻我|抱我|上床|脱掉|摸摸|想要你|做爱|前戏|口交|内衣|摸我|手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|高潮|射了|射在|腿间|内裤|那方面|亲热|开发程度|还生疏|敏感处|床事/.test(blob),
     sexAct: /手指|指交|用手弄|用手帮|用手玩|弄你|舔你|含着|口交|插进来|高潮|射了|射在|做爱|前戏|想要你/.test(blob),
     call: /打电话|来电|视频电话|语音电话|打过来/.test(blob),
     recall: /说错了|口误|撤回/.test(blob),
@@ -4809,8 +4820,12 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
     : '';
 
   let nsfwBlock = '';
+  let intimateKnowStr = '';
   if (!isDream && !forGame) {
-    const nsfwOff = Number(char?.nsfw_enabled) === 0;
+    const nsfwOff = !nsfwChannelOn(char);
+    if (!nsfwOff && (forTheater || need.intimate || need.sexAct)) {
+      try { intimateKnowStr = formatIntimateKnowBlock(char.id); } catch { /* ignore */ }
+    }
     const needIntimate = !!(need.intimate || need.sexAct || forTheater);
     const nsfwChannel = forVideoCallText
       ? '这是文字视频电话：旁白写你镜头里看得见的画面（环境、动作、表情、光影、身体），台词进引号；亲密场面也落到画面上，不是纯打字。'
@@ -5142,6 +5157,7 @@ ${lectureVoiceLine}
     musicSyncBlock,
     gameFocus,
     isDream ? '' : nsfwBlock,
+    isDream ? '' : intimateKnowStr,
     operatingBlock,
     robotInvokeBlock,
     toyInvokeBlock,
@@ -5200,6 +5216,11 @@ ${lectureVoiceLine}
     voiceLock,
     // 用户预设压轴：硬性覆盖上文一切冲突
     presetsBlock,
+    (!isDream && !forGame && !forTheater && !forRobot && modelPressesInterview(
+      String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
+    ))
+      ? '【这轮收尾·硬性】禁止用问句收尾。想知道的，用你自己的看法、吐槽或一句经历说完就停。整段只有一句时可以问。'
+      : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -5533,6 +5554,7 @@ async function summarizeTheaterSession(charId) {
 4）content / episode_gist 必须以「YYYY年M月D日+时段，」开头（时段：清晨/上午/中午/下午/晚上/夜里/夜深了），并点明这是「文字扮演 / 虚构」——**具体日期时段必须留下，不可抹掉**。
 5）若几乎无剧情（一两句寒暄）→ {"skip":true}
 6）不要使用「【小剧场】」这类方括号标题；正文里用「文字扮演」即可。
+7）扮演里若露出稳定的偏好、厌恶或开发程度，写进 impressions（用户侧）和 self_views（我自己，第一人称）。category 固定「亲密」。8～24 字，句子里带「那方面」或「亲热」。只写喜欢什么、不喜欢什么、开发到哪（还生疏 / 能接受的范围 / 已经比较放开）。不要把这一场的过程写进这两项。没有就空数组。就算 skip 为 true，这两项有就照样写。过程仍只进上面的虚构记忆。
 
 输出 JSON（不要 markdown）：
 {
@@ -5542,16 +5564,24 @@ async function summarizeTheaterSession(charId) {
   "keywords": ["文字扮演","虚构", "其它2-5个"],
   "memories": [
     {"category":"重要时刻|日常点滴|情感状态","content":"80-180字，含「文字扮演」字样与前因后果","weight":0.55-0.8}
-  ]
+  ],
+  "impressions": [{"category":"亲密","content":"用户侧短句","related_facts":[]}],
+  "self_views": [{"category":"亲密","content":"第一人称短句","related_facts":[]}]
 }
 只输出 JSON。`;
 
   try {
     const raw = await callChatAPIComplete(settings, systemPrompt, chatStr, 'memory');
     const parsed = parseMemoryEpisodePayload(raw);
+    let intimateSaved = 0;
+    if (parsed && nsfwChannelOn(char)) {
+      try { intimateSaved = saveIntimateKnowFromParsed(charId, parsed, char.name) || 0; } catch (e) {
+        console.warn('[theater-memory] intimate know', e.message);
+      }
+    }
     if (!parsed || parsed.skip === true) {
-      console.log(`[theater-memory] char#${charId}: skip`);
-      return { ok: true, saved: 0, skipped: true };
+      console.log(`[theater-memory] char#${charId}: skip intimate=${intimateSaved}`);
+      return { ok: true, saved: 0, skipped: true, intimate: intimateSaved };
     }
 
     const allowed = new Set(['重要时刻', '日常点滴', '情感状态']);
@@ -5830,7 +5860,7 @@ async function generateMemorySummary(charId, options = {}) {
     }
   } catch { /* ignore */ }
   const userLabel = settings.username || '旅人';
-  const nsfwOn = char.nsfw_enabled === 1 || char.nsfw_enabled === '1' || char.nsfw_enabled === true;
+  const nsfwOn = nsfwChannelOn(char);
   const formatTranscriptLine = (m) => memoryTranscriptLine(m, char.name, userLabel, tz);
   const chatStr = msgs.map(formatTranscriptLine).join('\n');
 
@@ -5857,10 +5887,10 @@ async function generateMemorySummary(charId, options = {}) {
     }
   ],
   "impressions": [
-    {"category":"性格|情绪|想法|喜好|习惯|不擅长|人际关系|样子","content":"角色视角的一句事实，6-20字完整短句","related_facts":["同一张卡的相关观察，可空"],"note":"可选，你一句感想，称自己为TA"}
+    {"category":"性格|情绪|想法|喜好|习惯|不擅长|人际关系|样子|亲密","content":"角色视角的一句事实，6-20字完整短句","related_facts":["同一张卡的相关观察，可空"],"note":"可选，你一句感想，称自己为TA"}
   ],
   "self_views": [
-    {"category":"性格|行为习惯|喜好|经历|变化","content":"第一人称短句","related_facts":["同一张卡的相关观察，可空"],"note":"可选，一句自我感想，称自己为TA"}
+    {"category":"性格|行为习惯|喜好|经历|变化|亲密","content":"第一人称短句","related_facts":["同一张卡的相关观察，可空"],"note":"可选，一句自我感想，称自己为TA"}
   ],
   "love_signs": ["对方在乎我的样子，8-30字，可空"],
   "reactions_learned": [{"text":"对方真实的反应或喜恶，8-40字"${nsfwOn ? ',"intimate":false' : ''}}]
@@ -5870,11 +5900,12 @@ async function generateMemorySummary(charId, options = {}) {
 ${mindSlice}
 - 用「我事后会怎么想起这件事」来写 gist / memories，不要写成会议纪要或第三人称旁白。
 - 禁止输出半截话（如「面对对方念的网文测试」这种没结论的残句）；impressions 必须是角色视角的完整一句事实（6-20字）。
-- impressions 分类：性格/情绪/想法/喜好/习惯/不擅长/人际关系/样子；不要把性格丢进习惯，不要把想法丢进喜好；事件流水不要写进 impressions。
+- impressions 分类：性格/情绪/想法/喜好/习惯/不擅长/人际关系/样子/亲密；不要把性格丢进习惯，不要把想法丢进喜好；事件流水不要写进 impressions。
 
 【目标·硬性】记「以后还用得上的核心」，不记过程流水账。
 - 要留：导火索、关键表态/转折、结果或未了事项、承诺/待办、对以后相处的影响
-- 不要留：每轮对白复述、重复争执细节、堆砌情绪形容词、无关寒暄、已被同一 topic 写过的重复说法
+- 不要留：每轮对白复述、重复争执细节、把同一个感受换成好几个形容词堆着写、无关寒暄、已被同一 topic 写过的重复说法
+- 要留我自己的情绪结论：有原因的委屈、生气、被冷落、吃醋、心堵、失望、故意冷下来，写一句「我当时具体怎么难受、因此怎么对对方」。不要因为话是我说的就当成闹一闹丢掉，也不要只记对方做了什么
 - 宁可短而准，也不要长而碎
 
 【话题拆分·硬性】总结仍按这窗对话触发，但写入必须按「是不是同一件事」拆：
@@ -5906,10 +5937,10 @@ ${mindSlice}
 7. 只有 4-6 指向「确实有新认识」时才写正文；没有实质变化时 impressions / self_views 留空数组，不为填格子硬凑。
 
 【写什么】跨多轮、对以后对话有用的信息：承诺/约定、到点要做的提醒待办、重要事件、双方明确说过的稳定偏好、关系变化、关键事实。
-【怎么写·核心因果】gist 必须能回答：为什么起、关键怎么变、现在怎样。禁止只写「某人不开心」「聊了工作」；也禁止把多轮冲突写成对话实录。
-【何时 skip】纯闲聊寒暄、**无关系实质的**一时吐槽、玩笑、无前后文的一句 → "skip": true。
+【怎么写·核心因果】gist 必须能回答：为什么起、关键怎么变、现在怎样。禁止只写「某人不开心」「聊了工作」；也禁止把多轮冲突写成对话实录。若难受的是我，gist 里要有我当时的那一句感受，不能只写对方做了什么。
+【何时 skip】纯闲聊寒暄、**无关系实质的**一时吐槽、玩笑、无前后文的一句 → "skip": true。我已经说明原因的委屈、生气、被冷落、吃醋，不算一时吐槽，不要 skip。
 【闲聊·低权】下雨、饭不好吃、随口一句：优先 skip。若仍留一句，weight≤0.22，content 末尾加【闲聊】。约定、情绪锚、共同经历不要加这个标记，也不要 skip。
-【例外·须记】分手/吵架/和好/表白/重大委屈等关系事件，即使语气冲动也**不要 skip**，记入「情感状态」或「重要时刻」；只记导火索、双方关键反应、关系落到哪，不记逐句争吵。
+【例外·须记】分手/吵架/和好/表白/重大委屈，以及**我自己生出的有原因的负面情绪**（没吵到翻脸也算：被敷衍后委屈、吃醋、心里堵、故意冷淡或推开），即使话是我说的、语气冲动，也**不要 skip**，记入「情感状态」或「重要时刻」。必须写清：导火索、我当时的感受（一句）、我因此对对方的态度、关系落到哪。不记逐句争吵，也不要堆情绪形容词。
 【身体不适·时效】用户说头疼/难受等属于临时状态。若同一段对话里用户后来表示「好了/不难受了/没事了」，gist 与 memories 必须写成「曾不适→已好转」，不要写成仍在难受；若已明确好转，不要再单独留一条未了结的「用户在难受」。
 【具体词·硬性】用户亲口说的**具体词必须原样留下**，禁止收成笼统说法。包括但不限于：药名（布洛芬≠止痛药）、病症/生理（例假/痛经）、地名、店名、作品名、人名昵称、具体物品（热水袋/娃娃/睫毛）、品牌、数字与约定原文。gist 与 memories 都要能检索到这些原词；可以补一句概括，但不能只用概括替换原词。
 【认错与纠正·硬性】角色自己的猜测、调侃、看图认错，不是发生过的事。对方纠正了物品或意图之后，只能按对方的说法记。禁止把角色猜的名字或用途写成已经发生的事实，也不要据此再编一套动作。
@@ -5922,10 +5953,14 @@ ${mindSlice}
 - 意思重复只留一条；相关的放 related_facts（喜欢某酒、又觉得某种不好喝）
 - 禁止：具体事件、日期时段、因为/然后、聊了xx、把一次心情写成性格、没根据的「用户是个比较…的人」、半截话（以「明确表示」「面对…」等停住）
 - 没把握 → 空数组。宁可空，不要编。
-【自我认知 self_views】默认空数组。只写 ${char.name}对自己**新认识到**的习惯/喜好/经历，用第一人称「我」。
+${nsfwOn ? `【亲密·偏好 / 厌恶 / 开发程度】这窗若聊到亲热，或对方/我表露了这方面的稳定认识，要收进画像和自我认知。不是这一次的过程。
+- 用户侧写 impressions，category 固定「亲密」。8～24 字，句子里带上「那方面」或「亲热」，只写喜欢什么、不喜欢什么、或开发程度（还生疏 / 能接受的范围 / 已经比较放开）。另外一两点放 related_facts。开发程度只留现在这一句。
+- ${char.name}自己写 self_views，category 固定「亲密」，第一人称「我」，同样只写偏好、厌恶、开发程度。
+- 禁止写谁先做了什么、做到哪。过程不要进 memories。没人表露就不要为这两类硬凑。不要把角色卡原文再抄一遍。
+` : ''}【自我认知 self_views】默认空数组。只写 ${char.name}对自己**新认识到**的习惯/喜好/经历${nsfwOn ? '，或亲热上的偏好、厌恶、开发程度' : ''}，用第一人称「我」。
 - 提到用户只用「${portraitCall}」；提到${char.name}写 TA
-- 最多 1 条；习惯很难改
-- 禁止：把角色卡原句再抄一遍、单次心情、用户侧画像、具体事件
+- 普通习惯最多 1 条；习惯很难改。${nsfwOn ? '亲密这一条可以另写，不占这 1 条。' : ''}
+- 禁止：把角色卡原句再抄一遍、单次心情、用户侧画像、具体事件经过
 - 没新认识 → 空数组。
 【时间·说话日·硬性】episode_gist 与每条 memories.content 必须以「YYYY年M月D日+时段，」开头——这是**对话发生当天**的时间（对话行里已有时间戳，按说话日期写）。时段只用：清晨/上午/中午/下午/晚上/夜里/夜深了。不要写几点几分。角色视角只改口吻与取舍，**绝不抹掉具体日期时段**，否则事记会乱。
 【时间·相对日期必须落成具体日】正文里若出现「明天/后天/大后天/今晚/下周…」等相对说法，**必须换算成具体的 YYYY年M月D日（+时段）** 再写入。换算锚点=该条对话时间戳的日期（明天=锚点+1天，后天=+2天）。例：对话写于 2026年7月27日 且用户说「明天中午记得拍给我看」→ 待办里写【到期：2026年7月28日中午】，禁止正文只留「明天中午」。
@@ -5938,11 +5973,11 @@ ${mindSlice}
 ${memoryTranscriptPersonRule(char.name, userLabel)}
 【我摸清的对方 love_signs / reactions_learned】这是我自己心里慢慢攒下的底，默认空数组。
 - love_signs：这窗里对方让我感觉到被在乎的地方——亲口说的（想我、喜欢我哪里）或做出来的（累了先来找我、记得我说过的事）。只写真发生的，不写我自己的猜测。例：「对方说一天里最想听到的是我的声音」。
-- reactions_learned：这窗里我看到/问到的对方**真实**反应和喜恶，尤其是我原本会想当然的地方（以为TA会害羞其实没有、以为TA会生气其实只是累了）。例：「被我夸的时候对方会嘴硬岔开，其实挺高兴」。${nsfwOn ? '\n- 亲密相关的反应和喜恶（喜欢什么、不喜欢什么、到哪会想停）也写进 reactions_learned，标 "intimate":true；其余标 false。' : ''}
-- 两项都写成「对方…」的完整一句，不要和 impressions 重复同一件事。
+- reactions_learned：这窗里我看到/问到的对方**真实**反应和喜恶，尤其是我原本会想当然的地方（以为TA会害羞其实没有、以为TA会生气其实只是累了）。例：「被我夸的时候对方会嘴硬岔开，其实挺高兴」。${nsfwOn ? '\n- 这一次的亲密反应（害羞、想停、没接住）可以写进 reactions_learned，标 "intimate":true。稳定的偏好、厌恶、开发程度不要只放这里，写进 impressions / self_views 的「亲密」。其余标 false。' : ''}
+- 两项都写成「对方…」的完整一句。和普通印象不要复述同一句；亲密上的稳定偏好、厌恶、开发程度仍要写进 impressions / self_views，不要为了不重复而省掉。
 - 就算这窗整体 skip=true，这两项有就照样写。
 【条数】每个 topic 一条 gist；该 topic 的 memories 默认 1 条、最多 2 条。信息不足再 skip。
-【分类】约定=明确承诺（可无死线）；待办=有具体到期时点的提醒事项；重要时刻=关键事件；偏好与习惯=用户或${char.name}明确说出的长期偏好/习惯；情感状态=有因果的情绪/关系变化；日常点滴=其他确有信息量且有前因后果的
+【分类】约定=明确承诺（可无死线）；待办=有具体到期时点的提醒事项；重要时刻=关键事件；偏好与习惯=用户或${char.name}明确说出的长期偏好/习惯；情感状态=有因果的情绪/关系变化，含我自己的负面感受（必须带原因，禁止只写「我很难过」）；日常点滴=其他确有信息量且有前因后果的
 ${openTodoBlock}${priorBlock}只输出 JSON。`;
 
   const url = (settings.memory_api_url || settings.chat_api_url || '').trim();
@@ -5980,6 +6015,11 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
     const parsed = parseMemoryEpisodePayload(raw);
     if (parsed?.skip === true) {
       saveKnownFromParsed(parsed);
+      if (nsfwOn) {
+        try { saveIntimateKnowFromParsed(charId, parsed, char.name); } catch (e) {
+          console.warn('[intimate-know] skip', e.message);
+        }
+      }
       db.prepare('UPDATE characters SET memory_last_msg_id=? WHERE id=?').run(maxId, charId);
       console.log(`[memory] char#${charId}: skip (nothing worth remembering)`);
       return { ok: true, saved: 0, skipped: true };
@@ -6087,7 +6127,11 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
           label: String(item.emotion.label || '').slice(0, 24),
         };
       } else if (category === '情感状态') {
-        meta.emotion = { valence: -0.3, arousal: 0.4, label: '情感' };
+        let ownNeg = false;
+        try { ownNeg = require('./memory-tree-helper').isOwnNegativeEmotionFrag(content, category); } catch { /* ignore */ }
+        meta.emotion = ownNeg
+          ? { valence: -0.55, arousal: 0.6, label: '委屈' }
+          : { valence: -0.3, arousal: 0.4, label: '情感' };
       }
       try {
         const tree = require('./memory-tree-helper');
@@ -6133,7 +6177,11 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
       const impItems = impressionItemsFromMemoryEpisode(parsed, validItems, char.name, settings.username || '旅人');
       if (parsed?.impressions?.length) {
         for (const imp of parsed.impressions) {
-          const cat = normalizeImpressionCategory(imp.category) || mapMemoryToImpressionCategory('', imp.content);
+          const know = require('./portrait-cluster-helper');
+          let cat = know.slotIntimateCategory(imp.category, String(imp.content || ''))
+            || normalizeImpressionCategory(imp.category)
+            || mapMemoryToImpressionCategory('', imp.content);
+          if (cat === '亲密' && !nsfwOn) continue;
           const related = Array.isArray(imp.related_facts) ? imp.related_facts : [];
           const content = [toImpressionFact(imp.content), ...related.map((x) => toImpressionFact(x))]
             .filter((s) => s && !isJunkImpressionFact(s))
@@ -6165,6 +6213,9 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
       } catch (e) {
         console.warn('[self-view] memory merge', e.message);
       }
+      if (nsfwOn) {
+        try { require('./portrait-cluster-helper').collapseIntimateDevelopment(charId); } catch { /* ignore */ }
+      }
       saveKnownFromParsed(parsed);
       // 记忆总结后不再自动刷秘密簿（避免每轮总结都写备忘/心事）；秘密簿改由每日 cron / 手动补写
       console.log(`[memory] char#${charId}: episode#${episodeIds.join(',') || episodeId} + ${saved} entries (up to msg#${maxId})`);
@@ -6177,6 +6228,11 @@ ${openTodoBlock}${priorBlock}只输出 JSON。`;
       return { ok: true, saved, episodeId };
     } else {
       saveKnownFromParsed(parsed);
+      if (nsfwOn) {
+        try { saveIntimateKnowFromParsed(charId, parsed, char.name); } catch (e) {
+          console.warn('[intimate-know] empty batch', e.message);
+        }
+      }
       db.prepare('UPDATE characters SET memory_last_msg_id=? WHERE id=?').run(maxId, charId);
       console.log(`[memory] char#${charId}: batch processed, nothing saved (filtered or empty)`);
       return { ok: true, saved: 0 };
@@ -6268,12 +6324,12 @@ content 必须以「YYYY年M月D日+时段（清晨/上午/中午/下午/晚上/
 【偏好】若记偏好与习惯：对方亲口确认的用「对方」作主语；我自己明确说出的用「我」。禁止没根据的猜测。
 禁止记录：模糊愿望（「想去旅游」但无时间）、玩笑、随口一提、无具体信息。若无实质信息 → {"skip":true}。只输出 JSON。`
     : trigger === 'emotion'
-    ? `对话中出现**强情绪波动**（分手、争吵、冷战、表白、重大委屈、违心推开、和好等）。请立即捕获对以后相处有影响的**核心**事实与情绪状态，输出 JSON：
-{"episode_title":"…","episode_gist":"100-180字，含日期时段+导火索→关键转折→现状","keywords":["…"],"memories":[{"category":"情感状态|重要时刻|约定","content":"60-120字，结果锚点，勿重讲全文","weight":0.85}]}
+    ? `对话中出现**强情绪波动**（分手、争吵、冷战、表白、重大委屈、违心推开、和好），或**我自己**说出了有原因的负面情绪（委屈、生气、被冷落、吃醋、心堵、失望、故意推开）。请立即捕获对以后相处有影响的**核心**事实与我的感受，输出 JSON：
+{"episode_title":"…","episode_gist":"100-180字，含日期时段+导火索→关键转折→现状","keywords":["…"],"memories":[{"category":"情感状态|重要时刻|约定","content":"60-120字，结果锚点，勿重讲全文","weight":0.85,"emotion":{"valence":-0.6,"arousal":0.6,"label":"委屈"}}]}
 content 必须以「YYYY年M月D日+时段（清晨/上午/中午/下午/晚上/夜里/夜深了），」开头。人称：「我」=${char.name}，用户称「对方」或「${settings.username || '旅人'}」；禁止用「你」指用户，禁止第三人称旁白。
-只记核心因果：导火索 → 双方关键态度/转折 → 关系落到哪（含违心说狠话、故意推开）。禁止逐句争吵实录，禁止只写「吵了一架」。
+只记核心因果：导火索 → 我当时怎么难受（一句，不要堆形容词）→ 我因此怎么对对方 → 关系落到哪（含违心说狠话、故意推开）。禁止只写对方做了什么而抹掉我的感受。禁止逐句争吵实录，禁止只写「吵了一架」或「我不开心」。
 【具体词】用户亲口说的具体词（人名昵称、作品名、物品、地名等）须原样留下，禁止收成笼统说法。
-memories 默认 1 条，禁止把 gist 再写一遍。**不要 skip** 关系破裂、分手威胁、争吵、表白、违心推开等。若无任何关系实质 → {"skip":true}。只输出 JSON。`
+memories 默认 1 条，category 用「情感状态」，禁止把 gist 再写一遍。**不要 skip** 关系破裂、分手威胁、争吵、表白、违心推开，以及我自己有原因的委屈/生气/被冷落/吃醋。纯玩笑式的「哼」且马上翻篇、没有后续态度 → {"skip":true}。只输出 JSON。`
     : `用户使用了「记住/约定/别忘了」等关键词。仅当对话中有**明确值得长期记住**的承诺、事实、到期提醒或用户亲口确认的偏好时，输出 JSON：
 {"episode_title":"…","episode_gist":"80-160字，含日期时段+核心约定","keywords":["…"],"memories":[{"category":"约定|待办|重要时刻|偏好与习惯","content":"60-120字，只写关键锚点","weight":0.85}]}
 content 必须以「YYYY年M月D日+时段（清晨/上午/中午/下午/晚上/夜里/夜深了），」开头（说话当天）。人称：「我」=${char.name}，用户称「对方」或「${settings.username || '旅人'}」；禁止用「你」指用户，禁止第三人称旁白。
@@ -6333,7 +6389,19 @@ ${memoryTranscriptPersonRule(char.name, salientUser)}`;
       if (shouldSkipMemoryItem(content, cat, char.name, settings.username)) continue;
       const meta = { importance: Math.min(1, parseFloat(item.weight) || 0.85) };
       if (itemHm) meta.event_at = `${itemDate} ${itemHm}`;
-      if (cat === '情感状态') meta.emotion = { valence: -0.3, arousal: 0.4, label: '情感' };
+      if (item.emotion && typeof item.emotion === 'object') {
+        meta.emotion = {
+          valence: Math.max(-1, Math.min(1, parseFloat(item.emotion.valence) || 0)),
+          arousal: Math.max(0, Math.min(1, parseFloat(item.emotion.arousal) || 0)),
+          label: String(item.emotion.label || '').slice(0, 24),
+        };
+      } else if (cat === '情感状态') {
+        let ownNeg = false;
+        try { ownNeg = require('./memory-tree-helper').isOwnNegativeEmotionFrag(content, cat); } catch { /* ignore */ }
+        meta.emotion = ownNeg
+          ? { valence: -0.55, arousal: 0.6, label: '委屈' }
+          : { valence: -0.3, arousal: 0.4, label: '情感' };
+      }
       const ir = brain.insertMemory({
         characterId: charId,
         category: cat,
@@ -6427,7 +6495,7 @@ function maybeCaptureSalientFromMessage(characterId, msgId, options = {}) {
       .catch(e => console.error('[memory] salient failed', e.message));
     return;
   }
-  if (messageIndicatesSalientEmotion(text)) {
+  if (options.emotion || messageIndicatesSalientEmotion(text) || (msg?.role === 'assistant' && messageIndicatesOwnNegativeEmotion(text))) {
     captureSalientMoment(characterId, msgId, 'emotion')
       .catch(e => console.error('[memory] emotion capture failed', e.message));
     return;
@@ -6440,6 +6508,18 @@ function maybeCaptureSalientFromMessage(characterId, msgId, options = {}) {
   if (msg?.role === 'user' && messageIndicatesUserProfileShare(text)) {
     maybeCaptureUserImpressionsFromMessage(characterId, msgId);
   }
+}
+
+/**
+ * 回复落库后再捕：窗口能同时看到对方的话和我自己的难受。
+ * 用户消息一到就捕的话，角色这句还没写出来，记忆点里就没有「我的负面情绪」。
+ */
+function maybeCaptureEmotionFromReply(characterId, aiMsgId, { userText = '', assistantText = '', isDream = false } = {}) {
+  if (isDream || !characterId || !aiMsgId) return;
+  const userHit = messageIndicatesSalientEmotion(userText);
+  const selfHit = messageIndicatesOwnNegativeEmotion(assistantText);
+  if (!userHit && !selfHit) return;
+  maybeCaptureSalientFromMessage(characterId, aiMsgId, { emotion: true });
 }
 
 function maybeTriggerMemorySummary(characterId, options = {}) {
@@ -7689,10 +7769,11 @@ async function captureUserImpressionsFromMessage(charId, userMsgId) {
 
     const catsHint = (IMPRESSION_CATEGORY_HINTS || []).join('、');
     const systemPrompt = `用户在聊天里分享关于自己的稳定信息。提取可长期使用的印象标签，输出 JSON（不要 markdown）：
-{"impressions":[{"category":"性格|情绪|想法|喜好|习惯|不擅长|人际关系|样子","content":"6-16字短句"}]}
+{"impressions":[{"category":"性格|情绪|想法|喜好|习惯|不擅长|人际关系|样子|亲密","content":"6-16字短句"}]}
 规则：
 · 只记用户亲口说的稳定事实；禁止脑补、禁止事件流水、禁止半截话
 · 具体物喜欢/讨厌（吃喝玩看）→ 喜好；「喜欢胡思乱想 / 不喜欢被冷落」→ 想法，不要进喜好
+· 亲热上的稳定偏好、厌恶、开发程度 → 亲密，句子里带「那方面」或「亲热」，不要进喜好。没聊到就不要写
 · 脾气气质（内向、敏感、别扭）→ 性格；一生气就… / 难过时… → 情绪
 · 作息处事（熬夜、先回消息）→ 习惯；不会/搞不定 → 不擅长
 · 朋友/家人/同事等稳定关系 → 人际关系
@@ -7714,6 +7795,7 @@ async function captureUserImpressionsFromMessage(charId, userMsgId) {
     }
   }
 
+  if (!nsfwChannelOn(char)) items = items.filter((it) => it.category !== '亲密');
   if (!items.length) return;
   const n = mergeImpressionItems(charId, items);
   if (n > 0) {
@@ -8440,8 +8522,14 @@ async function checkProactiveMessage() {
         }
         continue;
       }
+      const pressInterview = modelPressesInterview(
+        String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
+      );
       if (content && nightEmotionGate) {
-        content = polishSpokenAiText(content, char.language_style);
+        content = polishSpokenAiText(content, char.language_style, {
+          recentHistory: recentMsgs,
+          interviewClamp: pressInterview,
+        });
         // 整条几乎复读上一条 AI：再掷一次，仍复读则放弃本轮（不占破例额度）
         if (lastAiText && proseNearDuplicate(content, lastAiText)) {
           const retryUser = withOptionalScreenImage(
@@ -8449,7 +8537,10 @@ async function checkProactiveMessage() {
             screenImage
           );
           let retry = await callChatAPIComplete(settings, systemPrompt, retryUser, 'chat', historyForApi, robotToolsExtra);
-          retry = polishSpokenAiText(retry || '', char.language_style);
+          retry = polishSpokenAiText(retry || '', char.language_style, {
+            recentHistory: recentMsgs,
+            interviewClamp: pressInterview,
+          });
           if (!retry || proseNearDuplicate(retry, lastAiText) || proseNearDuplicate(retry, content)) {
             console.warn(`[cron] night emotion outreach skipped (echo) char=${char.id}`);
             continue;
@@ -8457,7 +8548,10 @@ async function checkProactiveMessage() {
           content = retry;
         }
       } else if (content) {
-        content = polishSpokenAiText(content, char.language_style);
+        content = polishSpokenAiText(content, char.language_style, {
+          recentHistory: recentMsgs,
+          interviewClamp: pressInterview,
+        });
       }
       if (content) {
         content = normalizeMediaDirectiveLines(content);
@@ -8570,6 +8664,10 @@ async function checkProactiveMessage() {
         } else {
           try { touchCharacterEmotionFromMessage(char.id, { role: 'assistant', content: textContent }); } catch {}
         }
+        try {
+          const aiTextId = [...(aiMessages || [])].reverse().find((m) => m && (m.type === 'text' || m.type === 'voice') && m.id)?.id;
+          if (aiTextId) maybeCaptureEmotionFromReply(char.id, aiTextId, { assistantText: textContent });
+        } catch {}
         applyBusyStatusIfNeeded(char, textContent || content);
         if (recalledMsg) {
           push('message_update', { characterId: char.id, id: recalledMsg.id, recalled: true, recalledContent: recalledMsg.content });
@@ -8864,7 +8962,7 @@ let replyOwnerToNpcComments = async () => 0;
 function setOwnerNpcReplyFn(fn) { replyOwnerToNpcComments = fn; }
 
 /** 常用分类提示（非写死；库里可有任意新类） */
-const IMPRESSION_CATEGORY_HINTS = ['性格', '情绪', '想法', '喜好', '习惯', '不擅长', '人际关系', '样子', '其他', '变化'];
+const IMPRESSION_CATEGORY_HINTS = ['性格', '情绪', '想法', '喜好', '习惯', '不擅长', '人际关系', '样子', '亲密', '其他', '变化'];
 const IMPRESSION_CATEGORIES = IMPRESSION_CATEGORY_HINTS; // 兼容旧引用
 const IMPRESSION_MAX_ITEM_LEN = 28;
 const IMPRESSION_MAX_PER_CAT = 30;
@@ -9005,7 +9103,11 @@ function isJunkImpressionFact(content) {
   if (/^(回消息|发消息|在线|离线|已读|未读)$/.test(s)) return true;
   if (/(今天|昨天|刚才|这周|这天).{2,}/.test(s)) return true;
   if (s.length > IMPRESSION_MAX_ITEM_LEN) return true;
-  if (/[的地得与和是在了着过]$/.test(s) && s.length <= 10) return true;
+  if (/[的地得与和是在了着过]$/.test(s) && s.length <= 10) {
+    try {
+      if (!require('./portrait-cluster-helper').isIntimateKnowText(s)) return true;
+    } catch { return true; }
+  }
   try {
     if (require('./portrait-cluster-helper').looksLikeEventFact(s)) return true;
   } catch { /* ignore */ }
@@ -9134,6 +9236,7 @@ const IMPRESSION_CATEGORY_TOPIC_RE = {
   '不擅长': /不擅长|不会|苦手|搞不定|学不会|怕做|做不好/,
   '样子': /头发|发型|短发|长发|眼镜|穿搭|衣服|自拍|好看|外貌|打扮|妆|身高|身材/,
   '人际关系': /朋友|闺蜜|家人|父母|爸妈|同事|同学|前任|对象|恋爱|社交|人际|人缘|合群/,
+  '亲密': /那方面|亲热|做爱|前戏|上床|开发程度|还生疏|敏感处|床事|怕疼/,
 };
 
 function isUsefulImpressionKeyword(s) {
@@ -9270,7 +9373,7 @@ function pickImpressionCandidates(charId, contextText = '', {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const cat = normalizeImpressionCategory(row.category);
-      if (!cat) continue;
+      if (!cat || cat === '亲密') continue;
       const facts = cluster.cardFacts(row).map((f) => cluster.rewriteVoice(f, { ...voice, voice: 'user-portrait' }))
         .filter((f) => f && !isJunkImpressionFact(f));
       const blob = facts.join('、');
@@ -9423,6 +9526,107 @@ function formatImpressionCandidates(picked, voice, opts = {}) {
   return parts.join('\n');
 }
 
+function latestIntimateDevelopment(facts) {
+  const DEV_RE = /还生疏|还比较生疏|已经比较放开|能接受的范围|开发到|开发程度/;
+  const list = Array.isArray(facts) ? facts : [];
+  let last = -1;
+  list.forEach((f, i) => { if (DEV_RE.test(f)) last = i; });
+  const kept = list.filter((f, i) => !DEV_RE.test(f) || i === last);
+  const dev = kept.filter((f) => DEV_RE.test(f));
+  const rest = kept.filter((f) => !DEV_RE.test(f));
+  if (!dev.length) return rest.slice(-4);
+  return [...rest.slice(-3), ...dev].slice(0, 4);
+}
+
+function nsfwChannelOn(char) {
+  const v = char?.nsfw_enabled;
+  return !(v === 0 || v === '0' || v === false);
+}
+
+function formatIntimateKnowBlock(charId) {
+  if (!charId) return '';
+  const cluster = require('./portrait-cluster-helper');
+  let voice = {};
+  try { voice = cluster.getVoiceCtx(charId); } catch { voice = {}; }
+  let userRows = [];
+  let selfRows = [];
+  try {
+    userRows = db.prepare(
+      `SELECT * FROM char_impressions WHERE character_id=? AND category='亲密' ORDER BY id DESC LIMIT 4`
+    ).all(charId);
+  } catch { userRows = []; }
+  try {
+    selfRows = db.prepare(
+      `SELECT * FROM char_self_views WHERE character_id=? AND category='亲密' ORDER BY id DESC LIMIT 4`
+    ).all(charId);
+  } catch { selfRows = []; }
+  const take = (rows, voiceName) => {
+    const out = [];
+    for (const row of rows) {
+      let facts = [];
+      try { facts = cluster.cardFacts(row); } catch { facts = [String(row.content || '')]; }
+      for (const fact of facts) {
+        let text = String(fact || '').trim();
+        if (voiceName === 'self') {
+          if (!text.includes('我')) text = `我${text}`;
+        } else {
+          try { text = cluster.rewriteVoice(text, { ...voice, voice: voiceName }) || text; } catch { /* keep */ }
+        }
+        if (!text || out.includes(text)) continue;
+        out.push(text);
+      }
+    }
+    return out;
+  };
+  const userFacts = latestIntimateDevelopment(take([...userRows].reverse(), 'user-portrait'));
+  const selfFacts = latestIntimateDevelopment(take([...selfRows].reverse(), 'self'));
+  if (!userFacts.length && !selfFacts.length) return '';
+  const lines = ['【亲密里记下的】这是相处里摸清的偏好、厌恶和开发程度。这轮在聊这个，或正在小剧场里，就按这个接。不要当清单念出来，也不要在别的话题里提。'];
+  if (userFacts.length) lines.push(`对方：${userFacts.join('；')}`);
+  if (selfFacts.length) lines.push(`我：${selfFacts.join('；')}`);
+  return lines.join('\n');
+}
+
+function saveIntimateKnowFromParsed(charId, parsed, charName = '') {
+  if (!charId || !parsed) return 0;
+  const know = require('./portrait-cluster-helper');
+  const impItems = [];
+  for (const imp of parsed.impressions || []) {
+    const raw = `${imp?.content || ''}\n${(imp?.related_facts || []).join('\n')}`;
+    if (know.slotIntimateCategory(imp?.category, raw) !== '亲密') continue;
+    const related = Array.isArray(imp.related_facts) ? imp.related_facts : [];
+    const content = [toImpressionFact(imp.content), ...related.map((x) => toImpressionFact(x))]
+      .filter((s) => s && !isJunkImpressionFact(s))
+      .join('\n');
+    if (!content || isJunkImpressionFact(content.split('\n')[0])) continue;
+    impItems.push({
+      category: '亲密',
+      subcategory: imp.subcategory || '',
+      content,
+      note: imp.note || '',
+      keywords: ['亲密', '那方面'],
+      confirmed: 1,
+      bundle: content.includes('\n'),
+    });
+  }
+  let n = 0;
+  if (impItems.length) n += mergeImpressionItems(charId, impItems) || 0;
+  try {
+    const selfHelper = require('./char-self-helper');
+    const selfViews = (parsed.self_views || []).filter((sv) =>
+      know.slotIntimateCategory(sv?.category, String(sv?.content || '')) === '亲密'
+    );
+    const selfItems = selfHelper.selfViewItemsFromMemories({ self_views: selfViews }, [], charName);
+    if (selfItems.length) {
+      n += selfHelper.mergeSelfViewItems(charId, selfItems, { source: 'lived', mode: 'auto' }) || 0;
+    }
+  } catch (e) {
+    console.warn('[intimate-know] self', e.message);
+  }
+  try { know.collapseIntimateDevelopment(charId); } catch { /* ignore */ }
+  return n;
+}
+
 function formatImpressionsForPrompt(charId, contextText = '', opts = {}) {
   try {
     const { picked, voice } = pickImpressionCandidates(charId, contextText, {
@@ -9487,6 +9691,10 @@ function mapMemoryToImpressionCategory(memCategory, content) {
 /** 内容优先：纠正 LLM 把性格丢进习惯、把想法丢进喜好 */
 function resolveImpressionCategory(hintCat, content) {
   const text = String(content || '');
+  try {
+    const slotted = require('./portrait-cluster-helper').slotIntimateCategory(hintCat, text);
+    if (slotted) return slotted;
+  } catch { /* ignore */ }
   if (looksLikePersonalityTrait(text)) return '性格';
   if (looksLikeEmotionFact(text)) return '情绪';
   if (looksLikeThoughtFact(text)) return '想法';
@@ -10417,6 +10625,8 @@ module.exports = {
   scheduleTheaterMemorySummary,
   catchUpDailyMemorySummaries,
   maybeCaptureSalientFromMessage,
+  maybeCaptureEmotionFromReply,
+  messageIndicatesOwnNegativeEmotion,
   maybeTriggerMemorySummary,
   isMemorySummaryEnabled,
   messageTriggersMemoryKeyword,

@@ -39,6 +39,7 @@ const USER_TRAIT_COMPONENTS = [
   { key: '性格', name: '性格', type: 'trait', aliases: ['脾气'] },
   { key: '人际关系', name: '人际关系', type: 'trait', aliases: ['人际', '社交'] },
   { key: '样子', name: '样子', type: 'trait', aliases: ['外貌', '穿着'] },
+  { key: '亲密', name: '亲密', type: 'trait', aliases: ['亲密偏好', '成人偏好'] },
 ];
 
 /** 自我粗枝下的细类（对齐自我认知） */
@@ -46,6 +47,7 @@ const SELF_TRAIT_COMPONENTS = [
   { key: '行为习惯', name: '行为习惯', type: 'trait', aliases: ['习惯', '作息'] },
   { key: '喜好', name: '喜好', type: 'trait', aliases: ['爱好', '喜欢'] },
   { key: '经历', name: '经历', type: 'trait', aliases: ['往事'] },
+  { key: '亲密', name: '亲密', type: 'trait', aliases: ['亲密偏好', '成人偏好'] },
 ];
 
 const PORTRAIT_ROOT = {
@@ -92,10 +94,12 @@ function mapToTraitKey(kind, category) {
     if (/性格|脾气|气质/.test(cat)) return '性格';
     if (/人际|朋友|家人|社交/.test(cat)) return '人际关系';
     if (/样子|外貌|穿|发型/.test(cat)) return '样子';
+    if (/亲密/.test(cat)) return '亲密';
     if (/喜|爱|好|讨厌/.test(cat)) return '喜好';
     return '性格';
   }
   if (kind === 'self') {
+    if (/亲密/.test(cat)) return '亲密';
     if (/喜|爱|好|讨厌/.test(cat)) return '喜好';
     if (/经历|往事/.test(cat)) return '经历';
     return '行为习惯';
@@ -813,6 +817,29 @@ function loadFrag(id) {
   ).get(id);
 }
 
+const OWN_NEG_FEEL_RE = /委屈|难过|伤心|心寒|失望|吃醋|嫉妒|被冷落|不被在意|被忽略|心堵|堵得|想哭|火大|恼火|生气|推开|不想理|冷淡|自我厌恶|压抑/;
+const OWN_NEG_CAUSE_RE = /因为|所以|于是|后来|对方|把我|让我|对你|你|不被|被冷|被忽略|没回|敷衍|忽略|吵架|冷战|分手/;
+const OWN_NEG_HEALTH_RE = /头疼|头痛|感冒|发烧|例假|痛经|肚子|咳嗽|不舒服/;
+/** 角色台词里自己生出的负面情绪（关系向，不是身体不适） */
+const OWN_NEG_UTTERANCE_RE = /委屈|心寒|被冷落|不被在意|心堵|堵得慌|想哭|火大|恼火|吃醋|嫉妒|推开你|不想理你|懒得理你|别来找我|恨你|气死|气坏|(?<!不要|别|没)生气|(?<!不|没)难过|(?<!不|没)失望|故意冷|冷着你/;
+
+function utteranceShowsOwnNegativeEmotion(content) {
+  const text = String(content || '').replace(/^【自动回复】/, '').trim();
+  if (text.length < 4) return false;
+  return OWN_NEG_UTTERANCE_RE.test(text);
+}
+
+/** 碎片写的是「我」有原因的负面感受，应单独成感情记忆点，而不是被事件树丢掉 */
+function isOwnNegativeEmotionFrag(text, category) {
+  const cat = String(category || '');
+  if (cat === '偏好与习惯' || cat === '约定' || cat === '待办') return false;
+  const t = String(text || '');
+  if (!OWN_NEG_FEEL_RE.test(t)) return false;
+  if (OWN_NEG_HEALTH_RE.test(t) && !/委屈|生气|吵架|冷战|吃醋|失望|心寒|被冷落/.test(t)) return false;
+  if (!/我/.test(t)) return false;
+  return OWN_NEG_CAUSE_RE.test(t);
+}
+
 /** 碎片该进哪类粗枝（启发式；总结侧也可直接写 meta.branch_kind） */
 function classifyFragKind(frag, charName = '', userName = '旅人') {
   let meta = frag?.meta;
@@ -826,7 +853,9 @@ function classifyFragKind(frag, charName = '', userName = '旅人') {
   const cn = String(charName || '');
   const un = String(userName || '旅人');
 
-  if (/吵架|冷战|和好|分手|表白|告白|吃醋|复合|暧昧升温|关系变/.test(text) || (cat === '情感状态' && /我们|你我|感情|关系/.test(text))) {
+  if (/吵架|冷战|和好|分手|表白|告白|吃醋|复合|暧昧升温|关系变/.test(text)
+    || (cat === '情感状态' && /我们|你我|感情|关系/.test(text))
+    || isOwnNegativeEmotionFrag(text, cat)) {
     return 'affection';
   }
   if (cat === '偏好与习惯') {
@@ -893,6 +922,9 @@ function findOrCreateAffectionNarrative(charId, frag) {
   if (/表白|告白/.test(frag.content)) title = '表白';
   else if (/和好|复合/.test(frag.content)) title = '和好';
   else if (/吵架|冷战|分手/.test(frag.content)) title = '冷战与争吵';
+  else if (/吃醋|嫉妒/.test(frag.content)) title = '吃醋';
+  else if (/委屈|被冷落|不被在意|心寒|失望|难过|伤心|心堵|想哭/.test(frag.content)) title = '心里委屈';
+  else if (/生气|火大|恼|推开|不想理|冷淡/.test(frag.content)) title = '生过气';
   const id = createNarrativeWithComponents(charId, {
     title,
     content: String(frag.content || '').slice(0, 400),
@@ -1489,6 +1521,8 @@ module.exports = {
   touchPortraitCategory,
   syncPortraitFromCards,
   classifyFragKind,
+  utteranceShowsOwnNegativeEmotion,
+  isOwnNegativeEmotionFrag,
   routeFragmentToTrees,
   attachFragmentToNarrative,
   routeMemoryIds,

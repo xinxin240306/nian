@@ -534,12 +534,63 @@ function compactPortraitCards(charId, table) {
   }
 }
 
+/** 亲热上的稳定认识：偏好、厌恶、开发程度。不是某一场的过程。 */
+const INTIMATE_KNOW_RE = /做爱|前戏|口交|上床|高潮|射在|射了|内裤|内衣|指交|敏感处|敏感点|被压着|开发程度|那方面|亲热|床事|疼了就停|受不了痛|想停一下/;
+
+function isIntimateCategory(cat) {
+  const c = String(cat || '').trim();
+  return c === '亲密' || c === '亲密偏好' || c === '成人偏好';
+}
+
+function isIntimateKnowText(text) {
+  return INTIMATE_KNOW_RE.test(String(text || ''));
+}
+
+/** 模型标了「亲密」，或句子本身就是这类稳定认识 → 归到亲密，不要掉进普通喜好。 */
+function slotIntimateCategory(hint, text) {
+  if (isIntimateCategory(hint) || isIntimateKnowText(text) || isIntimateKnowText(hint)) return '亲密';
+  return '';
+}
+
+const INTIMATE_DEV_RE = /还生疏|还比较生疏|已经比较放开|能接受的范围|开发到|开发程度/;
+
+/** 开发程度只留最新一句，避免「还生疏」和「已经放开」叠在一起。 */
+function collapseIntimateDevelopment(charId) {
+  if (!charId) return 0;
+  ensureClusterColumns();
+  let changed = 0;
+  for (const table of ['char_impressions', 'char_self_views']) {
+    let rows = [];
+    try {
+      rows = db.prepare(
+        `SELECT * FROM ${table} WHERE character_id=? AND category=? ORDER BY id ASC`
+      ).all(charId, '亲密');
+    } catch { continue; }
+    const flat = [];
+    for (const row of rows) {
+      cardFacts(row).forEach((f) => flat.push({ id: row.id, f }));
+    }
+    const dev = flat.filter((x) => INTIMATE_DEV_RE.test(x.f));
+    if (dev.length <= 1) continue;
+    const keep = dev[dev.length - 1];
+    for (const row of rows) {
+      const prev = cardFacts(row);
+      const next = prev.filter((f) => !INTIMATE_DEV_RE.test(f) || (row.id === keep.id && f === keep.f));
+      if (next.length === prev.length) continue;
+      changed += 1;
+      if (!next.length) db.prepare(`DELETE FROM ${table} WHERE id=?`).run(row.id);
+      else writeCardFacts(table, row.id, next, { topic_key: row.topic_key || topicKeyOf(next.join('、')) });
+    }
+  }
+  return changed;
+}
+
 function looksBrokenFact(text) {
   const s = String(text || '').trim();
   if (!s) return true;
   if (/(.)\1{3,}/.test(s)) return true;
   if (/^[，,。.!！？、\s]+|[，,。.!！？、\s]+$/.test(s) && s.length < 8) return true;
-  if (/[的地得与和是在了着过]$/.test(s) && s.length <= 10) return true;
+  if (/[的地得与和是在了着过]$/.test(s) && s.length <= 10 && !isIntimateKnowText(s)) return true;
   if (/^(喜欢|讨厌|习惯|经常|总是|觉得|是个|比较)$/.test(s)) return true;
   if (/…$|\.{2,}$|——$|-$/.test(s)) return true;
   if (looksLikeEventFact(s)) return true;
@@ -549,11 +600,12 @@ function looksBrokenFact(text) {
 function normalizeTidyCategory(table, cat) {
   const c = String(cat || '').trim().slice(0, 12);
   if (table === 'char_self_views') {
-    if (['性格', '行为习惯', '喜好', '经历', '变化'].includes(c)) return c;
+    if (['性格', '行为习惯', '喜好', '经历', '变化', '亲密'].includes(c)) return c;
     if (c === '习惯') return '行为习惯';
+    if (isIntimateCategory(c)) return '亲密';
     return '';
   }
-  const allowed = ['性格', '情绪', '想法', '喜好', '习惯', '不擅长', '人际关系', '样子', '其他'];
+  const allowed = ['性格', '情绪', '想法', '喜好', '习惯', '不擅长', '人际关系', '样子', '亲密', '其他'];
   if (allowed.includes(c)) return c;
   if (c === '情绪反应') return '情绪';
   if (c === '爱好') return '喜好';
@@ -672,7 +724,7 @@ async function tidyPortraitWithAI(charId, table, { callChatAPIComplete, settings
   const ctx = getVoiceCtx(charId);
   ctx.voice = voiceForTable(table);
   const isSelf = table === 'char_self_views';
-  const catsHint = isSelf ? '性格、行为习惯、喜好、经历、变化' : '性格、情绪、想法、喜好、习惯、不擅长、人际关系、样子、其他';
+  const catsHint = isSelf ? '性格、行为习惯、喜好、经历、变化、亲密' : '性格、情绪、想法、喜好、习惯、不擅长、人际关系、样子、亲密、其他';
   const voiceRule = isSelf
     ? `第一人称「我」记自己；提到用户只用「${ctx.userCall}」；角色本名一律写 TA`
     : `称呼用户只用「${ctx.userCall}」；称自己为 TA；禁止用户/你/他/她/旅人混用；角色本名一律写 TA`;
@@ -839,6 +891,10 @@ module.exports = {
   familiesOverlap,
   factPolarity,
   looksLikeEventFact,
+  isIntimateCategory,
+  isIntimateKnowText,
+  slotIntimateCategory,
+  collapseIntimateDevelopment,
   looksBrokenFact,
   unifiedUserCall,
   rewriteVoice,
