@@ -237,6 +237,7 @@ final class ScreenShareOverlay {
       o.put("on", callOn);
       o.put("video", callVideo);
       o.put("facing", callFacing == null ? "" : callFacing);
+      o.put("characterId", characterId);
     } catch (Exception ignored) {}
     return o;
   }

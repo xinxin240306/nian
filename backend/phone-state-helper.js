@@ -158,11 +158,34 @@ function ingestCall(raw, deviceCall) {
     : (deviceCall && typeof deviceCall === 'object' ? deviceCall : null);
   if (!src) return _snap.call || { on: false, video: false, facing: '' };
   const facing = String(src.facing || '').trim();
+  const cid = Number(src.characterId) || 0;
   return {
     on: !!src.on,
     video: !!src.video,
     facing: facing === 'environment' ? 'environment' : (src.video ? 'user' : ''),
+    characterId: cid,
+    at: Date.now(),
   };
+}
+
+/** 手机还报着这通没挂。快照超过 10 分钟没刷新就不当成还在打。 */
+const LIVE_CALL_MS = 10 * 60 * 1000;
+
+function liveVoiceCall(characterId) {
+  const cid = Number(characterId) || 0;
+  const call = _snap.call;
+  if (!cid || !call?.on) return null;
+  const at = Number(call.at) || Number(_snap.at) || 0;
+  if (!at || Date.now() - at > LIVE_CALL_MS) return null;
+  const onId = Number(call.characterId) || 0;
+  if (onId) {
+    if (onId !== cid) return null;
+  } else {
+    let owner = 0;
+    try { owner = require('./emoji-helper').latestOpenCallCharacterId(); } catch { owner = 0; }
+    if (owner !== cid) return null;
+  }
+  return { on: true, video: !!call.video, characterId: cid };
 }
 
 function clipApps(list, max) {
@@ -672,21 +695,46 @@ function trailDayKey() {
   }
 }
 
+function metersBetween(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (Number(d) * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
 function rememberLocationTrail(loc) {
   if (!loc?.ok) return;
+  const acc = Number(loc.accuracy) || 0;
+  // 误差几百米的粗点会把「家」跳成隔壁店名，不要记成又去了一处
+  if (!loc.anchor && acc >= 250) return;
   const day = trailDayKey();
   if (_locTrail.day !== day) _locTrail = { day, points: [] };
-  const label = loc.anchorLabel || loc.title || '';
+  const label = loc.anchor === 'home'
+    ? '家'
+    : (loc.anchor === 'work' ? '公司' : (loc.anchorLabel || loc.title || ''));
   if (!label) return;
   const last = _locTrail.points[_locTrail.points.length - 1];
   if (last && last.label === label) {
     last.at = loc.at || Date.now();
+    if (loc.lat != null) { last.lat = loc.lat; last.lng = loc.lng; }
     return;
+  }
+  if (last && last.lat != null && loc.lat != null) {
+    const moved = metersBetween(last.lat, last.lng, loc.lat, loc.lng);
+    if (moved < 350) {
+      last.at = loc.at || Date.now();
+      return;
+    }
   }
   _locTrail.points.push({
     at: loc.at || Date.now(),
     label,
     anchor: loc.anchor || '',
+    lat: loc.lat,
+    lng: loc.lng,
   });
   if (_locTrail.points.length > 14) _locTrail.points = _locTrail.points.slice(-14);
 }
@@ -789,12 +837,26 @@ function locationResult() {
   const stale = loc.stale || (loc.at && Date.now() - loc.at > 3 * 60 * 1000);
   const title = loc.title || place.split('|')[0] || '当前位置';
   const extra = loc.detail && loc.detail !== title ? `（${loc.detail}）` : '';
-  const trail = locationTrailLine();
+  const acc = Number(loc.accuracy) || 0;
+  const coarse = acc <= 0 || acc >= 180;
+  let homePinned = false;
+  try {
+    const row = require('./db').prepare(`SELECT value FROM settings WHERE key='user_home_lat'`).get();
+    homePinned = Number.isFinite(parseFloat(row?.value));
+  } catch {}
+  // 人在家时，先前几次粗点跳出来的店名不要念成「今天溜了一圈」
+  const trail = (loc.anchor === 'home' || loc.anchor === 'work') ? '' : locationTrailLine();
   let nowLine = '';
   if (loc.anchor === 'home') {
     nowLine = `【心里知道·别说破】对方此刻在家${extra || ''}。聊天可按「人在家」接，但不要说「我看到你在家」「定位显示…」。`;
   } else if (loc.anchor === 'work') {
     nowLine = `【心里知道·别说破】对方此刻在公司上班${extra || ''}。聊天可按「人在上班」接，但不要说「我看到你在公司」「定位显示…」。`;
+  } else if (!homePinned || coarse) {
+    const spot = title;
+    const why = !homePinned
+      ? '还没存下家的坐标，只能看到一个地名，不能判断人在不在家。'
+      : `这次定位很粗${acc > 0 ? `（误差大约 ${Math.round(acc)} 米）` : ''}，点落在「${spot}」一带，不能据此判断对方出了门。`;
+    nowLine = `【心里知道·别说破】${why}不要说对方在外面溜达、乱跑或没报备。按人还在家附近接。`;
   } else {
     const spot = loc.poi && loc.poi !== title ? loc.poi : title;
     nowLine = `【心里知道·别说破】对方不在家也不在公司，人在外面（大约「${spot}」${extra}）。对方没跟你说自己去哪了；具体在干嘛你读不到，别瞎编。`;
@@ -1459,6 +1521,7 @@ module.exports = {
   ingest,
   snapshot,
   ageMs,
+  liveVoiceCall,
   query,
   notificationResult,
   toolResult: notificationResult,

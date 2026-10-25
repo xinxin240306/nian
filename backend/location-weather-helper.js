@@ -670,8 +670,13 @@ function standingPlacesFromSettings(settings) {
 }
 
 function matchStandingPlace(lat, lng, settings, accuracyM = 0) {
-  // 约 50m 内才认作「在家/在公司」；GPS 误差大时最多放到 70m，避免整条街都被收成家里
-  const radius = Math.max(50, Math.min(70, Number(accuracyM) * 1.2 || 50));
+  const acc = Number(accuracyM);
+  const accOk = Number.isFinite(acc) && acc > 20;
+  // 人在楼里时，手机常给出基站/Wi-Fi 点，离门口一两百米很常见。
+  // 误差圈盖住已存的家或公司，仍算在那儿；上限 650m，避免把隔壁几条街收成家。
+  const radius = accOk
+    ? Math.max(180, Math.min(650, acc * 1.25))
+    : 200;
   let best = null;
   for (const p of standingPlacesFromSettings(settings)) {
     const dist = haversineM(lat, lng, p.lat, p.lng);

@@ -1111,7 +1111,7 @@ const hangoutBed = createBreathingLayer({ defaultVol: 0.1 });
 export function playCallAmbient(url, opts) {
   const src = resolveMediaUrl(url) || url;
   const vol = Number.isFinite(Number(opts?.volume)) ? Number(opts.volume) : undefined;
-  // App 通话：垫音走原生 MediaPlayer（与角色 TTS 同通话声道），角色开口时不会被系统停掉
+  // App 通话：垫音走原生 MediaPlayer 的媒体流，音量跟系统媒体音量；和角色声分轨，开口时不停
   if (nativeCallBedPlay && src) {
     nativeBedActive = true;
     try { roomAmbient.stop(); } catch {}

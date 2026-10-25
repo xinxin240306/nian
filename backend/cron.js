@@ -8467,7 +8467,7 @@ async function checkProactiveMessage() {
       try { emotionHelper.applySilenceMoodTick(char.id, char); } catch {}
     }
 
-    const {
+    let {
       extra, userContent, historyForApi, scenario: mode, recentMsgs, screenImage,
       memoryCueText, contextText,
     } = await buildProactiveContext(
@@ -8476,12 +8476,20 @@ async function checkProactiveMessage() {
         nightEmotionGate,
       }
     );
+    let liveCall = null;
+    try { liveCall = require('./phone-state-helper').liveVoiceCall(char.id); } catch {}
+    if (liveCall) {
+      extra = `${extra}\n\n【还在电话里·硬性】这通电话没挂，对方现在还在听筒那头（可能已经连了一夜，早上也没挂）。这轮只能对着电话说，禁止改去微信打字，禁止说自己发了消息或点开了对话框，禁止发语音条。不要以「喂」开头，不要问能不能听见。连麦就接着夜里的口气，轻声一两句。`;
+      userContent = '电话还通着。你在听筒里开口，不是发微信。';
+    }
     const proactiveOpts = {
       recentHistory: recentMsgs,
       userMessage: memoryCueText || '',
       contextText: contextText || '',
       sessionClosed: !memoryCueText,
-      enableInlineDirectives: true,
+      enableInlineDirectives: !liveCall,
+      forVoiceCall: !!liveCall,
+      forVideoCall: !!liveCall?.video,
       // 夜间破例、或这段沉默里已经发过：不要每条都把情绪余波再开成一轮新的气
       suppressEmotionalCarryover: !!nightEmotionGate || charAlreadyFollowedUp(char.id),
     };
@@ -8493,7 +8501,8 @@ async function checkProactiveMessage() {
       if (mode === 'ai_unreplied' && awaitingReply.length > 0) continue;
 
       // 跟句时偶尔连文字带拍一拍（不再单独用拍一拍顶替整轮）
-      const alsoPoke = !nightEmotionGate
+      const alsoPoke = !liveCall
+        && !nightEmotionGate
         && mode === 'ai_unreplied'
         && mode !== 'travel_arrive'
         && mode !== 'process_done'
@@ -8589,7 +8598,10 @@ async function checkProactiveMessage() {
         try {
           if (require('./contact-helper').isPeerUndeliverable(db, char.id)) deliveryStatus = 'peer_undelivered';
         } catch {}
-        let { aiMessages } = saveAiReplySegments(char.id, toSave, char, false, { deliveryStatus });
+        let { aiMessages } = saveAiReplySegments(char.id, toSave, char, false, {
+          deliveryStatus,
+          voiceCallMode: !!liveCall,
+        });
         // 文字落库后同轮可附带拍一拍（模型写了 [拍一拍]，或跟句掷中）
         if (wantPoke || alsoPoke) {
           try {
@@ -8738,13 +8750,21 @@ async function checkSpecialDayMessages() {
       `INSERT INTO messages (character_id, role, content, type, timestamp, is_dream) VALUES (?,?,?,?,?,?)`
     ).run(char.id, 'system', `__special__${today}`, 'system', now, 0);
 
-    const {
+    let {
       extra, userContent, historyForApi, screenImage, recentMsgs, memoryCueText, contextText,
     } = await buildProactiveContext(char, chatSettings, 120, 'cold_start', null);
+    let liveCall = null;
+    try { liveCall = require('./phone-state-helper').liveVoiceCall(char.id); } catch {}
+    if (liveCall) {
+      extra = `${extra}\n\n【还在电话里·硬性】电话没挂，对方还在听筒里。这句对着电话说，不要发微信。不要「喂」，不要问能不能听见。`;
+      userContent = '电话还通着。你在听筒里开口，不是发微信。';
+    }
     const systemPrompt = buildSystemPrompt(char, chatSettings,
-      `${extra}\n【特别日子】今天是${occasion}。按【性格】【关系尺度】发 1-2 句口语消息（可热可淡可损），不要套模板祝福语，也不要强行「有温度」。`,
+      `${extra}\n【特别日子】今天是${occasion}。按【性格】【关系尺度】${liveCall ? '在电话里说' : '发'} 1-2 句口语（可热可淡可损），不要套模板祝福语，也不要强行「有温度」。`,
       {
-        enableInlineDirectives: true,
+        enableInlineDirectives: !liveCall,
+        forVoiceCall: !!liveCall,
+        forVideoCall: !!liveCall?.video,
         recentHistory: recentMsgs,
         userMessage: memoryCueText || '',
         contextText: contextText || '',
@@ -8768,7 +8788,10 @@ async function checkSpecialDayMessages() {
         try {
           if (require('./contact-helper').isPeerUndeliverable(db, char.id)) deliveryStatus = 'peer_undelivered';
         } catch {}
-        const { aiMessages } = saveAiReplySegments(char.id, toSave, char, false, { deliveryStatus });
+        const { aiMessages } = saveAiReplySegments(char.id, toSave, char, false, {
+          deliveryStatus,
+          voiceCallMode: !!liveCall,
+        });
         const textContent = aiMessages.filter(m => m.type === 'text' || m.type === 'voice').map(m => m.content).join('\n') || cleanContent;
         applyBusyStatusIfNeeded(char, textContent || cleanContent);
         if (recalledMsg) {

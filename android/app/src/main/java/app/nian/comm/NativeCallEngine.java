@@ -49,7 +49,7 @@ final class NativeCallEngine {
   private static PlayCallback playDone;
   private static File playFile;
   private static int playGen;
-  /** 通话现场循环垫音：与角色 TTS 分轨，走同一通话声道，角色开口时不停 */
+  /** 通话现场循环垫音：与角色 TTS 分轨，走媒体流（跟媒体音量），角色开口时不停 */
   private static MediaPlayer bedPlayer;
   private static File bedFile;
   private static int bedGen;
@@ -493,8 +493,14 @@ final class NativeCallEngine {
     bedPlayer = mp;
     try {
       if (Build.VERSION.SDK_INT >= 21) {
-        // 与角色 TTS 同属性，系统不会因「通话流 vs 媒体流」把垫音闪避掉
-        mp.setAudioAttributes(buildPlayAttrs(inCallMode || running));
+        // 现场环境音跟系统媒体音量。绑到 USAGE_VOICE_COMMUNICATION 时，
+        // 音量面板里的「媒体」调不到它，只会跟着通话音量变。
+        try {
+          mp.setAudioAttributes(buildBedAttrs());
+        } catch (Exception e) {
+          Log.w(TAG, "bed media attr refused", e);
+          try { mp.setAudioAttributes(buildPlayAttrs(false)); } catch (Exception ignored) {}
+        }
       }
       if (src.startsWith("blob:") || src.startsWith("data:")) {
         throw new IOException("webview blob");
@@ -569,6 +575,8 @@ final class NativeCallEngine {
     paused = true;
     CallAudioRoute.suspendScoForMedia(appCtx, () -> {
       if (gen != playGen) return;
+      // 抢焦点时系统可能把媒体轨垫音暂停，开播前拉回来
+      reviveBedLocked();
       // 路由切稳后直接满音量开播，把切换毛刺顶过去；不做淡入（淡入会让短句整句发虚）
       beginPlayer(url, data, mime, gen);
     });
@@ -632,6 +640,7 @@ final class NativeCallEngine {
             applyMediaBoost(target);
           }
           p.start();
+          reviveBedLocked();
         } catch (Exception e) {
           Log.w(TAG, "start failed", e);
           if (gen == playGen && player == p) stopPlayLocked(true, false, true);
@@ -659,6 +668,23 @@ final class NativeCallEngine {
   private static volatile boolean inCallMode = false;
   static void setInCallMode(boolean on) { inCallMode = !!on; }
   static boolean isInCallMode() { return inCallMode; }
+
+  /** 垫音固定媒体流，音量跟 STREAM_MUSIC，不跟通话音量。 */
+  private static AudioAttributes buildBedAttrs() {
+    return new AudioAttributes.Builder()
+      .setUsage(AudioAttributes.USAGE_MEDIA)
+      .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+      .build();
+  }
+
+  private static void reviveBedLocked() {
+    MediaPlayer mp = bedPlayer;
+    if (mp == null) return;
+    try { mp.setVolume(bedGain, bedGain); } catch (Exception ignored) {}
+    try {
+      if (!mp.isPlaying()) mp.start();
+    } catch (Exception ignored) {}
+  }
 
   private static AudioAttributes buildPlayAttrs(boolean voiceComm) {
     AudioAttributes.Builder ab = new AudioAttributes.Builder()
@@ -806,6 +832,7 @@ final class NativeCallEngine {
     // 任何结束路径都要把媒体音量 / 临时通话音量恢复回去
     restoreMediaBoost();
     restoreVoiceCallBoost();
+    reviveBedLocked();
     // 先回调前端，别把同轮下一句卡在 SCO 恢复上
     if (fireDone && cb != null) cb.onDone(ok);
     if (resume) {

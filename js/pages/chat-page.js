@@ -597,6 +597,7 @@ function chainSave(task) {
 function isInVoiceCallWith(id) {
   return !!(inCall && callCharId != null && Number(id) === Number(callCharId));
 }
+window.isLiveCallWith = isInVoiceCallWith;
 
 function getVideoCallLookMode() {
   const s = getChatSettings(callCharId || charId);
@@ -1436,7 +1437,10 @@ async function reconcileOrphanNativeCall() {
         startedAt,
         name: st?.activeCallName || '',
       });
-      if (resumed) return;
+      if (resumed) {
+        void speakRecentCallLine(charId);
+        return;
+      }
     }
 
     const durationSec = startedAt > 0
@@ -1781,6 +1785,42 @@ async function playCallReplyAudio(result, forCharId) {
     forceClaim: anyPlayed && ids.length > 1,
   });
   await armCallLiveAfterSpeak();
+}
+
+function callLineMeta(msg) {
+  try {
+    const meta = typeof msg?.media_meta === 'string'
+      ? JSON.parse(msg.media_meta || '{}')
+      : (msg?.media_meta || {});
+    return Number(meta?.callLine) === 1 || meta?.callLine === true;
+  } catch {
+    return false;
+  }
+}
+
+/** 锁屏后主动开口进了库，但当时页面冻住没念。只补最近一条通话行，不把整夜重播一遍。 */
+async function speakRecentCallLineFrom(msgs, forCharId) {
+  if (!isInVoiceCallWith(forCharId) || _callSpeechInFlightKey) return;
+  let latest = null;
+  for (const m of Array.isArray(msgs) ? msgs : []) {
+    if (m?.role && m.role !== 'assistant') continue;
+    if (m?.type !== 'text' && m?.type !== 'voice') continue;
+    if (!callLineMeta(m)) continue;
+    if (!latest || Number(m.id) > Number(latest.id)) latest = m;
+  }
+  if (!latest?.content) return;
+  const ts = Date.parse(latest.timestamp || '');
+  if (Number.isFinite(ts) && Date.now() - ts > 3 * 60 * 60 * 1000) return;
+  if (wasCallSpeechCompleted(latest.id)) return;
+  await playCallReplyAudio({ aiMessages: [latest], content: latest.content }, forCharId);
+}
+
+async function speakRecentCallLine(forCharId) {
+  if (!isInVoiceCallWith(forCharId)) return;
+  try {
+    const msgs = await api.getMessages(forCharId, { dream: 0, limit: 16, offset: 0 });
+    await speakRecentCallLineFrom(msgs, forCharId);
+  } catch {}
 }
 
 function shouldRenderForChar(forCharId) {
@@ -2714,6 +2754,10 @@ async function syncOpenChatFromServer() {
     const hasPendingMedia = !!list.querySelector(
       '[data-pending-video], [data-pending-selfie], [data-failed-video], [data-failed-selfie], .bubble-media-pending, .bubble-media-failed'
     );
+    if (isInVoiceCallWith(viewingId)) {
+      void speakRecentCallLineFrom(Array.isArray(msgs) ? msgs : [], viewingId);
+    }
+
     if (hasPendingMedia) {
       const recent = await api.getMessages(viewingId, { dream: dreamFlag, limit: 200, offset: 0 });
       if (seq !== _chatFgSyncSeq || Number(charId) !== Number(viewingId)) return;
@@ -7961,6 +8005,7 @@ function reviveCallLiveAfterForeground() {
   }
   keepCallCaptureAlive();
   updateCallLiveHoldUi();
+  if (!_callLiveRec && !_callLiveCommitting) void speakRecentCallLine(callCharId);
 }
 
 function callNoiseCap() {
@@ -12106,6 +12151,9 @@ window.onPeerEndCall = function(data) {
 window.onProactiveMessage = async function(data) {
   const cid = Number(data.characterId);
   if (!shouldRenderForChar(cid)) {
+    if (isInVoiceCallWith(cid)) {
+      try { await playCallReplyAudio(data, cid); } catch {}
+    }
     const msgs = data.aiMessages?.length
       ? data.aiMessages
       : (data.content ? [{ type: 'text', content: data.content }] : []);

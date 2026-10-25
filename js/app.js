@@ -2370,8 +2370,8 @@ function handleWSMessage(data) {
 async function handleIncomingChatMessage(data, allowOnChatPage = false) {
   const cid = Number(data.characterId);
   const isActive = window.isChatPageActiveFor?.(cid);
-  if (isActive) {
-    if (allowOnChatPage) {
+  if (isActive || (window.isLiveCallWith?.(cid) && typeof window.onProactiveMessage === 'function')) {
+    if (allowOnChatPage || window.isLiveCallWith?.(cid)) {
       if (typeof window.onProactiveMessage === 'function') {
         window.onProactiveMessage(data);
       } else {

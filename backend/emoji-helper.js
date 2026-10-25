@@ -624,8 +624,17 @@ function latestPersistedCallPhase(characterId) {
   if (!cid) return '';
   let rows = [];
   try {
+    // 只取通话边界，避免一夜的其它系统消息把「通话开始」挤出窗口
     rows = db.prepare(
-      `SELECT content FROM messages WHERE character_id=? AND type='system' AND COALESCE(is_dream,0)=0 ORDER BY id DESC LIMIT 24`
+      `SELECT content FROM messages
+       WHERE character_id=? AND type='system' AND COALESCE(is_dream,0)=0
+         AND (
+           content LIKE '%通话开始%'
+           OR content LIKE '%通话已结束%'
+           OR content LIKE '%通话被对方结束%'
+           OR content LIKE '%通话结束%'
+         )
+       ORDER BY id DESC LIMIT 8`
     ).all(cid);
   } catch {
     return '';
@@ -636,6 +645,31 @@ function latestPersistedCallPhase(characterId) {
     if (/通话已结束|通话被对方结束/.test(c) || (/通话结束/.test(c) && !/开始/.test(c))) return 'end';
   }
   return '';
+}
+
+/** 全库最近一条通话边界。仍是「开始」时返回角色 id，用来认出没挂的那一通。 */
+function latestOpenCallCharacterId() {
+  let row = null;
+  try {
+    row = db.prepare(
+      `SELECT character_id, content FROM messages
+       WHERE type='system' AND COALESCE(is_dream,0)=0
+         AND (
+           content LIKE '%通话开始%'
+           OR content LIKE '%通话已结束%'
+           OR content LIKE '%通话被对方结束%'
+           OR content LIKE '%通话结束%'
+         )
+       ORDER BY id DESC LIMIT 1`
+    ).get();
+  } catch {
+    return 0;
+  }
+  const c = String(row?.content || '');
+  if (!c) return 0;
+  if (/通话已结束|通话被对方结束/.test(c) || (/通话结束/.test(c) && !/开始/.test(c))) return 0;
+  if (/通话开始/.test(c) && !/结束/.test(c)) return Number(row.character_id) || 0;
+  return 0;
 }
 
 function buildPostCallChatNote(messages) {
@@ -3228,6 +3262,7 @@ module.exports = {
   stripLeadingPhonePickup,
   latestCallPhaseFromMessages,
   latestPersistedCallPhase,
+  latestOpenCallCharacterId,
   recentChatLeftCall,
   buildPostCallChatNote,
   applyCallChannelMarks,

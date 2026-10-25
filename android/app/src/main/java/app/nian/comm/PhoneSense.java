@@ -178,17 +178,18 @@ final class PhoneSense {
         return o;
       }
       Location best = pickLastKnown(lm);
-      if (best != null && System.currentTimeMillis() - best.getTime() < 180_000) {
+      long now = System.currentTimeMillis();
+      boolean fresh = best != null && now - best.getTime() < 180_000;
+      // 三分钟内的粗点（基站）常常把人从家里甩到隔壁街区，仍等一次更准的
+      boolean tight = best != null && accuracyOf(best) <= 120f;
+      if (fresh && tight) {
         putLocation(o, best, false);
         return o;
       }
-      Location fresh = waitForFix(lm, gpsOn, netOn);
-      if (fresh != null) {
-        putLocation(o, fresh, false);
-        return o;
-      }
-      if (best != null) {
-        putLocation(o, best, true);
+      Location newer = waitForFix(lm, gpsOn, netOn);
+      Location chosen = betterFix(newer, best) ? newer : best;
+      if (chosen != null) {
+        putLocation(o, chosen, chosen == best && !fresh);
         return o;
       }
       o.put("ok", false);
@@ -199,6 +200,26 @@ final class PhoneSense {
       try { o.put("ok", false); o.put("error", "unavailable"); } catch (Exception ignored) {}
     }
     return o;
+  }
+
+  private static float accuracyOf(Location loc) {
+    if (loc == null || !loc.hasAccuracy()) return 5000f;
+    float a = loc.getAccuracy();
+    return a > 0f ? a : 5000f;
+  }
+
+  /** 同样新鲜时用更准的。基站点更新更勤，但不能盖过刚拿到的 GPS。 */
+  private static boolean betterFix(Location cand, Location cur) {
+    if (cand == null) return false;
+    if (cur == null) return true;
+    float accC = accuracyOf(cand);
+    float accU = accuracyOf(cur);
+    long now = System.currentTimeMillis();
+    long ageC = now - cand.getTime();
+    long ageU = now - cur.getTime();
+    if (accC + 80f < accU && ageC < 15 * 60_000L) return true;
+    if (accU + 80f < accC && ageU < 15 * 60_000L) return false;
+    return cand.getTime() > cur.getTime();
   }
 
   @android.annotation.SuppressLint("MissingPermission")
@@ -212,8 +233,7 @@ final class PhoneSense {
     for (String provider : providers) {
       try {
         Location loc = lm.getLastKnownLocation(provider);
-        if (loc == null) continue;
-        if (best == null || loc.getTime() > best.getTime()) best = loc;
+        if (betterFix(loc, best)) best = loc;
       } catch (Exception ignored) {}
     }
     return best;
@@ -226,8 +246,9 @@ final class PhoneSense {
     final LocationListener listener = new LocationListener() {
       @Override public void onLocationChanged(Location location) {
         if (location == null) return;
-        got[0] = location;
-        latch.countDown();
+        if (betterFix(location, got[0])) got[0] = location;
+        // 楼里先到的往往是误差几百米的基站点，等到更准的或超时再用
+        if (accuracyOf(location) <= 80f) latch.countDown();
       }
       @Override public void onStatusChanged(String provider, int status, android.os.Bundle extras) {}
       @Override public void onProviderEnabled(String provider) {}

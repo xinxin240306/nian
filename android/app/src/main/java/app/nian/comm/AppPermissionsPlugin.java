@@ -1963,6 +1963,26 @@ public class AppPermissionsPlugin extends Plugin {
       || ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
   }
 
+  private float accuracyOf(Location loc) {
+    if (loc == null || !loc.hasAccuracy()) return 5000f;
+    float a = loc.getAccuracy();
+    return a > 0f ? a : 5000f;
+  }
+
+  /** 同样新鲜时用更准的，避免基站新点盖过家里的 GPS。 */
+  private boolean betterFix(Location cand, Location cur) {
+    if (cand == null) return false;
+    if (cur == null) return true;
+    float accC = accuracyOf(cand);
+    float accU = accuracyOf(cur);
+    long now = System.currentTimeMillis();
+    long ageC = now - cand.getTime();
+    long ageU = now - cur.getTime();
+    if (accC + 80f < accU && ageC < 15 * 60_000L) return true;
+    if (accU + 80f < accC && ageU < 15 * 60_000L) return false;
+    return cand.getTime() > cur.getTime();
+  }
+
   @SuppressLint("MissingPermission")
   private Location pickLastKnown(LocationManager lm) {
     Location best = null;
@@ -1974,8 +1994,7 @@ public class AppPermissionsPlugin extends Plugin {
     for (String provider : providers) {
       try {
         Location loc = lm.getLastKnownLocation(provider);
-        if (loc == null) continue;
-        if (best == null || loc.getTime() > best.getTime()) best = loc;
+        if (betterFix(loc, best)) best = loc;
       } catch (SecurityException ignored) {
       } catch (Exception ignored) {}
     }
@@ -2015,17 +2034,20 @@ public class AppPermissionsPlugin extends Plugin {
     }
 
     Location cached = pickLastKnown(lm);
-    if (cached != null && System.currentTimeMillis() - cached.getTime() < 90_000) {
+    if (cached != null && System.currentTimeMillis() - cached.getTime() < 90_000 && accuracyOf(cached) <= 120f) {
       resolveLocation(call, cached);
       return;
     }
 
     Handler handler = new Handler(Looper.getMainLooper());
     final boolean[] done = { false };
+    final Location[] got = { cached };
     LocationListener listener = new LocationListener() {
       @Override
       public void onLocationChanged(Location location) {
         if (done[0] || location == null) return;
+        if (betterFix(location, got[0])) got[0] = location;
+        if (accuracyOf(location) > 80f) return;
         done[0] = true;
         try { lm.removeUpdates(this); } catch (Exception ignored) {}
         handler.removeCallbacksAndMessages(null);
@@ -2046,8 +2068,8 @@ public class AppPermissionsPlugin extends Plugin {
       if (done[0]) return;
       done[0] = true;
       try { lm.removeUpdates(listener); } catch (Exception ignored) {}
-      if (cached != null) {
-        resolveLocation(call, cached);
+      if (got[0] != null) {
+        resolveLocation(call, got[0]);
       } else {
         call.reject("location_timeout");
       }
