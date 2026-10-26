@@ -32,6 +32,8 @@ final class CallAudioRoute {
   private static boolean scoHeldForMedia;
   /** 正在为 TTS 走 A2DP：此期间禁止 preferCall 再抢 SCO。 */
   private static boolean mediaSuspended;
+  /** 刚把外放切回通话扬声器时，播放端要等这一时刻再 start，避免开头被吃掉。 */
+  private static long speakerPrerollUntil;
 
   private CallAudioRoute() {}
 
@@ -189,6 +191,7 @@ final class CallAudioRoute {
     routeGen++;
     routed = false;
     waitingSco = false;
+    speakerPrerollUntil = 0;
     scoHeldForMedia = false;
     mediaSuspended = false;
     routeName = "none";
@@ -253,6 +256,12 @@ final class CallAudioRoute {
     return mediaSuspended;
   }
 
+  /** 外放刚切过通话模式时，还要等多少毫秒再出声。 */
+  static long speakerPrerollDelayMs() {
+    long d = speakerPrerollUntil - android.os.SystemClock.uptimeMillis();
+    return d > 0 ? d : 0;
+  }
+
   /** 播媒体前先卸 SCO；播完用 {@link #resumeAfterMedia} 等 SCO 再开麦。 */
   static void suspendScoForMedia(Context ctx, Runnable done) {
     Context app = ctx != null ? ctx.getApplicationContext() : null;
@@ -268,26 +277,40 @@ final class CallAudioRoute {
         mediaSuspended = true;
       }
       stopScoQuiet(am);
-      try {
-        am.setMode(AudioManager.MODE_NORMAL);
-      } catch (Exception ignored) {}
       AudioDeviceInfo wired = findWired(am);
       routed = false;
       if (hasBtOutput(am)) {
+        // 耳机走媒体声道，必须离开通话模式，否则会卡在 SCO 上断断续续
+        try {
+          am.setMode(AudioManager.MODE_NORMAL);
+        } catch (Exception ignored) {}
         setSpeakerOff(am);
         routeName = "a2dp";
         waitA2dp = wasSco;
         requestFocus(am, true);
       } else if (wired != null) {
+        try {
+          am.setMode(AudioManager.MODE_NORMAL);
+        } catch (Exception ignored) {}
         setSpeakerOff(am);
         routeName = "wired";
         routed = true;
+        mediaSuspended = true;
         requestFocus(am, true);
       } else {
+        // 外放仍走通话流。若先改成普通模式再开播，前半句会进听筒或被丢掉，
+        // 听起来就是每一句的开头没有声音。保持通话模式并打开扬声器。
+        boolean already =
+          am.getMode() == AudioManager.MODE_IN_COMMUNICATION && am.isSpeakerphoneOn();
+        setModeComm(am);
         setSpeakerOn(am);
         routeName = "builtin";
         routed = true;
-        requestFocus(am, true);
+        mediaSuspended = false;
+        requestFocus(am, false);
+        speakerPrerollUntil = already
+          ? 0
+          : android.os.SystemClock.uptimeMillis() + 220;
       }
     }
     if (waitA2dp) {
@@ -309,8 +332,8 @@ final class CallAudioRoute {
         boolean scoOff = am == null || !am.isBluetoothScoOn();
         boolean hasOut = am != null && hasBtOutput(am);
         long elapsed = android.os.SystemClock.uptimeMillis() - start;
-        // 至少缓 280ms，再等 SCO 掉或超时
-        if ((elapsed >= 280 && scoOff && hasOut) || elapsed >= maxMs) {
+        // SCO 掉了不代表 A2DP 已经出声。太早开播，第一句前半截会进一条还没通的通路。
+        if ((elapsed >= 480 && scoOff && hasOut) || elapsed >= maxMs) {
           finish(done);
           return;
         }

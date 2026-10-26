@@ -395,6 +395,10 @@ export async function setNativeCallOverlay(opts = {}) {
       name: String(opts.name || 'TA'),
       speaking: !!opts.speaking || phase === 'speaking',
       phase,
+      presenceMode: String(opts.presenceMode || ''),
+      hangoutSleeping: !!opts.hangoutSleeping,
+      hangoutWakeStep: Number(opts.hangoutWakeStep) || 0,
+      inputMode: String(opts.inputMode || ''),
     });
     return true;
   } catch {
@@ -486,6 +490,22 @@ export async function pullNativeCallRms() {
     }
   } catch {}
   return _nativeCallRms;
+}
+
+/** 锁屏期间原生已经在播或播过的通话回复。busy 时页面不要再开一轮。 */
+export async function getNativeCallLockState() {
+  const p = plugin();
+  if (!p?.getNativePlayedCallIds) return { ids: [], busy: false };
+  try {
+    const r = await p.getNativePlayedCallIds();
+    const raw = r?.ids;
+    const ids = Array.isArray(raw)
+      ? raw.map((id) => String(id))
+      : (raw && typeof raw.length === 'number' ? Array.from(raw).map((id) => String(id)) : []);
+    return { ids, busy: !!r?.busy };
+  } catch {
+    return { ids: [], busy: false };
+  }
 }
 
 export async function noteNativeCallListenTick({ silenceMs = 3000, maxMs = 20000, speechRms = 0.02 } = {}) {

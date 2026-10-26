@@ -61,7 +61,7 @@ import {
   initGameButlerUI,
   onGameButlerImageUpload,
 } from '../game-butler.js';
-import { getAppPermissionStatus, requestNativeMicrophone, requestNativeCamera, getDeviceCoordinates, formatLocationError, setNativeCallOverlay, setNativeCallPreviewFrame, setNativeCallMediaAudio, getNativeDeviceStatus, hasNativeCallAudio, startNativeCall, stopNativeCall, setNativeCallListen, beginNativeCallUtterance, abortNativeCallUtterance, commitNativeCallUtterance, nativeCallRms, nativeCallLevelAge, pullNativeCallRms, noteNativeCallListenTick, openExternalUrl, captureNativeScreen, toyStatus } from '../app-permissions.js';
+import { getAppPermissionStatus, requestNativeMicrophone, requestNativeCamera, getDeviceCoordinates, formatLocationError, setNativeCallOverlay, setNativeCallPreviewFrame, setNativeCallMediaAudio, getNativeDeviceStatus, hasNativeCallAudio, startNativeCall, stopNativeCall, setNativeCallListen, beginNativeCallUtterance, abortNativeCallUtterance, commitNativeCallUtterance, nativeCallRms, nativeCallLevelAge, pullNativeCallRms, noteNativeCallListenTick, getNativeCallLockState, openExternalUrl, captureNativeScreen, toyStatus } from '../app-permissions.js';
 import { isNativeShell } from '../server-config.js';
 import { installCallEngine, getState as getCallEngineState, patchState as patchCallEngineState, callExtras as callEngineExtras, connectWhenOpenerReady, setCallSpeaking as engineSetSpeaking, setCallThinking as engineSetThinking, armAfterSpeak as engineArmAfterSpeak, reviveAfterForeground as engineReviveAfterForeground, noteUserSpeechForSleep, setVoiceMode as engineSetVoiceMode, onHangoutSleepChange as engineOnHangoutSleepChange, setCallPresenceMode as engineSetPresenceMode } from '../call/index.js';
 import { setUserAsleep as engineSetUserAsleep } from '../call/call-presence.js';
@@ -1348,6 +1348,7 @@ async function syncNativeCallOverlay(extra = {}) {
     }
     const phase = extra.phase != null ? String(extra.phase) : callOverlayPhase();
     const speaking = extra.speaking != null ? !!extra.speaking : phase === 'speaking';
+    const extras = callEngineExtras();
     await setNativeCallOverlay({
       on: true,
       video: !!inVideoCall,
@@ -1358,6 +1359,10 @@ async function syncNativeCallOverlay(extra = {}) {
       name: char?.name || 'TA',
       speaking,
       phase,
+      presenceMode: extras.callPresenceMode || _callPresenceMode || 'talk',
+      hangoutSleeping: !!extras.callHangoutSleeping,
+      hangoutWakeStep: Number(extras.callHangoutWakeStep) || 0,
+      inputMode: extras.callInputMode || (_callVoiceMode ? 'voice' : 'keyboard'),
     });
     _lastCallOverlayPhase = phase;
     if (inVideoCall) startCallPreviewPump();
@@ -1798,8 +1803,17 @@ function callLineMeta(msg) {
   }
 }
 
+/** 把原生锁屏轮次记进「已念过」。正在请求或播放时返回 true，页面不要再开一轮。 */
+async function absorbNativeLockTurn() {
+  const st = await getNativeCallLockState();
+  for (const id of st?.ids || []) markCallSpeechCompleted(id);
+  return !!st?.busy;
+}
+
 /** 锁屏后主动开口进了库，但当时页面冻住没念。只补最近一条通话行，不把整夜重播一遍。 */
 async function speakRecentCallLineFrom(msgs, forCharId) {
+  if (!isInVoiceCallWith(forCharId) || _callSpeechInFlightKey) return;
+  if (await absorbNativeLockTurn()) return;
   if (!isInVoiceCallWith(forCharId) || _callSpeechInFlightKey) return;
   let latest = null;
   for (const m of Array.isArray(msgs) ? msgs : []) {
@@ -5270,6 +5284,11 @@ async function playCallTtsSegmentLocked(text, forCharId, {
   forceClaim = false,
 } = {}) {
   if (!isInVoiceCallWith(forCharId)) return;
+  // 锁屏轮次还在原生这边请求或播放：别再合成一遍叠上去
+  if (await absorbNativeLockTurn()) {
+    if (armListen) await armCallLiveAfterSpeak();
+    return;
+  }
   // 开播前占坑：堵住 WS/HTTP 双通道抢播（否则原生打断被当成播完，只听到每个句首一个字）
   if (!tryClaimCallSpeech(msgId, relatedIds, { force: forceClaim })) {
     if (armListen) await armCallLiveAfterSpeak();
@@ -8612,6 +8631,36 @@ async function startCallLiveListen() {
     await toastMicFailure(err);
   }
 }
+
+/**
+ * 锁屏时这一轮是原生发出去并播完的。亮屏后只补字幕和聊天记录，不要再请求一次、再念一遍。
+ * phase: thinking | played | idle
+ */
+window.__nianCallLockTurn = function(payload) {
+  const p = payload && typeof payload === 'object' ? payload : null;
+  if (!p || !inCall) return;
+  const ids = Array.isArray(p.ids) ? p.ids : [];
+  if (p.phase === 'thinking') {
+    try { engineSetThinking(true); } catch {}
+    updateCallLiveHoldUi();
+    return;
+  }
+  if (p.phase === 'played' && ids.length) markCallSpeechCompleted(ids[0], ids);
+  if (p.phase === 'played' || p.phase === 'idle') {
+    try { engineSetThinking(false); } catch {}
+    try { setCallSpeaking(false); } catch {}
+    const text = String(p.text || '').trim();
+    if (p.phase === 'played' && text && text !== '……' && text !== '…') {
+      const last = callTranscript[callTranscript.length - 1];
+      if (!(last?.role === 'assistant' && last.content === text)) {
+        callTranscript.push({ role: 'assistant', content: text });
+        appendCallChatMsg('assistant', text);
+      }
+    }
+    updateCallLiveHoldUi();
+    void syncOpenChatFromServer();
+  }
+};
 
 /** 页面计时被系统停掉时，原生麦自己把一句收完再交给这里发出去 */
 window.__nianIngestNativeUtterance = async function(b64, wallMs, opts) {

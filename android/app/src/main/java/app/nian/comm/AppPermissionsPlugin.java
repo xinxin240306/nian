@@ -1152,6 +1152,24 @@ public class AppPermissionsPlugin extends Plugin {
       characterId,
       call.getString("name", "TA")
     );
+    if (!on) {
+      CallLockTurn.cancel();
+    } else {
+      int wake = 0;
+      try {
+        Double w = call.getDouble("hangoutWakeStep", 0d);
+        if (w != null) wake = w.intValue();
+      } catch (Exception ignored) {}
+      CallLockTurn.updateContext(
+        getContext(),
+        characterId,
+        video,
+        call.getString("presenceMode", "talk"),
+        Boolean.TRUE.equals(call.getBoolean("hangoutSleeping")),
+        wake,
+        call.getString("inputMode", "voice")
+      );
+    }
     String phase = call.getString("phase", "");
     if (phase != null && !phase.trim().isEmpty()) {
       ScreenShareOverlay.setCallPhase(phase);
@@ -1311,6 +1329,16 @@ public class AppPermissionsPlugin extends Plugin {
     NativeCallEngine.setAmbientSampleIntervalMs(intervalMs);
     JSObject o = new JSObject();
     o.put("intervalMs", intervalMs);
+    call.resolve(o);
+  }
+
+  @PluginMethod
+  public void getNativePlayedCallIds(PluginCall call) {
+    JSObject o = new JSObject();
+    JSArray ids = new JSArray();
+    for (String id : CallLockTurn.playedIdList()) ids.put(id);
+    o.put("ids", ids);
+    o.put("busy", CallLockTurn.isBusy());
     call.resolve(o);
   }
 

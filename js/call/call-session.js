@@ -67,6 +67,7 @@ export function bindSessionDeps(deps) {
     doSend: (...args) => _deps?.doSend?.(...args),
     onPresenceChanged: (next) => {
       sync();
+      _deps?.syncOverlay?.();
       if (next === PRESENCE.HANGOUT || next === PRESENCE.TALK || next === PRESENCE.WATCH) {
         void armAfterSpeak();
       }

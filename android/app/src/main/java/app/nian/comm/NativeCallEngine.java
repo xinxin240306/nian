@@ -148,11 +148,13 @@ final class NativeCallEngine {
       KeepAliveService.setCallMedia(appCtx, true, ScreenShareOverlay.isCallVideo());
     } catch (Exception ignored) {}
     MainActivity.setKeepWebAlive(true);
+    CallLockTurn.attach(appCtx);
     Log.i(TAG, "started rate=" + sampleRate);
     return null;
   }
 
   static void stop() {
+    CallLockTurn.cancel();
     running = false;
     listen = false;
     bgGen++;
@@ -286,6 +288,11 @@ final class NativeCallEngine {
       ambientSampleBusy = false;
       if (wav == null || wav.length < 800) {
         Log.i(TAG, "ambient sample empty, skip");
+        return;
+      }
+      // 灭屏时页面冻住，环境采样也走原生一轮，不要等亮屏再交给 JS
+      if (!MainActivity.isResumed()) {
+        CallLockTurn.submit(wav, AMBIENT_SAMPLE_CAPTURE_MS, true);
         return;
       }
       deliverAmbientSample(wavBase64(wav), AMBIENT_SAMPLE_CAPTURE_MS);
@@ -631,16 +638,28 @@ final class NativeCallEngine {
           }
           // MediaPlayer.setVolume 上限 1.0；超过 1 的部分用 AudioManager
           // 把媒体音量推到合适的档位（不持久化，仅本句期间）
-          float mediaVol = Math.min(1f, target);
-          p.setVolume(mediaVol, mediaVol);
-          if (isBuiltin && loudLine) {
-            // 外放走通话流，系统「通话音量」经常比媒体音量低很多，台词会小得听不清
-            boostVoiceCallStream();
-          } else if (!isBuiltin) {
-            applyMediaBoost(target);
-          }
-          p.start();
-          reviveBedLocked();
+          final float speakTarget = target;
+          float mediaVol = Math.min(1f, speakTarget);
+          long preroll = isBuiltin ? CallAudioRoute.speakerPrerollDelayMs() : 0;
+          Runnable start = () -> {
+            if (gen != playGen || player != p) return;
+            try {
+              p.setVolume(mediaVol, mediaVol);
+              if (isBuiltin && loudLine) {
+                // 外放走通话流，系统「通话音量」经常比媒体音量低很多，台词会小得听不清
+                boostVoiceCallStream();
+              } else if (!isBuiltin) {
+                applyMediaBoost(speakTarget);
+              }
+              p.start();
+              reviveBedLocked();
+            } catch (Exception e) {
+              Log.w(TAG, "start failed", e);
+              if (gen == playGen && player == p) stopPlayLocked(true, false, true);
+            }
+          };
+          if (preroll > 0) MAIN.postDelayed(start, preroll);
+          else start.run();
         } catch (Exception e) {
           Log.w(TAG, "start failed", e);
           if (gen == playGen && player == p) stopPlayLocked(true, false, true);
@@ -1102,7 +1121,6 @@ final class NativeCallEngine {
   }
 
   private static void finishBackgroundUtterance() {
-    final int gen = bgGen;
     long wall = bgStart > 0 ? System.currentTimeMillis() - bgStart : 0;
     bgOwned = false;
     bgHeard = false;
@@ -1111,17 +1129,8 @@ final class NativeCallEngine {
     bgStart = 0;
     byte[] wav = commitUtterance();
     if (wav == null || wav.length < 800) return;
-    final String b64 = wavBase64(wav);
-    final long wallMs = Math.max(0, wall);
-    MAIN.post(() -> {
-      if (gen != bgGen || !running) return;
-      try {
-        MainActivity.runJs(
-          "try{window.__nianIngestNativeUtterance&&window.__nianIngestNativeUtterance("
-            + JSONObject.quote(b64) + "," + wallMs + ")}catch(e){}"
-        );
-      } catch (Exception ignored) {}
-    });
+    // 页面在锁屏时冻住，不能把这句塞回 JS 干等。原生自己上传、请求模型、播回复。
+    CallLockTurn.submit(wav, Math.max(0, wall), false);
   }
 
   private static void loop() {
