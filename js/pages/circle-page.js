@@ -943,7 +943,7 @@ async function openNpcMoments(npcId) {
                 <div class="npc-moment-header">
                   <div class="npc-moment-avatar">
                     ${npc.avatar
-                      ? `<img src="${escapeHtml(npc.avatar)}" alt="">`
+                      ? `<img src="${escapeHtml(window.resolveMediaUrl?.(npc.avatar) || npc.avatar)}" alt="">`
                       : `<div class="circle-npc-av-ph">${escapeHtml(String(npc.name || '?').charAt(0))}</div>`}
                   </div>
                   <div>
@@ -952,7 +952,10 @@ async function openNpcMoments(npcId) {
                   </div>
                 </div>
                 <div class="npc-moment-content">${escapeHtml(m.content || '')}</div>
-                ${images.length ? `<div class="npc-moment-images">${images.map((img) => `<img src="${escapeHtml(img)}" alt="">`).join('')}</div>` : ''}
+                ${images.length ? `<div class="npc-moment-images">${images.map((img) => {
+                  const src = window.resolveMediaUrl?.(img) || img;
+                  return `<img src="${escapeHtml(src)}" alt="">`;
+                }).join('')}</div>` : ''}
                 <div class="npc-moment-footer">
                   <div class="npc-moment-likes">${likes.length ? `♥ ${escapeHtml(likes.join(', '))}` : ''}</div>
                   <div class="npc-moment-actions">

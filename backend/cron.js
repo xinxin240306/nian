@@ -4,7 +4,7 @@ const db = dbModule;
 const { callChatAPI, callChatAPIComplete, formatApiBillingError, fetchUnsplashImage, fetchUnsplashImageForMoment, generateChatContextImage, generateChatContextVideo, fetchPexelsVideoForMoment, generateMomentVideoViaAI, parseMomentContentAndImageQuery, replySuggestsContextImage, shouldAttachContextImage, shouldAttachContextVideo, normalizeMediaDirectiveLines, stripImageDirectiveFromSegments, resolveCharacterHomeEnvironment, extractSelfieSceneQuery, isObjectOrStillLifeScene, generateImage, buildSelfieGenerationPrompt, normalizeImageRefGroups, selectSelfieReferenceUrls, resolveSelfieRefFlags, selectHomeReferenceUrls, normalizeSelfieAspect, resolveImg2ImgConfig, toAbsoluteMediaUrl, getLastGenerateImageError, replyClaimsSentShareMedia, extractImageQueryFromText } = require('./api-helper');
 const { push, notifyBillingError } = require('./push');
 const { buildEmojiPromptSection, buildVoiceMessagePromptSection, buildLocationMessagePromptSection, buildLinkMessagePromptSection, buildWebCardPromptSection, buildRecallPromptSection, buildQuoteReplyPromptSection, buildPokePromptSection, buildCallDirectivePromptSection, buildTheaterInvitePromptSection, buildPostCallChatNote, userRequestsPhoneCall, processAiContentWithEmojis, saveAiReplySegments, formatMessageForAi, polishSpokenAiText, modelPressesInterview, proseNearDuplicate } = require('./emoji-helper');
-const { queueAlbumSave, stripAlbumMarkersFromSegments } = require('./album-helper');
+const { queueAlbumSave, stripAlbumMarkersFromSegments, localizeMediaUrl } = require('./album-helper');
 const { buildInlineBeanPromptSection, sanitizeInlineBeans } = require('./inline-emoji-helper');
 const { buildMusicScorePromptSection } = require('./music-score-helper');
 const { isSoundFxConfigured, buildSoundFxPromptSection, buildCallSceneAudioPromptSection, attachSoundFxMessage, attachSoundFxMessages, stripSoundFxFromSegments } = require('./sound-fx-helper');
@@ -6826,10 +6826,11 @@ ${here.promptBlock}
       try {
         const imageQuery = typeof parsed.imageQuery === 'string' ? parsed.imageQuery : undefined;
         const placeQuery = [here.imageSceneHint, imageQuery].filter(Boolean).join(', ');
-        const imgUrl = momentImageUseGallery
+        let imgUrl = momentImageUseGallery
           ? await fetchUnsplashImageForMoment(settings, content, placeQuery || imageQuery)
           : await generateChatContextImage(settings, char, content, imageQuery ?? null, { placeHint: here.imageSceneHint });
         if (imgUrl) {
+          imgUrl = await localizeMediaUrl(imgUrl, 'image', { allowStock: true });
           images = [imgUrl];
           queueAlbumSave({
             characterId: charId,
@@ -6845,10 +6846,11 @@ ${here.promptBlock}
     } else if (shouldAttachMomentVideo(parsed, content)) {
       try {
         const videoQuery = typeof parsed.videoQuery === 'string' ? parsed.videoQuery : undefined;
-        const videoUrl = momentVideoUseGallery
+        let videoUrl = momentVideoUseGallery
           ? await fetchPexelsVideoForMoment(settings, content, videoQuery)
           : await generateMomentVideoViaAI(settings, char, content, videoQuery ?? null);
         if (videoUrl) {
+          videoUrl = await localizeMediaUrl(videoUrl, 'video', { allowStock: true });
           images = [videoUrl];
           queueAlbumSave({
             characterId: charId,

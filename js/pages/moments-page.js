@@ -670,7 +670,7 @@ function renderPost(m, username, userAvatar) {
         return `<video class="moment-img moment-video" src="${src}" controls playsinline preload="none" style="width:100%;border-radius:6px;background:#000"></video>`;
       }
       const src = escapeHtml(window.resolveMediaUrl?.(img) || img);
-      return `<img class="moment-img" src="${src}" alt="" onclick="viewMomentImage('${src}')" loading="lazy">`;
+      return `<img class="moment-img" src="${src}" alt="" onclick="viewMomentImage('${src}')">`;
     }).join('')}</div>`;
   }
 

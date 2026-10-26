@@ -624,7 +624,9 @@ async function generateReceivePhoto(char, parcel) {
       referenceImages: refs.slice(0, 3),
     });
     const url = typeof result === 'string' ? result : (result?.url || result?.image || '');
-    return url || '';
+    if (!url) return '';
+    const { localizeMediaUrl } = require('./album-helper');
+    return localizeMediaUrl(url, 'image', { allowStock: true });
   } catch (e) {
     console.warn('[post-office] receive photo', e.message);
     return '';

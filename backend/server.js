@@ -44,6 +44,8 @@ const {
   stripAlbumMarkersFromSegments,
   queueAlbumSave,
   localizeMediaToUploads,
+  localizeMediaUrl,
+  localizeStoredMediaRows,
   backfillAlbumFromChatMedia,
   mapAlbumRow,
   saveRobotSnapshotToAlbum,
@@ -3195,8 +3197,17 @@ app.get('/api/npcs/:id/moments', (req, res) => {
   res.json(circle.getNpcMoments(db, req.params.id, { limit, offset }));
 });
 
-app.post('/api/npcs/:id/moments', (req, res) => {
+app.post('/api/npcs/:id/moments', async (req, res) => {
   const data = { ...req.body, npc_id: parseInt(req.params.id, 10) };
+  const rawImages = Array.isArray(data.images) ? data.images : [];
+  const storedImages = [];
+  for (const item of rawImages) {
+    const src = String(item || '').trim();
+    if (!src) continue;
+    const type = /\.(mp4|webm|mov)(\?|$)/i.test(src) ? 'video' : 'image';
+    storedImages.push(await localizeMediaUrl(src, type, { allowStock: true }));
+  }
+  data.images = storedImages;
   const moment = circle.createNpcMoment(db, data);
   if (!moment) return res.status(404).json({ error: 'NPC不存在' });
   res.json(moment);
@@ -8580,12 +8591,20 @@ app.get('/api/moments/:id', (req, res) => {
   res.json(parseMoment(row));
 });
 
-app.post('/api/moments', (req, res) => {
+app.post('/api/moments', async (req, res) => {
   const { characterId, role, content, images, location = '', mentions = [] } = req.body;
   const chars = db.prepare('SELECT id, name FROM characters').all();
   const enrichedMentions = enrichMomentMentions(content, mentions, chars);
+  const rawImages = Array.isArray(images) ? images : [];
+  const storedImages = [];
+  for (const item of rawImages) {
+    const src = String(item || '').trim();
+    if (!src) continue;
+    const type = /\.(mp4|webm|mov)(\?|$)/i.test(src) ? 'video' : 'image';
+    storedImages.push(await localizeMediaUrl(src, type, { allowStock: true }));
+  }
   const r = db.prepare(`INSERT INTO moments (character_id, role, content, images, location, mentions) VALUES (?,?,?,?,?,?)`).run(
-    characterId || null, role || 'user', content || '', JSON.stringify(images || []),
+    characterId || null, role || 'user', content || '', JSON.stringify(storedImages),
     location || '', JSON.stringify(enrichedMentions)
   );
   const momentId = r.lastInsertRowid;
@@ -14836,6 +14855,9 @@ dbModule.initDB().then(() => {
     console.log(`   本机：http://localhost:${PORT}`);
     console.log(`   手机 App 请填：http://<电脑局域网IP>:${PORT}`);
     console.log(`   数据库：${path.join(__dirname, 'nian.db')}\n`);
+    setImmediate(() => {
+      localizeStoredMediaRows().catch((e) => console.warn('[media] backfill', e.message));
+    });
     initWS(server);
     startCronJobs(aiInteractWithMoment, aiNpcInteractWithMoment, replyOwnerToNpcComments);
     try {

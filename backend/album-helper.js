@@ -518,10 +518,10 @@ async function persistRemoteMediaToUploads(url, mediaType) {
  * 把外链 / dataURI 落成本地 /uploads/...；已是本地且文件存在则原样返回。
  * 图库 CDN（Unsplash/Pexels）返回空字符串，不进相册。
  */
-async function localizeMediaToUploads(url, mediaType = 'image') {
+async function localizeMediaToUploads(url, mediaType = 'image', opts = {}) {
   const s = String(url || '').trim();
   if (!s || isPlaceholderMediaUrl(s)) return '';
-  if (isStockCdnUrl(s)) return '';
+  if (isStockCdnUrl(s) && !opts.allowStock) return '';
   const type = mediaType === 'video' ? 'video' : 'image';
   const existing = filenameFromMediaUrl(s);
   if (existing) {
@@ -531,6 +531,132 @@ async function localizeMediaToUploads(url, mediaType = 'image') {
   if (s.startsWith('/uploads/')) return '';
   const filename = await persistRemoteMediaToUploads(s, type);
   return filename ? `/uploads/${filename}` : '';
+}
+
+/** 落成本地文件；失败时保留原地址，避免把还在的外链清掉 */
+async function localizeMediaUrl(url, mediaType = 'image', opts = {}) {
+  const s = String(url || '').trim();
+  if (!s || isPlaceholderMediaUrl(s)) return s;
+  try {
+    const local = await localizeMediaToUploads(s, mediaType, opts);
+    return local || s;
+  } catch (e) {
+    console.warn('[media] localize', e.message);
+    return s;
+  }
+}
+
+function guessStoredMediaType(url) {
+  const u = String(url || '').toLowerCase();
+  if (u.startsWith('data:video/') || /\.(mp4|webm|mov)(\?|$)/.test(u) || /\/videos\//.test(u)) return 'video';
+  return 'image';
+}
+
+async function rewriteJsonMediaColumn(db, table, column) {
+  let changed = 0;
+  let rows = [];
+  try {
+    rows = db.prepare(
+      `SELECT id, ${column} AS raw FROM ${table} WHERE ${column} LIKE '%data:%' OR ${column} LIKE '%http%'`
+    ).all();
+  } catch {
+    return 0;
+  }
+  for (const row of rows) {
+    let arr;
+    try { arr = JSON.parse(row.raw || '[]'); } catch { continue; }
+    if (!Array.isArray(arr) || !arr.length) continue;
+    let dirty = false;
+    const next = [];
+    for (const item of arr) {
+      const src = String(item || '').trim();
+      if (!src || src.startsWith('/uploads/')) {
+        next.push(item);
+        continue;
+      }
+      const local = await localizeMediaUrl(src, guessStoredMediaType(src), { allowStock: true });
+      if (local && local !== src) dirty = true;
+      next.push(local || item);
+    }
+    if (!dirty) continue;
+    db.prepare(`UPDATE ${table} SET ${column}=? WHERE id=?`).run(JSON.stringify(next), row.id);
+    changed += 1;
+  }
+  return changed;
+}
+
+async function rewriteUrlColumn(db, table, column) {
+  let changed = 0;
+  let rows = [];
+  try {
+    rows = db.prepare(
+      `SELECT id, ${column} AS raw FROM ${table} WHERE ${column} LIKE 'data:%' OR ${column} LIKE 'http%'`
+    ).all();
+  } catch {
+    return 0;
+  }
+  for (const row of rows) {
+    const src = String(row.raw || '').trim();
+    if (!src || src.startsWith('/uploads/')) continue;
+    const local = await localizeMediaUrl(src, guessStoredMediaType(src), { allowStock: true });
+    if (!local || local === src) continue;
+    db.prepare(`UPDATE ${table} SET ${column}=? WHERE id=?`).run(local, row.id);
+    changed += 1;
+  }
+  return changed;
+}
+
+/**
+ * 把已经写进库里的 data URL / 临时外链收成 /uploads 文件。
+ * 打开页面时就不用再把整张图从数据库里传一遍。失效的外链保持原样。
+ */
+async function localizeStoredMediaRows() {
+  const db = require('./db');
+  let changed = 0;
+  db.beginSaveBatch();
+  try {
+    changed += await rewriteJsonMediaColumn(db, 'moments', 'images');
+    changed += await rewriteJsonMediaColumn(db, 'circle_moments', 'images');
+    changed += await rewriteUrlColumn(db, 'char_wardrobe_items', 'image_url');
+    let msgs = [];
+    try {
+      msgs = db.prepare(
+        `SELECT id, type, content FROM messages
+         WHERE type IN ('image','video') AND (content LIKE 'data:%' OR content LIKE 'http%')`
+      ).all();
+    } catch { msgs = []; }
+    for (const row of msgs) {
+      const src = String(row.content || '').trim();
+      if (!src || src.startsWith('/uploads/') || src.startsWith('__')) continue;
+      const type = row.type === 'video' ? 'video' : guessStoredMediaType(src);
+      const local = await localizeMediaUrl(src, type, { allowStock: true });
+      if (!local || local === src) continue;
+      db.prepare('UPDATE messages SET content=? WHERE id=?').run(local, row.id);
+      changed += 1;
+    }
+    try {
+      const covers = db.prepare(
+        `SELECT id, avatar, moments_cover FROM characters
+         WHERE avatar LIKE 'data:%' OR moments_cover LIKE 'data:%'`
+      ).all();
+      for (const row of covers) {
+        for (const col of ['avatar', 'moments_cover']) {
+          const src = String(row[col] || '').trim();
+          if (!src.startsWith('data:')) continue;
+          const local = await localizeMediaUrl(src, 'image');
+          if (!local || local === src) continue;
+          db.prepare(`UPDATE characters SET ${col}=? WHERE id=?`).run(local, row.id);
+          changed += 1;
+        }
+      }
+    } catch { /* 列可能不存在 */ }
+  } catch (e) {
+    console.warn('[media] backfill', e.message);
+  } finally {
+    db.endSaveBatch();
+  }
+  if (changed) console.log('[media] 已把外链/内嵌图落成本地文件', changed);
+  return changed;
 }
 
 function defaultAlbumDesc(subject, mediaType, extra = '') {
@@ -701,6 +827,8 @@ module.exports = {
   saveGeneratedMediaToAlbum,
   queueAlbumSave,
   localizeMediaToUploads,
+  localizeMediaUrl,
+  localizeStoredMediaRows,
   backfillAlbumFromChatMedia,
   mapAlbumRow,
   saveRobotSnapshotToAlbum,
