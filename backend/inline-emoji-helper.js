@@ -118,13 +118,12 @@ function isFlatBeanProse(plain) {
  * reserved=高冷/内敛极少用；expressive=活泼外向可多用；mixed=傲娇等；neutral=默认。
  */
 function beanPersonaTone(char) {
+  // 只看现在怎么说话。来历/介绍里的疏离、沉默多半是对外人和往事，不拿来收跟眼前这个人的豆。
   const blob = [
     char?.personality,
     char?.emotion_style,
     char?.behavior,
     char?.language_style,
-    char?.background,
-    char?.intro,
   ].map((s) => String(s || '')).join('\n');
   if (!blob.trim()) return 'neutral';
   const reserved = /高冷|冷淡|冷漠|淡漠|内敛|话少|寡言|克制|含蓄|慢热|沉稳|深沉|阴郁|理性|冷静|佛系|钝感|不苟言笑|面瘫|禁欲|清冷|疏离|少言|惜字|闷骚|口是心非|不善表达|不爱直说/.test(blob);
