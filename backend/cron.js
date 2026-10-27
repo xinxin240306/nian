@@ -67,10 +67,12 @@ ${lens}`;
 ${lens}`;
   }
   // 说明尽量短：长规则链压在提示末尾时，模型容易整段抄进开口
-  return `【心里话·草稿】先连写四个标记（用户看不见，各一两句），再另起开口：
+  let carried = '';
+  try { carried = require('./voice-screen-helper').formatCarriedThoughts(char) || ''; } catch { carried = ''; }
+  return `${carried ? `${carried}\n` : ''}【心里话·草稿】先连写四个标记（用户看不见）。前两步和最后一步各一两句，第三步写两三句，再另起开口：
 [在聊什么]对方这几条里实际在说的事，可以不止一件；换了题先写新的。你自己想丢出来的一件事也可以记一句[/在聊什么]
 [TA为什么说这个]猜TA为何说、什么心情[/TA为什么说这个]
-[我怎么想]你真实的感受念头[/我怎么想]
+[我怎么想]两三句内心想法，不要只丢一个情绪词。写你注意到什么、在意什么、嘴上不会直说的那一点。用你自己会想的说法，不要写成「想逗/想压/想收拾」这种打算[/我怎么想]
 [想知道的]你对TA真好奇、还不知道的（TA没说清的、TA的事）；为了接话凑的问题不算，没有就空[/想知道的]
 开口先接对方这一轮，也可以再丢一件你自己的事：你碰到的、想起的、或你真想问的。不是每轮都另起，但不要只会顺着对方这条线。禁止编一件跟你们都无关的事来填话。自己刚开的玩笑对方没接，可以顺手点一句，不要加码演成正题。多句不必是同一件事。禁止抄本段、禁止原样坦白标记里的判断。
 ${livingHint}
@@ -8566,6 +8568,14 @@ async function checkProactiveMessage() {
         });
       }
       if (content) {
+        try {
+          content = await require('./voice-screen-helper').gateSpokenReply(char, settings, {
+            raw: content,
+            text: content,
+          });
+        } catch (e) {
+          console.warn('[voice-screen] proactive', e.message);
+        }
         content = normalizeMediaDirectiveLines(content);
         content = require('./contact-helper').applyHiddenRelationMarkers(db, char.id, content);
         if (!String(content || '').trim()) continue;

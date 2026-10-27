@@ -4500,6 +4500,16 @@ app.post('/api/messages/send', async (req, res) => {
         ),
       });
     }
+    if (!isDreamMode && !forTheaterMode && !callVideoTextMode) {
+      try {
+        aiContent = await require('./voice-screen-helper').gateSpokenReply(char, settings, {
+          raw: rawAiContent,
+          text: aiContent,
+        });
+      } catch (e) {
+        console.warn('[voice-screen]', e.message);
+      }
+    }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
         userMsgId,
@@ -5504,6 +5514,16 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
           String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
         ),
       });
+    }
+    if (!isDreamMode && !forTheaterMode && !callVideoTextMode) {
+      try {
+        aiContent = await require('./voice-screen-helper').gateSpokenReply(char, settings, {
+          raw: rawAiContent,
+          text: aiContent,
+        });
+      } catch (e) {
+        console.warn('[voice-screen]', e.message);
+      }
     }
     if (!isDreamMode && !String(aiContent || '').trim()) {
       return res.json(emptyAiChatPayload({
@@ -11873,6 +11893,14 @@ async function runCharacterCameraLookFollowUp(opts = {}) {
   if (!aiContent) return null;
 
   aiContent = polishSpokenAiText(aiContent, char.language_style);
+  try {
+    aiContent = await require('./voice-screen-helper').gateSpokenReply(char, settings, {
+      raw: rawAiContent,
+      text: aiContent,
+    });
+  } catch (e) {
+    console.warn('[voice-screen]', e.message);
+  }
 
   const peerParsed = contacts.applyPeerRelationFromAiContent(db, characterId, aiContent);
   aiContent = peerParsed.content || aiContent;
@@ -12139,6 +12167,14 @@ async function runCharacterMicListenFollowUp(opts = {}) {
   if (!aiContent) return null;
 
   aiContent = polishSpokenAiText(aiContent, char.language_style);
+  try {
+    aiContent = await require('./voice-screen-helper').gateSpokenReply(char, settings, {
+      raw: rawAiContent,
+      text: aiContent,
+    });
+  } catch (e) {
+    console.warn('[voice-screen]', e.message);
+  }
 
   const peerParsed = contacts.applyPeerRelationFromAiContent(db, characterId, aiContent);
   aiContent = peerParsed.content || aiContent;

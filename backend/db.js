@@ -662,6 +662,7 @@ async function initDB() {
       snapshot_at TEXT DEFAULT (datetime('now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_monitor_outfit_snap_char_date ON char_monitor_outfit_snapshots(character_id, date, id)`,
+    `ALTER TABLE characters ADD COLUMN recent_inner_thoughts TEXT DEFAULT ''`,
   ];
   for (const m of migrations) {
     try { db.run(m); } catch(e) { /* 列已存在则忽略 */ }
