@@ -24,6 +24,50 @@ const STAR_ASIDE_RE = /\*{1,3}[^*\n]{1,60}\*{1,3}/g;
 const PAREN_ASIDE_RE = /[（(][^（()）\n]{0,60}[）)]/g;
 /** Speech 2.8 语气词标签：念出来就是表演腔，日常/电话都剥掉 */
 const SPEECH_ACT_TAG_RE = /\((?:laughs|chuckle|coughs|clear-throat|groans|breath|pant|inhale|exhale|gasps|sniffs|sighs|snorts|burps|lip-smacking|humming|hissing|emm|sneezes)\)/gi;
+/** ElevenLabs v3/v4 方括号表演。占位符不能含 []，否则后面的净化会把标签拆掉。 */
+const ELEVEN_TAG_HOLD_RE = /\u0001EL(\d+)\u0002/g;
+
+function isElevenAudioTag(inner) {
+  const s = String(inner || '').trim();
+  if (s.length < 4 || s.length > 48) return false;
+  if (/[:：/\\]/.test(s)) return false;
+  if (/[\u3400-\u9fff]/.test(s)) return false;
+  if (!/^[A-Za-z][A-Za-z0-9'’.,\- ]*$/.test(s)) return false;
+  return /[A-Za-z]/.test(s);
+}
+
+function holdElevenAudioTags(text) {
+  const tags = [];
+  const out = String(text || '').replace(/\[([^[\]\n]{1,48})\]/g, (full, inner) => {
+    if (!isElevenAudioTag(inner)) return full;
+    const i = tags.length;
+    tags.push(`[${String(inner).trim()}]`);
+    return `\u0001EL${i}\u0002`;
+  });
+  return { text: out, tags };
+}
+
+function restoreElevenAudioTags(text, tags) {
+  return String(text || '').replace(ELEVEN_TAG_HOLD_RE, (_, i) => tags[Number(i)] || '');
+}
+
+function stripElevenAudioTags(text) {
+  return String(text || '').replace(/\[([^[\]\n]{1,48})\]/g, (full, inner) => (
+    isElevenAudioTag(inner) ? '' : full
+  ));
+}
+
+/** 整段去掉表演标签和标点后没有字：这轮就是一声亲吻/喘息，不要当空指令丢掉。 */
+function containsOnlyElevenAudio(text) {
+  let found = false;
+  const rest = String(text || '').replace(/\[([^[\]\n]{1,48})\]/g, (full, inner) => {
+    if (!isElevenAudioTag(inner)) return full;
+    found = true;
+    return '';
+  });
+  if (!found) return false;
+  return !/[\p{L}\p{N}]/u.test(rest);
+}
 /** 剩下这些符号 TTS 会挨个读出来 */
 const NOISE_CHARS_RE = /[*_~`#|<>^\\{}[\]【】［］]/g;
 
@@ -125,9 +169,10 @@ function voiceLaneProsody(lane) {
 
 /**
  * @param {string} text
- * @param {{ dropAsides?: boolean, keepSpeechActs?: boolean }} [opts]
+ * @param {{ dropAsides?: boolean, keepSpeechActs?: boolean, keepAudioTags?: boolean }} [opts]
  *   dropAsides：连 *动作*／（旁白）一起去掉，给小机喇叭用；手机端语音通话保留旁白文字。
  *   keepSpeechActs：speech-2.8 的 (sighs)/(laughs) 是语气标记，不要剥。
+ *   keepAudioTags：ElevenLabs 的 [soft kiss]、[sighs] 要原样送进合成。
  * @returns {string} 只剩台词；一句台词都不剩时返回空串（调用方应跳过合成）
  */
 function sanitizeForSpeech(text, opts = {}) {
@@ -150,11 +195,18 @@ function sanitizeForSpeech(text, opts = {}) {
     t = t.replace(STAR_ASIDE_RE, ' ');
     t = t.replace(PAREN_ASIDE_RE, ' ');
   }
+  let heldTags = [];
+  if (opts.keepAudioTags) {
+    const held = holdElevenAudioTags(t);
+    t = held.text;
+    heldTags = held.tags;
+  }
   if (!opts.keepSpeechActs) t = t.replace(SPEECH_ACT_TAG_RE, ' ');
   t = t.replace(SHORT_BRACKET_RE, ' ');
   t = t.replace(EMOJI_RE, '');
   // 用空串而不是空格：中文里「好呀~我在呢」不该被劈成「好呀 我在呢」
   t = t.replace(NOISE_CHARS_RE, '');
+  if (heldTags.length) t = restoreElevenAudioTags(t, heldTags);
 
   t = t
     .replace(/[ \t]+/g, ' ')
@@ -170,6 +222,15 @@ function sanitizeForSpeech(text, opts = {}) {
 /**
  * 通话 / 语音条：像真人说话，不要表演腔。
  */
+function buildElevenAudioTagHint() {
+  return `· 这条嗓子认英文方括号。要气息、轻笑、亲吻时嵌进台词里，用户看不见标签。例：过来…… [gentle breathing] [soft kiss]
+· 可用 [sighs] [exhales] [whispers] [laughs] [gentle breathing] [soft kiss]。不要写成 (sighs) 这种圆括号，也不要单独一行只有标签。`;
+}
+
+function buildFishAudioTagHint() {
+  return `· 这条嗓子认英文方括号，用来带一点活气。偶尔用 [laugh] [whisper] [pause]，嵌在台词里，用户看不见。不要每句都挂，不要单独一行只有标签，也不要写成 (laugh) 圆括号。`;
+}
+
 function buildSpeechDeliveryHint(_model) {
   return `【说话像人】
 · 像跟熟人说话：短、松、有停顿；别朗诵、别播音、别演情绪。
@@ -190,7 +251,13 @@ function buildToneTagHint() {
 }
 
 /** 电话专用：像真人一样说话，少量语气词 OK，但别堆 */
-function buildNaturalCallSpeechHint() {
+function buildNaturalCallSpeechHint(opts = {}) {
+  const provider = String(opts?.provider || '').trim().toLowerCase();
+  const actLine = provider === 'elevenlabs'
+    ? buildElevenAudioTagHint()
+    : provider === 'fish'
+      ? buildFishAudioTagHint()
+      : '· 禁止 (laughs)(sighs)(chuckle)(emm) 这类英文表演标记，合成会念成演出来的笑/叹；中文里直接写「哈」「叹」这种口语动词就行。';
   return `【电话怎么说】
 · 像平时拿着手机跟熟人说话：短、松、有停顿；别朗诵、别播音、别演情绪。
 · 偶尔一两个自然语气词 / 拉长音是可以的，真人讲话就这种节奏。例如：开头的「诶」「嗯」「噢」；中间的「那个」「就是说」「反正」「对吧」；句尾的「嗯——」「呃……」；拉长的「行吧——」「好好好——」。按你此刻接话的情绪自然带出，不要刻意也不要堆。
@@ -202,7 +269,7 @@ function buildNaturalCallSpeechHint() {
     - 不要每句都开头挂「嗯」「那个」；正常聊天里大多数句子还是没有这些的。
     - 笑、叹写进口语即可（哈哈、嘿嘿、噗、呵、唉、嗐）。
 
-· 禁止 (laughs)(sighs)(chuckle)(emm) 这类英文表演标记，合成会念成演出来的笑/叹；中文里直接写「哈」「叹」这种口语动词就行。
+${actLine}
 · 平常电话不要用 [软声][沉声] 变腔。只有讲故事里幼崽/软角色那一两句对白，才可以轻轻用一下 [软声]，别整段奶声表演。
 · 犹豫别写 emmm、hmm，合成会念字母；写「嗯——」「呃……」「唔」。
 ${buildToneTagHint()}`.trim();
@@ -224,6 +291,9 @@ function buildStorytellingLaneHint() {
 
 module.exports = {
   sanitizeForSpeech,
+  isElevenAudioTag,
+  stripElevenAudioTags,
+  containsOnlyElevenAudio,
   extractSpeechRateTag,
   extractToneTag,
   normalizeVoiceLane,
@@ -233,6 +303,8 @@ module.exports = {
   voiceLaneProsody,
   buildSpeechDeliveryHint,
   buildNaturalCallSpeechHint,
+  buildElevenAudioTagHint,
+  buildFishAudioTagHint,
   buildStorytellingLaneHint,
   buildToneTagHint,
 };

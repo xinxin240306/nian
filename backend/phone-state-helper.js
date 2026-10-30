@@ -1374,18 +1374,17 @@ async function synthesizeAlarmVoice(characterId, speech) {
   if (!cid || !text) return { audioUrl: '', error: 'no_speech' };
   try {
     const db = require('./db');
-    const char = db.prepare('SELECT voice_id, name, mood, emotion_state FROM characters WHERE id=?').get(cid);
+    const char = db.prepare('SELECT voice_id, name, mood, emotion_state, tts_provider FROM characters WHERE id=?').get(cid);
     const vid = String(char?.voice_id || '').trim();
     if (!vid) return { audioUrl: '', name: String(char?.name || ''), error: 'no_voice_id' };
     const rows = db.prepare('SELECT key, value FROM settings').all();
     const settings = Object.fromEntries((rows || []).map((r) => [r.key, r.value]));
     const { callTTS } = require('./api-helper');
-    const { sanitizeForSpeech } = require('./speech-text-helper');
-    const speak = sanitizeForSpeech(text, { dropAsides: true });
-    if (!speak) return { audioUrl: '', name: String(char.name || ''), error: 'empty' };
-    const buffer = await callTTS(settings, speak, vid, {
+    const { normalizeTtsProvider } = require('./voice-lane-helper');
+    const buffer = await callTTS(settings, text, vid, {
       mood: char.mood,
       emotionState: char.emotion_state,
+      provider: normalizeTtsProvider(char.tts_provider),
     });
     if (!buffer || buffer.length < 80) return { audioUrl: '', name: String(char.name || ''), error: 'tts_empty' };
     const fs = require('fs');

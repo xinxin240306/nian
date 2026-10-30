@@ -5,10 +5,11 @@ const DB_PATH = path.join(__dirname, 'nian.db');
 const BACKUP_DIR = path.join(__dirname, 'db_backups');
 const MAX_BACKUPS = 10;
 
-let db = null;
-let SQL = null;
+const Database = require('better-sqlite3');
 
-// Load or create database (synchronous wrapper around sql.js)
+let db = null;
+
+// 本机 SQLite。改动直接写入文件，不再把整库读进内存再每半分钟导出。
 function getDB() {
   if (db) return db;
   throw new Error('DB not initialized. Call initDB() first.');
@@ -17,22 +18,141 @@ function getDB() {
 /** 备份一份带时间戳的库文件，并只保留最近 MAX_BACKUPS 份，防止 crash 循环把唯一数据文件写坏后无法找回 */
 function backupDBFile(tagSuffix) {
   try {
+    if (db?.native) {
+      try { db.native.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* ignore */ }
+    }
     if (!fs.existsSync(DB_PATH)) return null;
     if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dest = path.join(BACKUP_DIR, `nian-${stamp}${tagSuffix ? '-' + tagSuffix : ''}.db`);
     fs.copyFileSync(DB_PATH, dest);
-    const files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.endsWith('.db'))
-      .map(f => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.t - a.t);
-    for (const { f } of files.slice(MAX_BACKUPS)) {
-      try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch {}
-    }
+    pruneBackups();
     return dest;
   } catch (e) {
     console.warn('[db] backup failed', e.message);
     return null;
+  }
+}
+
+function pruneBackups() {
+  const files = fs.readdirSync(BACKUP_DIR)
+    .filter(f => f.endsWith('.db'))
+    .map(f => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
+    .sort((a, b) => b.t - a.t);
+  for (const { f } of files.slice(MAX_BACKUPS)) {
+    try { fs.unlinkSync(path.join(BACKUP_DIR, f)); } catch {}
+  }
+}
+
+/** 开机用：拷贝在后台线程，不堵住健康检查 */
+async function backupDBFileAsync(tagSuffix) {
+  try {
+    if (db?.native) {
+      try { db.native.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* ignore */ }
+    }
+    if (!fs.existsSync(DB_PATH)) return null;
+    if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dest = path.join(BACKUP_DIR, `nian-${stamp}${tagSuffix ? '-' + tagSuffix : ''}.db`);
+    await fs.promises.copyFile(DB_PATH, dest);
+    pruneBackups();
+    return dest;
+  } catch (e) {
+    console.warn('[db] backup failed', e.message);
+    return null;
+  }
+}
+
+function rowsToSqlJs(rows) {
+  if (!rows?.length) return [];
+  const columns = Object.keys(rows[0]);
+  return [{ columns, values: rows.map((r) => columns.map((c) => r[c])) }];
+}
+
+function wrapNative(native) {
+  return {
+    native,
+    run(sql, params) {
+      if (params && params.length) return native.prepare(sql).run(...params);
+      native.exec(sql);
+    },
+    exec(sql, params) {
+      const text = String(sql || '');
+      const trimmed = text.trim().replace(/;+\s*$/, '');
+      const single = !trimmed.includes(';');
+      if ((params && params.length) || (single && /^select\b/i.test(trimmed))) {
+        const rows = native.prepare(trimmed).all(...(params || []));
+        return rowsToSqlJs(rows);
+      }
+      native.exec(text);
+      return [];
+    },
+    prepare(sql) {
+      const stmt = native.prepare(sql);
+      const bind = (args) => (Array.isArray(args[0]) ? args[0] : args);
+      return {
+        run: (...args) => {
+          const info = stmt.run(...bind(args));
+          return {
+            changes: info?.changes || 0,
+            lastInsertRowid: Number(info?.lastInsertRowid || 0),
+          };
+        },
+        get: (...args) => stmt.get(...bind(args)),
+        all: (...args) => stmt.all(...bind(args)),
+      };
+    },
+    close() {
+      try { native.close(); } catch { /* ignore */ }
+    },
+  };
+}
+
+function openNative(file) {
+  const native = new Database(file);
+  native.pragma('journal_mode = WAL');
+  native.pragma('foreign_keys = ON');
+  native.pragma('busy_timeout = 5000');
+  return wrapNative(native);
+}
+
+function removeSidecars(file) {
+  for (const ext of ['-wal', '-shm']) {
+    try { if (fs.existsSync(file + ext)) fs.unlinkSync(file + ext); } catch { /* ignore */ }
+  }
+}
+
+/** sql.js 不读 wal。第一次改用本机 SQLite 前把旧 wal 挪走，避免把一份过期日志回放到主库上。 */
+function quarantineLegacyWal() {
+  const mark = DB_PATH + '.native';
+  if (fs.existsSync(mark) || !fs.existsSync(DB_PATH)) return;
+  for (const ext of ['-wal', '-shm']) {
+    const p = DB_PATH + ext;
+    if (!fs.existsSync(p)) continue;
+    const dest = `${p}.before-native`;
+    try {
+      fs.renameSync(p, dest);
+      console.warn('[db] 移开 sql.js 未合并的', ext);
+    } catch (e) {
+      console.warn('[db] 移开 wal 失败', e.message);
+    }
+  }
+}
+
+function markNativeEngine() {
+  try { fs.writeFileSync(DB_PATH + '.native', '1'); } catch { /* ignore */ }
+}
+
+function countCharactersInFile(file) {
+  let native = null;
+  try {
+    native = new Database(file, { readonly: true, fileMustExist: true });
+    const row = native.prepare('SELECT COUNT(*) AS c FROM characters').get();
+    return Number(row?.c || 0);
+  } catch {
+    return -1;
+  } finally {
+    try { native?.close(); } catch { /* ignore */ }
   }
 }
 
@@ -45,14 +165,8 @@ function findRecoverableBackup() {
       .map(f => ({ f, t: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs }))
       .sort((a, b) => b.t - a.t);
     for (const { f } of files) {
-      try {
-        const data = fs.readFileSync(path.join(BACKUP_DIR, f));
-        const testDb = new SQL.Database(data);
-        const res = testDb.exec(`SELECT COUNT(*) FROM characters`);
-        const count = res?.[0]?.values?.[0]?.[0] || 0;
-        testDb.close();
-        if (count > 0) return path.join(BACKUP_DIR, f);
-      } catch { /* 这份备份也打不开/是坏的，试下一份 */ }
+      const full = path.join(BACKUP_DIR, f);
+      if (countCharactersInFile(full) > 0) return full;
     }
   } catch (e) {
     console.warn('[db] scan backups failed', e.message);
@@ -60,34 +174,37 @@ function findRecoverableBackup() {
   return null;
 }
 
+function replaceWithBackup(backup) {
+  try { db?.close(); } catch { /* ignore */ }
+  db = null;
+  removeSidecars(DB_PATH);
+  fs.copyFileSync(backup, DB_PATH);
+  removeSidecars(DB_PATH);
+  db = openNative(DB_PATH);
+}
+
 async function initDB() {
-  SQL = await require('sql.js')();
+  const firstNative = !fs.existsSync(DB_PATH + '.native');
+  if (firstNative) quarantineLegacyWal();
 
-  if (fs.existsSync(DB_PATH + '-wal') || fs.existsSync(DB_PATH + '-shm')) {
-    console.warn('[db] 发现 nian.db-wal/shm。sql.js 只读主库文件，未 checkpoint 的写入会丢。切回前请先停进程，让上一版把 WAL 合并进主库，不要先删 wal。');
-  }
-
-  // 每次启动前先把当前库文件快照一份（不管好坏）：即使这次启动读到的是被 crash 写坏/清空的文件，
-  // 之前某次正常落盘的快照仍然留着，不会因为反复重启把恢复的可能性也抹掉
-  backupDBFile('preboot');
+  // 第一次换引擎前先抄一份 sql.js 留下的主库。之后先打开并收 WAL，再抄，避免备份缺最近的写入。
+  if (firstNative) backupDBFile('preboot');
 
   let loadedFresh = false;
   if (fs.existsSync(DB_PATH)) {
-    let data = fs.readFileSync(DB_PATH);
     try {
-      db = new SQL.Database(data);
-      // 打开成功不代表数据完好——crash 写到一半的文件也可能被 sql.js 接受但表是空的；
-      // 这里做个健康检查，明显异常（有 settings 却没有 characters 表数据且备份里有更好的版本）时尝试自动切换到最近的健康备份
+      db = openNative(DB_PATH);
+      // 打开成功不代表数据完好。characters 被清空时改用最近一份还有角色的备份。
       let charCount = -1;
       try {
-        const res = db.exec(`SELECT COUNT(*) FROM characters`);
+        const res = db.exec(`SELECT COUNT(*) AS c FROM characters`);
         charCount = res?.[0]?.values?.[0]?.[0] ?? -1;
       } catch { /* 表可能还不存在（全新库属正常），交给下面的建表逻辑处理 */ }
       if (charCount === 0) {
         const backup = findRecoverableBackup();
         if (backup) {
           console.warn(`[db] 当前数据库 characters 表为空，疑似被异常重启写坏，自动改用最近的健康备份: ${backup}`);
-          db = new SQL.Database(fs.readFileSync(backup));
+          replaceWithBackup(backup);
         }
       }
     } catch (e) {
@@ -95,18 +212,26 @@ async function initDB() {
       const backup = findRecoverableBackup();
       if (backup) {
         console.warn(`[db] 改用最近的健康备份: ${backup}`);
-        db = new SQL.Database(fs.readFileSync(backup));
+        replaceWithBackup(backup);
       } else {
         console.error('[db] 没有可用备份，只能新建空库（这会丢失全部数据，请检查 db_backups 目录）');
-        db = new SQL.Database();
+        try { db?.close(); } catch { /* ignore */ }
+        removeSidecars(DB_PATH);
+        try { fs.unlinkSync(DB_PATH); } catch { /* ignore */ }
+        db = openNative(DB_PATH);
         loadedFresh = true;
       }
     }
   } else {
-    db = new SQL.Database();
+    db = openNative(DB_PATH);
     loadedFresh = true;
   }
   void loadedFresh;
+  if (!firstNative) {
+    // 只收 WAL。整库拷贝改到开始监听之后做，否则开机先抄一份两百多 MB，这段时间端口是关的
+    saveDBSync();
+  }
+  markNativeEngine();
 
   db.run(`PRAGMA foreign_keys = ON;`);
 
@@ -607,6 +732,7 @@ async function initDB() {
     `ALTER TABLE characters ADD COLUMN self_review TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN vocal_clips TEXT DEFAULT '[]'`,
     `ALTER TABLE characters ADD COLUMN voice_id_nsfw TEXT DEFAULT ''`,
+    `ALTER TABLE characters ADD COLUMN tts_provider TEXT DEFAULT 'minimax'`,
     `ALTER TABLE characters ADD COLUMN call_video TEXT DEFAULT ''`,
     `ALTER TABLE characters ADD COLUMN call_video_mode TEXT DEFAULT 'video'`,
     `ALTER TABLE characters ADD COLUMN memory_flash_chance INTEGER DEFAULT 20`,
@@ -1123,7 +1249,8 @@ async function initDB() {
     ['chat_api_url', ''], ['chat_api_key', ''], ['chat_model', 'gpt-4o'],
     ['chat_temperature', '0.8'], ['chat_max_tokens', '4000'],
     ['minimax_api_key', ''], ['minimax_group_id', ''], ['minimax_api_url', ''],
-    ['elevenlabs_api_key', ''], ['elevenlabs_api_url', ''],
+    ['elevenlabs_api_key', ''], ['elevenlabs_api_url', ''], ['elevenlabs_tts_model', 'eleven_v4'],
+    ['fish_api_key', ''], ['fish_api_url', ''], ['fish_tts_model', 's2.1-pro'],
     ['sfx_vol_scene', '100'],
     ['sfx_vol_oneshot', '55'],
     ['sfx_vol_close', '20'],
@@ -1131,6 +1258,7 @@ async function initDB() {
     ['sfx_vol_call_voice', '115'],
     ['image_api_url', ''], ['image_api_key', ''],
     ['username', '旅人'], ['user_desc', ''], ['user_location', ''], ['user_birthday', ''], ['user_avatar', ''],
+    ['user_cycle_interval', ''], ['user_period_days', ''], ['user_cramps', '0'], ['user_cramp_days', ''],
     ['user_selfie', ''], ['user_appearance', ''],
     ['user_gender', ''], ['user_home_address', ''], ['user_home_lat', ''], ['user_home_lng', ''],
     ['user_work_address', ''], ['user_work_lat', ''], ['user_work_lng', ''],
@@ -1350,33 +1478,9 @@ function countCharactersSafe(database) {
 }
 
 function saveDBSync() {
-  if (!db) return;
-  // 内存库 characters 被掏空时，禁止覆盖磁盘上仍有角色的主库
-  try {
-    if (SQL && fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
-      const memChars = countCharactersSafe(db);
-      if (memChars === 0) {
-        const diskDb = new SQL.Database(fs.readFileSync(DB_PATH));
-        const diskChars = countCharactersSafe(diskDb);
-        diskDb.close();
-        if (diskChars > 0) {
-          console.error(`[db] 拒绝落盘：内存 characters=0，但磁盘仍有 ${diskChars} 个角色`);
-          return;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[db] save guard', e.message);
-  }
-  const data = db.export();
-  // 唯一临时文件名：避免 sync/async 落盘同时抢同一个 .tmp 导致 rename ENOENT
-  const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.sync.tmp`;
-  fs.writeFileSync(tmpPath, Buffer.from(data));
-  try {
-    fs.renameSync(tmpPath, DB_PATH);
-  } catch (e) {
-    try { fs.unlinkSync(tmpPath); } catch {}
-    throw e;
+  if (!db?.native) return;
+  try { db.native.pragma('wal_checkpoint(TRUNCATE)'); } catch (e) {
+    console.warn('[db] checkpoint', e.message);
   }
 }
 
@@ -1390,7 +1494,7 @@ function scheduleSaveDB() {
   }, 5000);
 }
 
-/** 异步落盘：export 仍同步，但 writeFile 不阻塞事件循环 */
+/** 写入已经落在文件上。这里只把 WAL 收进主库，方便备份看到完整内容。 */
 async function flushSaveDBAsync() {
   if (!db) return;
   if (_saveInFlight) {
@@ -1399,19 +1503,7 @@ async function flushSaveDBAsync() {
   }
   _saveInFlight = true;
   try {
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    const data = db.export();
-    await new Promise((r) => setImmediate(r));
-    // 唯一临时文件名：避免与 saveDBSync 抢同一个 .tmp 导致 rename ENOENT
-    const tmpPath = `${DB_PATH}.${process.pid}.${Date.now()}.async.tmp`;
-    await fs.promises.writeFile(tmpPath, Buffer.from(data));
-    try {
-      await fs.promises.rename(tmpPath, DB_PATH);
-    } catch (e) {
-      try { await fs.promises.unlink(tmpPath); } catch {}
-      throw e;
-    }
+    saveDBSync();
   } catch (e) {
     console.error('[db] save failed', e.message);
   } finally {
@@ -1454,10 +1546,12 @@ process.on('SIGTERM', () => { flushSaveDB(); process.exit(0); });
 // ===== Query helpers (synchronous) =====
 
 function run(sql, params = []) {
-  db.run(sql, params);
-  const changes = typeof db.getRowsModified === 'function' ? db.getRowsModified() : 0;
+  const info = (params && params.length)
+    ? db.native.prepare(sql).run(...params)
+    : (db.native.exec(sql), null);
   scheduleSaveDB();
-  return { lastInsertRowid: getLastInsertId(), changes };
+  if (info) return { lastInsertRowid: Number(info.lastInsertRowid || 0), changes: info.changes || 0 };
+  return { lastInsertRowid: getLastInsertId(), changes: 0 };
 }
 
 function getLastInsertId() {
@@ -1466,29 +1560,11 @@ function getLastInsertId() {
 }
 
 function get(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  if (stmt.step()) {
-    const cols = stmt.getColumnNames();
-    const vals = stmt.get();
-    stmt.free();
-    const obj = {};
-    cols.forEach((c, i) => obj[c] = vals[i]);
-    return obj;
-  }
-  stmt.free();
-  return null;
+  return db.prepare(sql).get(...(params || [])) || null;
 }
 
 function all(sql, params = []) {
-  const res = db.exec(sql, params);
-  if (!res.length) return [];
-  const { columns, values } = res[0];
-  return values.map(row => {
-    const obj = {};
-    columns.forEach((c, i) => obj[c] = row[i]);
-    return obj;
-  });
+  return db.prepare(sql).all(...(params || []));
 }
 
 function exec(sql) {
@@ -1513,4 +1589,4 @@ function prepare(sql) {
   };
 }
 
-module.exports = { initDB, run, get, all, exec, prepare, saveDB: flushSaveDB, beginSaveBatch, endSaveBatch, getDB: () => db, backupDBFile };
+module.exports = { initDB, run, get, all, exec, prepare, saveDB: flushSaveDB, beginSaveBatch, endSaveBatch, getDB: () => db, backupDBFile, backupDBFileAsync };

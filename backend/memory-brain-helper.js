@@ -5,9 +5,13 @@
 const db = require('./db');
 
 const HEALTH_BODY_RE = /头疼|头痛|头晕|难受|不舒服|生病|感冒|发烧|咳嗽|嗓子|拉肚子|过敏|失眠/;
-/** 用药/生理期：只有对方这句已经在说药或例假，才把俗称和药名绑在一起 */
-const HEALTH_MED_CUE_RE = /布洛芬|止痛药|退烧药|感冒药|消炎药|吃了?.{0,6}药|吃药|服药|药效|例假|姨妈|月经|痛经|生理期/;
-const HEALTH_MED_EXPAND = ' 布洛芬 止痛药 吃药 药 例假 姨妈 痛经 生理期 肚子难受';
+/** 用药：只有对方这句已经在说药，才把俗称和药名绑在一起。经期另按普通事记记，不跟过时的药一起藏。 */
+const HEALTH_MED_CUE_RE = /布洛芬|止痛药|退烧药|感冒药|消炎药|吃了?.{0,6}药|吃药|服药|药效|例假|姨妈|月经|痛经|生理期|经期|大姨妈/;
+const HEALTH_MED_EXPAND = ' 布洛芬 止痛药 吃药 药 例假 姨妈 痛经 生理期 经期 大姨妈 肚子难受';
+const CYCLE_RE = /例假|姨妈|月经|痛经|生理期|经期|大姨妈/;
+/** 一次经期大约一周；这几天聊到身体要能想起来 */
+const CYCLE_RECENT_DAYS = 7;
+const MED_RECENT_DAYS = 2;
 
 /** 所有改写记忆的提示词共用：模型最常犯的是词都对、谁对谁弄反 */
 const MEMORY_ACTOR_RULE = `【谁对谁·硬性】
@@ -36,27 +40,45 @@ function expandHealthRetrievalCue(text) {
   return `${t}${HEALTH_MED_EXPAND}`;
 }
 
+function isCycleMemory(m) {
+  return CYCLE_RE.test(`${m?.content || ''} ${m?.keywords || ''}`);
+}
+
 function isMedOrCycleMemory(m) {
   const blob = String(m?.content || '');
   return HEALTH_MED_CUE_RE.test(blob) || /止痛|痛经|例假|姨妈|吃药|药效/.test(blob);
 }
 
-function isRecentHealthOrMedMemory(m, todayStr) {
-  const blob = `${m?.category || ''} ${m?.content || ''}`;
-  if (!HEALTH_MED_CUE_RE.test(blob) && !/止痛|痛经|例假|姨妈|吃药|药效/.test(blob)) return false;
+function memoryAgeDays(m, todayStr) {
   const d = String(m?.date || '').slice(0, 10);
-  if (!d || !todayStr) return true;
-  // 近两天身体/用药事实，对方再提起时优先捞上来
+  if (!d || !todayStr) return 0;
   try {
     const pa = d.split('-').map(Number);
-    const pb = todayStr.split('-').map(Number);
+    const pb = String(todayStr).split('-').map(Number);
+    if (pa.length < 3 || pb.length < 3) return 0;
     const da = Date.UTC(pa[0], pa[1] - 1, pa[2]);
     const db_ = Date.UTC(pb[0], pb[1] - 1, pb[2]);
-    const days = Math.round((db_ - da) / 86400000);
-    return days >= 0 && days <= 2;
+    return Math.round((db_ - da) / 86400000);
   } catch {
-    return true;
+    return 0;
   }
+}
+
+function isRecentHealthOrMedMemory(m, todayStr) {
+  const blob = `${m?.category || ''} ${m?.content || ''}`;
+  const cycle = isCycleMemory(m) || CYCLE_RE.test(blob);
+  const med = HEALTH_MED_CUE_RE.test(blob) || /止痛|吃药|药效/.test(blob);
+  if (!cycle && !med) return false;
+  const d = String(m?.date || '').slice(0, 10);
+  if (!d || !todayStr) return true;
+  const days = memoryAgeDays(m, todayStr);
+  const limit = cycle ? CYCLE_RECENT_DAYS : MED_RECENT_DAYS;
+  return days >= 0 && days <= limit;
+}
+
+function mentionsBodyOrCycle(text) {
+  const t = String(text || '');
+  return HEALTH_MED_CUE_RE.test(t) || HEALTH_BODY_RE.test(t) || CYCLE_RE.test(t) || /肚子/.test(t);
 }
 const HEALTH_RECOVERY_RE = /好[了點点]|好多了|不难受|没事了|已经好|不疼了|退烧|痊愈|恢复了/i;
 const FLASH_MAX = 2;
@@ -1078,8 +1100,9 @@ function utteranceHitsMemory(m, rawText) {
   return memoryMatchesContext(m, raw) || distinctiveTermHit(m.content, raw);
 }
 
-/** 没再提那件事、也过了近两天的吃药/例假，不要因为一句身体抱怨被捞回来 */
+/** 过了近两天的药，不要因为一句身体抱怨被捞回来。经期不走这条，按普通事记留着。 */
 function medMemoryStaleForUtterance(m, todayStr, rawText) {
+  if (isCycleMemory(m)) return false;
   if (!isMedOrCycleMemory(m)) return false;
   const raw = String(rawText || '');
   if (HEALTH_MED_CUE_RE.test(raw)) return false;
@@ -1316,7 +1339,10 @@ function selectMemoriesForBrain(char, contextText = '', opts = {}) {
     if (Number(m.resolved) === 1) return pastAsk;
     if (st === 'historical') {
       if (pastAsk) return true;
-      // 过时的药/例假：对方没点名，就不要因为一句「头疼」再捞回来
+      // 这周的经期：对方在说身体或不舒服，就要能对上，不必再把「例假」原词说一遍
+      if (isCycleMemory(m) && isRecentHealthOrMedMemory(m, todayStr) && mentionsBodyOrCycle(rawFocusEarly)) return true;
+      if (isCycleMemory(m)) return utteranceHitsMemory(m, rawFocusEarly);
+      // 过时的药：对方没点名，就不要因为一句「头疼」再捞回来
       if (isMedOrCycleMemory(m) && !HEALTH_MED_CUE_RE.test(rawFocusEarly)) return false;
       return utteranceHitsMemory(m, rawFocusEarly);
     }
@@ -1360,9 +1386,9 @@ function selectMemoriesForBrain(char, contextText = '', opts = {}) {
   if (ctx) {
     const rawFocus = latestFocusText(ctx) || ctx;
     const focus = expandHealthRetrievalCue(rawFocus);
-    const healthCue = HEALTH_MED_CUE_RE.test(rawFocus) || HEALTH_BODY_RE.test(rawFocus);
+    const healthCue = mentionsBodyOrCycle(rawFocus);
     const pool = live.filter((m) => !seen.has(m.id));
-    // 对方刚提用药/例假/身体：近两天相关条先入选，避免「布洛芬」对不上库里的「止痛药」
+    // 对方刚提用药/例假/身体：近期相关条先入选，避免「布洛芬」对不上库里的「止痛药」
     if (healthCue) {
       live.filter((m) => !seen.has(m.id) && isRecentHealthOrMedMemory(m, todayStr))
         .sort((a, b) => Number(b.id) - Number(a.id))
@@ -1704,7 +1730,7 @@ function collectFlashCandidates(char, selected, opts = {}) {
   const ctx = String(opts.contextText || '');
   const rawFocus = latestFocusText(ctx) || ctx;
   const focus = expandHealthRetrievalCue(rawFocus);
-  const healthCue = HEALTH_MED_CUE_RE.test(rawFocus) || HEALTH_BODY_RE.test(rawFocus);
+  const healthCue = mentionsBodyOrCycle(rawFocus);
   const out = [];
   const seen = new Set();
   const push = (item) => {
@@ -2167,6 +2193,7 @@ async function prepareMindFlashForPromptAsync(char, contextText = '', opts = {})
   try {
     queryEmb = await require('./embed-helper').embedText(focus || '', getSettings());
   } catch { /* lexical */ }
+  await new Promise((resolve) => setImmediate(resolve));
   const selected = selectMemoriesForBrain(char, contextText, { ...opts, queryEmb });
   try {
     const narrativeHelper = require('./memory-narrative-helper');

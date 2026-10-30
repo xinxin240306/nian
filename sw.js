@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nian-v158';
+const CACHE_NAME = 'nian-v167';
 
 // 只预缓存离线壳与图标；JS/CSS 不再预缓存，避免改版后仍吃到旧壳
 const SHELL = [

@@ -273,21 +273,27 @@ export async function ensureServerConfigured() {
 
   const existing = getServerBase();
   if (existing) {
-    try {
-      await probeServer(existing);
-      installNativeMediaRewriter();
-      return true;
-    } catch (e) {
-      // 已有地址时后端暂时挂了：允许取消进入，避免卡死在配置页
-      return new Promise((resolve) => {
-        showServerSetupOverlay({
-          preset: existing,
-          allowCancel: true,
-          initialError: `暂时连不上服务器：${e.message || e}\n\n多半是 VPS 上的 Node 没在跑。可先取消进界面，去服务器重启后再试。`,
-          onDone: () => resolve(true),
-        });
-      });
+    let lastError = null;
+    // 重启后要等进程和数据库起来，前几十秒会是 502。已保存的地址先重试，不要立刻当成没配服务器
+    for (let i = 0; i < 4; i++) {
+      try {
+        await probeServer(existing);
+        installNativeMediaRewriter();
+        return true;
+      } catch (e) {
+        lastError = e;
+        if (i < 3) await new Promise((r) => setTimeout(r, 2000));
+      }
     }
+    const e = lastError || new Error('连接失败');
+    return new Promise((resolve) => {
+      showServerSetupOverlay({
+        preset: existing,
+        allowCancel: true,
+        initialError: `暂时连不上服务器：${e.message || e}\n\n如果刚重启过，等半分钟再点一次连接。地址不用重填。`,
+        onDone: () => resolve(true),
+      });
+    });
   }
 
   return new Promise((resolve) => {

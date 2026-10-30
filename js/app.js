@@ -62,7 +62,7 @@ const PAGE_LOADERS = {
   chat: () => import('./pages/chat-page.js?v=offpage-notify1'),
   dream: () => import('./pages/dream-page.js'),
   diary: () => import('./pages/diary-page.js'),
-  character: () => import('./pages/character-page.js?v=char-import1'),
+  character: () => import('./pages/character-page.js?v=char-import2'),
   worldbook: () => import('./pages/worldbook-page.js'),
   preset: () => import('./pages/preset-page.js'),
   manage: () => import('./pages/manage-page.js'),
@@ -84,6 +84,8 @@ const PAGE_LOADERS = {
   series: () => import('./pages/series-page.js'),
   robot: () => import('./pages/robot-page.js'),
   mcp: () => import('./pages/mcp-page.js'),
+  'xhs-screen': () => import('./pages/xhs-screen-page.js'),
+  'xhs-me': () => import('./pages/xhs-me-page.js'),
   impression: () => import('./pages/impression-page.js'),
   wardrobe: () => import('./pages/wardrobe-page.js'),
   appearance: () => import('./pages/appearance-page.js'),
@@ -91,7 +93,7 @@ const PAGE_LOADERS = {
   ta: () => import('./pages/ta-page.js'),
   mailbox: () => import('./pages/mailbox-page.js'),
   postoffice: () => import('./pages/postoffice-page.js'),
-  tieba: () => import('./pages/tieba-page.js?v=setup2'),
+  tieba: () => import('./pages/tieba-page.js?v=ui6'),
 };
 
 // 将 kebab-case 转为 PascalCase，例如 emoji-manager → EmojiManager
@@ -2233,6 +2235,9 @@ function handleWSMessage(data) {
       break;
     case 'ai_diary':
       showSystemNotify('有新的秘密可以偷看了 📔');
+      import('./pages/diary-page.js')
+        .then(() => window.prefetchSecretDiary?.(data.characterId))
+        .catch(() => {});
       break;
     case 'ai_peeked_diary':
       showSystemNotify(`${getCharName(data.characterId)} 悄悄看了你的秘密 👀`);

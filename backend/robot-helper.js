@@ -992,7 +992,7 @@ async function generateSnapshotNote(settings, char, opts = {}) {
     let apiHistory = [];
     if (abs) {
       const picMsg = { id: 'robot_snap_' + Date.now(), role: 'user', content: abs, type: 'image' };
-      apiHistory = buildHistoryApiMessages([picMsg], publicBase, {});
+      apiHistory = await buildHistoryApiMessages([picMsg], publicBase, {});
       if (apiHistory.length) {
         const last = apiHistory[apiHistory.length - 1];
         if (Array.isArray(last.content)) {
@@ -1028,7 +1028,7 @@ async function generateSnapshotCaption(settings, char, opts = {}) {
   if (!abs) return '桌宠抓拍';
   try {
     const picMsg = { id: 'robot_cap_' + Date.now(), role: 'user', content: abs, type: 'image' };
-    const apiHistory = buildHistoryApiMessages([picMsg], publicBase, {});
+    const apiHistory = await buildHistoryApiMessages([picMsg], publicBase, {});
     const ask = '用 4～12 个汉字给这张抓拍起相册标题（只输出标题，不要标点）：';
     if (apiHistory.length) {
       const last = apiHistory[apiHistory.length - 1];

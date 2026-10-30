@@ -589,6 +589,7 @@ ${KEY_RULES}
 - ${materialHint}
 - 纯闲聊、寒暄、无信息量的玩笑不要进近况或事实。
 - 近况是给以后聊天用的：${uname}当天提到自己在忙什么、要去哪、计划、烦心事、身体或心情，即使不大也应收进 recent，好让你之后知道对方最近在干嘛。不要因为「不是大事」就空着。
+- 对方说自己来例假、痛经、在生理期/经期，记进 recent 的「状态」。judgment 里保留原词（例假/痛经/生理期/经期/大姨妈），不要收成「不舒服」，也不要因为会过去就丢掉。
 - recent / facts 只写${uname}；self 只写你自己。你们俩之间的约会、拌嘴、相处过程本身不进近况、性格、喜恶这些格子；对方自己的生活、状态才进近况。唯一例外是情绪反应的 reason，必须写那一次的经过。
 - recent / facts 的 judgment 不写主语或写「TA」「她」「他」；self 的 judgment 用「我」。一般不超过 28 字（情绪反应的教训可到 48 字）；judgment 禁止半截（如停在「明确表示」「面对…测试」）。
 - reason 用第一人称。除情绪反应外不超过 60 字，不贴聊天原文；reason 里可带 ${dateStr} 等具体日期。
@@ -1107,6 +1108,19 @@ function readLabel(r) {
   return r.section === 'recent' ? `近况·${r.category}` : r.category;
 }
 
+const CYCLE_STATUS_RE = /例假|姨妈|月经|痛经|生理期|经期|大姨妈/;
+const CYCLE_STATUS_DAYS = 7;
+
+/** 这周说过的例假还算近况，聊天时要带着，不用对方再把原词说一遍 */
+function isFreshCycleRecent(row, today) {
+  const blob = `${row?.judgment || ''} ${row?.reason || ''} ${(row?.marks || []).join(' ')} ${(row?.triggers || []).join(' ')}`;
+  if (!CYCLE_STATUS_RE.test(blob)) return false;
+  const seen = String(row?.last_seen || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(seen) || !/^\d{4}-\d{2}-\d{2}$/.test(String(today || ''))) return true;
+  const cutoff = shiftDate(today, -CYCLE_STATUS_DAYS);
+  return !!cutoff && seen >= cutoff && seen <= today;
+}
+
 function formatRecentStanding(rows) {
   const recent = (rows || []).filter((r) => r.section === 'recent' && String(r.judgment || '').trim());
   if (!recent.length) return '';
@@ -1140,7 +1154,16 @@ function formatForPrompt(charId, userText = '') {
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s || b.r.id - a.r.id)
     .map((x) => x.r);
-  const standingRecent = formatRecentStanding(rank(recentRows).slice(0, RECENT_KNOW_MAX));
+  const freshCycle = recentRows.filter((r) => isFreshCycleRecent(r, today));
+  const pickedRecent = [];
+  const pickedIds = new Set();
+  for (const r of [...freshCycle, ...rank(recentRows)]) {
+    if (!r || pickedIds.has(r.id)) continue;
+    pickedIds.add(r.id);
+    pickedRecent.push(r);
+    if (pickedRecent.length >= Math.max(RECENT_KNOW_MAX, freshCycle.length)) break;
+  }
+  const standingRecent = formatRecentStanding(pickedRecent);
   const userHits = rank(userRows);
 
   let offer = null;

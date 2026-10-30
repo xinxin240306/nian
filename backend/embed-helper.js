@@ -132,7 +132,8 @@ const STOP_BIGRAMS = new Set((
 
 /** 打分用的词项：中文二元词（去口水词）+ 字母数字串（N2、cet6 这类专名） */
 function scoringTerms(text) {
-  const t = String(text || '').toLowerCase().replace(/\s+/g, '');
+  // 超长正文（整段聊天、base64）按字扫会把事件循环堵住几十秒，健康检查和面板一起卡住
+  const t = String(text || '').toLowerCase().replace(/\s+/g, '').slice(0, 1500);
   const out = new Set();
   for (let i = 0; i + 1 < t.length; i++) {
     const bg = t.slice(i, i + 2);
@@ -191,8 +192,15 @@ function scoreTextsAgainst(queryText, docs, { queryEmb = null, corpus = null } =
   const N = Math.max(size, dts.length) + 1;
   const idf = (k) => Math.max(0, Math.log((N + 1) / ((df.get(k) || 0) + 0.5)));
 
-  // 只看「查询里确实能在某个候选里找到」的词，长查询不会被无关内容稀释
-  const matchable = [...qt].filter((k) => dts.some((d) => d.has(k)));
+  // 只看「查询里确实能在某个候选里找到」的词。先并成一个集合，避免每个词都把全部候选扫一遍
+  const present = new Set();
+  for (const d of dts) {
+    for (const k of d) present.add(k);
+  }
+  const matchable = [];
+  for (const k of qt) {
+    if (present.has(k)) matchable.push(k);
+  }
   const denom = matchable.reduce((s, k) => s + idf(k), 0);
 
   return list.map((_, i) => {

@@ -2040,6 +2040,7 @@ function getPublicSettings() {
   };
   delete s.vps_archive_ack;
   delete s.vps_store_last_prune;
+  delete s.xhs_screen_token;
   // MCP 服务 token 不对外；管理走 /api/mcp/servers
   try {
     const mcp = require('./mcp-client-helper');
@@ -2077,25 +2078,47 @@ function resolveBusyAutoReply(char, characterId, isDreamMode, settings) {
   return { autoReplyText: `【自动回复】${autoReply}` };
 }
 
-function resolveChatImageUrl(url, baseUrl) {
+/** 聊天识图：本机图一律内嵌 base64。大图先压成 jpeg，避免退回远程网址被中转站拒绝。 */
+async function resolveChatImageUrl(url, baseUrl) {
   const abs = toAbsoluteMediaUrl(url, baseUrl);
   const marker = '/uploads/';
-  const idx = abs.indexOf(marker);
-  if (idx >= 0) {
-    const filename = decodeURIComponent(abs.slice(idx + marker.length).split('?')[0]);
-    const localPath = path.join(UPLOADS_PATH, filename);
-    if (fs.existsSync(localPath)) {
-      try {
-        const stat = fs.statSync(localPath);
-        if (stat.size > 2.5 * 1024 * 1024) return abs;
-      } catch {}
-      const buf = fs.readFileSync(localPath);
-      const ext = path.extname(filename).toLowerCase();
-      const mime = { '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[ext] || 'image/jpeg';
-      return `data:${mime};base64,${buf.toString('base64')}`;
+  const idx = String(abs || '').indexOf(marker);
+  if (idx < 0) return abs;
+  const filename = decodeURIComponent(abs.slice(idx + marker.length).split('?')[0]);
+  if (!filename || filename.includes('..')) return abs;
+  const localPath = path.join(UPLOADS_PATH, filename);
+  if (!fs.existsSync(localPath)) return abs;
+  const ext = path.extname(filename).toLowerCase();
+  if (['.mp4', '.webm', '.mov'].includes(ext)) return abs;
+  let buf;
+  try { buf = await fs.promises.readFile(localPath); } catch { return abs; }
+  if (!buf.length) return abs;
+  const mime = { '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[ext] || 'image/jpeg';
+  const limit = 1.6 * 1024 * 1024;
+  if (buf.length > limit) {
+    try {
+      const sharp = require('sharp');
+      let quality = 82;
+      let width = 1600;
+      let cur = buf;
+      for (let i = 0; i < 5; i++) {
+        const out = await sharp(cur)
+          .rotate()
+          .resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality, mozjpeg: true })
+          .toBuffer();
+        cur = out;
+        if (cur.length <= limit) break;
+        width = Math.max(768, Math.round(width * 0.75));
+        quality = Math.max(55, quality - 8);
+      }
+      console.log('[chat-image] inline', filename, buf.length, '->', cur.length);
+      return `data:image/jpeg;base64,${cur.toString('base64')}`;
+    } catch (e) {
+      console.warn('[chat-image] compress', filename, e.message);
     }
   }
-  return abs;
+  return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
 /** 把本地语音做成多模态 part。Gemini 中转对 OpenAI input_audio 常听成杂音，改走 data URI。 */
@@ -2398,6 +2421,80 @@ app.post('/api/mcp/servers', (req, res) => {
     res.json({ ok: true, server, servers: mcp.listPublicServers(getSettings) });
   } catch (e) {
     res.status(400).json({ error: e.message || '保存失败' });
+  }
+});
+
+app.get('/api/xhs-screen', (req, res) => {
+  try {
+    const screen = require('./xhs-screen-helper');
+    res.json(screen.publicConfig(getSettings()));
+  } catch (e) {
+    res.status(500).json({ error: e.message || '读取失败' });
+  }
+});
+
+app.post('/api/xhs-screen', (req, res) => {
+  try {
+    const screen = require('./xhs-screen-helper');
+    screen.saveConfig(setSetting, req.body || {});
+    res.json({ ok: true, ...screen.publicConfig(getSettings()) });
+  } catch (e) {
+    res.status(400).json({ error: e.message || '保存失败' });
+  }
+});
+
+app.get('/api/xhs-screen/shot', async (req, res) => {
+  try {
+    const screen = require('./xhs-screen-helper');
+    const shot = await screen.fetchShot(getSettings());
+    res.json(shot);
+  } catch (e) {
+    const status = e.code === 'unconfigured' || /地址|位置/.test(String(e.message || '')) ? 400 : 502;
+    res.status(status).json({ error: e.message || '取画面失败' });
+  }
+});
+
+app.post('/api/xhs-screen/stack', async (req, res) => {
+  try {
+    const stack = require('./xhs-stack');
+    const result = await stack.startAll(getSettings, setSetting);
+    res.json(result);
+  } catch (e) {
+    const status = e.code === 'platform' ? 400 : 500;
+    res.status(status).json({ error: e.message || '启动失败' });
+  }
+});
+
+app.get('/api/xhs-me', (req, res) => {
+  try {
+    res.json(require('./xhs-me-helper').read(getSettings()));
+  } catch (e) {
+    res.status(500).json({ error: e.message || '读取失败' });
+  }
+});
+
+app.post('/api/xhs-me', (req, res) => {
+  try {
+    const me = require('./xhs-me-helper');
+    const body = req.body || {};
+    if (body.clear === true || body.clear === '1') {
+      me.clear(setSetting);
+      return res.json({ ok: true, nickname: '', redId: '', userId: '' });
+    }
+    res.json({ ok: true, ...me.save(setSetting, body) });
+  } catch (e) {
+    res.status(400).json({ error: e.message || '保存失败' });
+  }
+});
+
+app.post('/api/xhs-screen/click', async (req, res) => {
+  try {
+    const screen = require('./xhs-screen-helper');
+    const result = await screen.clickAt(getSettings(), req.body || {});
+    res.json(result);
+  } catch (e) {
+    const status = e.code === 'unconfigured' || /地址|位置/.test(String(e.message || '')) ? 400 : 502;
+    res.status(status).json({ error: e.message || '点按失败' });
   }
 });
 
@@ -2797,6 +2894,13 @@ app.post('/api/characters', (req, res) => {
           .run(trimVoiceId(d.voice_id_nsfw), r.lastInsertRowid);
       } catch {}
     }
+    if (d.tts_provider !== undefined) {
+      try {
+        const { normalizeTtsProvider } = require('./voice-lane-helper');
+        db.prepare('UPDATE characters SET tts_provider=? WHERE id=?')
+          .run(normalizeTtsProvider(d.tts_provider), r.lastInsertRowid);
+      } catch {}
+    }
     if (d.call_video !== undefined) {
       try {
         db.prepare('UPDATE characters SET call_video=? WHERE id=?')
@@ -3018,6 +3122,15 @@ app.put('/api/characters/:id', (req, res) => {
         .run(trimVoiceId(d.voice_id_nsfw), req.params.id);
     } catch (e) {
       console.warn('[voice_id_nsfw] save', e.message);
+    }
+  }
+  if (d.tts_provider !== undefined) {
+    try {
+      const { normalizeTtsProvider } = require('./voice-lane-helper');
+      db.prepare('UPDATE characters SET tts_provider=? WHERE id=?')
+        .run(normalizeTtsProvider(d.tts_provider), req.params.id);
+    } catch (e) {
+      console.warn('[tts_provider] save', e.message);
     }
   }
   if (d.call_video !== undefined) {
@@ -3535,6 +3648,13 @@ app.post('/api/characters/import-card', (req, res) => {
         .run(trimVoiceId(d.voice_id_nsfw), r.lastInsertRowid);
     } catch {}
   }
+  if (d.tts_provider !== undefined) {
+    try {
+      const { normalizeTtsProvider } = require('./voice-lane-helper');
+      db.prepare('UPDATE characters SET tts_provider=? WHERE id=?')
+        .run(normalizeTtsProvider(d.tts_provider), r.lastInsertRowid);
+    } catch {}
+  }
   if (d.call_video !== undefined) {
     try {
       db.prepare('UPDATE characters SET call_video=? WHERE id=?')
@@ -3627,7 +3747,7 @@ function estimateMessageContentTokens(content) {
 
 // 当前角色实际会发给聊天 API 的上下文（系统提示 + 历史消息）大致 token 数，
 // 用于通讯设置里给用户一个参考，不是精确计费口径
-app.get('/api/characters/:id/context-tokens', (req, res) => {
+app.get('/api/characters/:id/context-tokens', async (req, res) => {
   try {
     const characterId = parseInt(req.params.id, 10);
     const char = db.prepare('SELECT * FROM characters WHERE id=?').get(characterId);
@@ -3638,7 +3758,7 @@ app.get('/api/characters/:id/context-tokens', (req, res) => {
     const { liveHistory } = resolveChatSession(history, isDreamMode, '');
     const reqBase = `${req.protocol}://${req.get('host')}`;
     const systemPrompt = buildSystemPrompt(char, settings, '', { isDream: isDreamMode, recentHistory: liveHistory });
-    const apiHistory = buildHistoryApiMessages(liveHistory, reqBase, {});
+    const apiHistory = await buildHistoryApiMessages(liveHistory, reqBase, {});
     const systemPromptTokens = estimateTokenCount(systemPrompt);
     const historyTokens = apiHistory.reduce((sum, m) => sum + estimateMessageContentTokens(m.content), 0);
     res.json({
@@ -4008,6 +4128,14 @@ app.post('/api/messages/send', async (req, res) => {
     }
   }
 
+  if (!isDreamMode && type !== 'system' && type !== 'location') {
+    try {
+      if (!isTheaterActive(char)) require('./cycle-helper').noteUserMessage(characterId, userContent);
+    } catch (e) {
+      console.warn('[cycle] note', e.message);
+    }
+  }
+
   const forTheaterMode = !isDreamMode && !isVoiceMode && isTheaterActive(char);
   if (forTheaterMode && type !== 'system') {
     mergeMessageMediaMeta(userMsgId, { theater: 1 });
@@ -4265,13 +4393,14 @@ app.post('/api/messages/send', async (req, res) => {
     db.prepare(`INSERT INTO daily_context (character_id, content, date) VALUES (?,?,?)`).run(characterId, content.slice(0, 50), today);
   }
 
-  const apiHistory = buildHistoryApiMessages(liveHistory, reqBase, buildChatHistoryOptions(req, timeNote, noteTargetUserId, settings, isDreamMode));
+  const apiHistory = await buildHistoryApiMessages(liveHistory, reqBase, buildChatHistoryOptions(req, timeNote, noteTargetUserId, settings, isDreamMode));
   if (!apiHistory.length) {
-    apiHistory.push(buildHistoryApiMessages(
+    const fallbackHistory = await buildHistoryApiMessages(
       [{ id: userMsgId, role: 'user', content, type }],
       reqBase,
       buildChatHistoryOptions(req, timeNote, userMsgId, settings, isDreamMode)
-    )[0]);
+    );
+    if (fallbackHistory[0]) apiHistory.push(fallbackHistory[0]);
   }
   // 忙碌自动回复：梦境中不受忙碌状态影响；日常聊天才触发
   const busyHit = resolveBusyAutoReply(char, characterId, isDreamMode, settings);
@@ -4960,7 +5089,16 @@ function acquireTriggerAiLock(characterId) {
 }
 
 app.post('/api/messages/trigger-ai', async (req, res) => {
+  // 手机两分钟会放弃。不取消的话这一轮还占着锁，下一次打包发送会一直排在后面
+  const clientAbort = new AbortController();
+  const stopIfClientGone = () => {
+    if (res.writableEnded || res.headersSent) return;
+    if (!clientAbort.signal.aborted) clientAbort.abort();
+  };
+  req.on('aborted', stopIfClientGone);
+  res.on('close', stopIfClientGone);
   const {
+
     characterId, isDream = false, mode = 'retry', dreamMask = false, dreamStyle = '',
     dreamConfig = null, isVoiceCall = false, catchUp = false, gameTopicContext = '', callRollHint = '',
     isVideoCall = false, callLookImage = '', callPresenceMode = '', callInputMode = '',
@@ -4969,6 +5107,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
   } = req.body;
   const releaseTriggerLock = await acquireTriggerAiLock(characterId);
   try {
+  if (clientAbort.signal.aborted) return;
   const isDreamMode = isDream === true || isDream === 1 || isDream === '1';
   const isVoiceMode = isVoiceCall === true || isVoiceCall === 1 || isVoiceCall === '1';
   const isVideoMode = isVoiceMode && (isVideoCall === true || isVideoCall === 1 || isVideoCall === '1');
@@ -5252,7 +5391,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
   if (replyTimePack.minutes) promptOpts.userReturnMinutes = replyTimePack.minutes;
   const systemPrompt = buildSystemPrompt(char, settings, extraSystemPrompt, promptOpts);
 
-  const apiHistory = buildHistoryApiMessages(retrySession.liveHistory, reqBase, buildChatHistoryOptions(req, timeNote, noteTargetUserId, settings, isDreamMode));
+  const apiHistory = await buildHistoryApiMessages(retrySession.liveHistory, reqBase, buildChatHistoryOptions(req, timeNote, noteTargetUserId, settings, isDreamMode));
   // 兜底：retry 时上下文不能以角色旧回复结尾，否则模型容易把旧内容续出来
   if (aiMode === 'retry') {
     while (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'assistant') {
@@ -5340,6 +5479,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
       ? Math.max(3500, parseInt(settings.chat_max_tokens || '4000', 10) || 4000)
       : parseInt(settings.chat_max_tokens || '4000');
 
+    if (clientAbort.signal.aborted) return;
     const robotChatTools = await require('./robot-llm-tools').toolsForChat(char, settings, {
       isDream: isDreamMode,
       forTheater: forTheaterMode,
@@ -5355,6 +5495,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
       messages: apiMessages,
       maxTokens: trigMaxTokens,
       timeout: 120000,
+      signal: clientAbort.signal,
       tools: robotChatTools,
       characterId: char.id,
     });
@@ -9487,7 +9628,7 @@ app.post('/api/games/butler', async (req, res) => {
 
       const gameHint = '[你们正在玩你画我猜，用户刚发了画。请像平时聊天一样看图猜是什么，自然口语回复即可；不要问系统要答案。]';
       const systemPrompt = buildSystemPrompt(char, settings, gameHint, { forGame: true });
-      const apiHistory = buildHistoryApiMessages(
+      const apiHistory = await buildHistoryApiMessages(
         guessHistory,
         reqBase,
         buildChatHistoryOptions(req, '', picMsg.id, settings, false),
@@ -11552,18 +11693,19 @@ app.post('/api/tts', async (req, res) => {
   if (!characterId) {
     return res.status(400).json({ error: '缺少角色 ID' });
   }
-  const char = db.prepare('SELECT voice_id, voice_id_nsfw, mood, emotion_state, mindset FROM characters WHERE id=?').get(characterId);
+  const char = db.prepare('SELECT voice_id, voice_id_nsfw, mood, emotion_state, mindset, tts_provider FROM characters WHERE id=?').get(characterId);
   if (!char) return res.status(404).json({ error: '角色不存在' });
   let speak = sanitizeInlineBeans(String(text || ''), { forceStrip: true });
   try {
     const { stripMindsetEcho } = require('./emoji-helper');
     speak = stripMindsetEcho(speak, char?.mindset);
   } catch { /* ignore */ }
-  const { pickCharacterVoiceId } = require('./voice-lane-helper');
+  const { pickCharacterVoiceId, normalizeTtsProvider, ttsProviderVoiceLabel } = require('./voice-lane-helper');
   const picked = pickCharacterVoiceId(char, { text: speak, nsfw });
   const vid = picked.voiceId;
+  const ttsProvider = normalizeTtsProvider(char.tts_provider);
   if (!vid) {
-    return res.status(400).json({ error: '请先在角色中填写 MiniMax 声音 ID' });
+    return res.status(400).json({ error: `请先在角色中填写 ${ttsProviderVoiceLabel(ttsProvider)} 声音 ID` });
   }
   if (!String(speak || '').trim()) {
     return res.status(400).json({ error: '没有可朗读的内容' });
@@ -11576,6 +11718,7 @@ app.post('/api/tts', async (req, res) => {
       emotionState: char.emotion_state,
       characterId,
       inCall: !!req.body?.inCall,
+      provider: ttsProvider,
     });
     console.log('[TTS] ok voice_id=%s lane=%s char=%s bytes=%d', vid, picked.lane, characterId, buffer.length);
     res.set('Content-Type', 'audio/mp3');
@@ -11838,7 +11981,7 @@ async function runCharacterCameraLookFollowUp(opts = {}) {
     return null;
   }
   // 这一帧已经作为当前消息附在下面了；历史里那条照片气泡只留文字占位，别发两遍
-  const apiHistory = buildHistoryApiMessages(history, reqBase, { noRobotFrameImage: true });
+  const apiHistory = await buildHistoryApiMessages(history, reqBase, { noRobotFrameImage: true });
   let userContent = visionPack.userParts;
   if (apiHistory.length && apiHistory[apiHistory.length - 1]?.role === 'user') {
     const last = apiHistory.pop();
@@ -12118,7 +12261,7 @@ async function runCharacterMicListenFollowUp(opts = {}) {
     return null;
   }
   // 当前这条会作为 userContent 附真音频；历史里那条隐藏语音只留文字占位，别发两遍
-  const apiHistory = buildHistoryApiMessages(history, reqBase, {
+  const apiHistory = await buildHistoryApiMessages(history, reqBase, {
     noRobotMicAudio: true,
     resolveAudioPart: (u) => resolveChatAudioPart(u, { model }),
   });
@@ -12332,6 +12475,7 @@ async function runCharacterMicListenFollowUp(opts = {}) {
         const { callTTS: ttsFn } = require('./api-helper');
         const buffer = await ttsFn(settings, aiContent.slice(0, 500), String(char.voice_id).trim(), {
           forSpeaker: true,
+          provider: require('./voice-lane-helper').normalizeTtsProvider(char.tts_provider),
         });
         const filename = `robot_say_${Date.now()}.mp3`;
         const fp = path.join(UPLOADS_PATH, filename);
@@ -13087,7 +13231,7 @@ app.post('/api/robot/touch', async (req, res) => {
           };
           const systemPrompt = buildSystemPrompt(char, settings, extraSystemPrompt, promptOpts);
           const reqBase = robotPublicBase(req, settings);
-          const apiHistory = buildHistoryApiMessages(history, reqBase, {});
+          const apiHistory = await buildHistoryApiMessages(history, reqBase, {});
           while (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'user') {
             apiHistory.pop();
           }
@@ -13739,7 +13883,7 @@ app.post('/api/robot/chat', async (req, res) => {
     || req.body?.attachCamera === 1
     || req.body?.attachCamera === '1';
   // attachCamera 会把当前帧附在 userContent 上，历史里那条照片气泡就别再发一遍
-  const apiHistory = buildHistoryApiMessages(history, reqBase, {
+  const apiHistory = await buildHistoryApiMessages(history, reqBase, {
     noRobotFrameImage: attachCamera,
   });
   // 去掉末尾刚写入的用户句，避免与 callChatAPIComplete 的 userContent 重复
@@ -13840,6 +13984,7 @@ app.post('/api/robot/chat', async (req, res) => {
       const buffer = await callTTS(settings, speak.slice(0, 500), voiceId, {
         emotion: parsed.emotion,
         forSpeaker: true,
+        provider: require('./voice-lane-helper').normalizeTtsProvider(char.tts_provider),
       });
       if (buffer && buffer.length) {
         audioBase64 = Buffer.from(buffer).toString('base64');
@@ -14595,6 +14740,46 @@ app.post('/api/minimax/test', async (req, res) => {
   }
 });
 
+app.post('/api/fish/tts-test', async (req, res) => {
+  const baseSettings = getSettings();
+  const settings = {
+    ...baseSettings,
+    fish_api_key: String(req.body?.key || baseSettings.fish_api_key || '').trim(),
+    fish_api_url: String(req.body?.url || baseSettings.fish_api_url || '').trim(),
+    fish_tts_model: String(req.body?.model || baseSettings.fish_tts_model || 's2.1-pro').trim(),
+  };
+  const voiceId = String(req.body?.voiceId || '').trim();
+  if (!voiceId) return res.status(400).json({ ok: false, error: '请提供测试用声音 ID' });
+  try {
+    const buffer = await callTTS(settings, '你好，这是一条 Fish Audio 语音测试。', voiceId, {
+      provider: 'fish',
+    });
+    res.json({ ok: true, bytes: buffer.length });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/elevenlabs/tts-test', async (req, res) => {
+  const baseSettings = getSettings();
+  const settings = {
+    ...baseSettings,
+    elevenlabs_api_key: String(req.body?.key || baseSettings.elevenlabs_api_key || '').trim(),
+    elevenlabs_api_url: String(req.body?.url || baseSettings.elevenlabs_api_url || '').trim(),
+    elevenlabs_tts_model: String(req.body?.model || baseSettings.elevenlabs_tts_model || 'eleven_v4').trim(),
+  };
+  const voiceId = String(req.body?.voiceId || '').trim();
+  if (!voiceId) return res.status(400).json({ ok: false, error: '请提供测试用声音 ID' });
+  try {
+    const buffer = await callTTS(settings, '你好，这是一条 ElevenLabs 语音测试。[sighs]', voiceId, {
+      provider: 'elevenlabs',
+    });
+    res.json({ ok: true, bytes: buffer.length });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/sfx/test', async (req, res) => {
   const settings = {
     ...getSettings(),
@@ -14892,6 +15077,7 @@ dbModule.initDB().then(() => {
     console.log(`   手机 App 请填：http://<电脑局域网IP>:${PORT}`);
     console.log(`   数据库：${path.join(__dirname, 'nian.db')}\n`);
     setImmediate(() => {
+      dbModule.backupDBFileAsync('preboot').catch((e) => console.warn('[db] preboot', e.message));
       localizeStoredMediaRows().catch((e) => console.warn('[media] backfill', e.message));
     });
     initWS(server);

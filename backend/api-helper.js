@@ -251,7 +251,7 @@ function fallbackMessageTextForAi(msg) {
   return role === 'user' ? '[用户消息]' : '[消息]';
 }
 
-function buildMessageContent(msg, baseUrl, options = {}) {
+async function buildMessageContent(msg, baseUrl, options = {}) {
   const role = msg.role === 'user' ? 'user' : 'assistant';
   const type = msg.type || 'text';
   const content = msg.content || '';
@@ -267,7 +267,7 @@ function buildMessageContent(msg, baseUrl, options = {}) {
     }
     const label = '[这是你自己通过桌上小机的镜头看到的画面，不是用户发给你的图。'
       + '按你看见的内容自然回应；看不清就说看不清，不要编图里没有的东西]';
-    const src = localUploadToDataUrl(content) || resolveImage(content, baseUrl);
+    const src = localUploadToDataUrl(content) || await Promise.resolve(resolveImage(content, baseUrl));
     return {
       role,
       content: [
@@ -291,7 +291,7 @@ function buildMessageContent(msg, baseUrl, options = {}) {
       role,
       content: [
         { type: 'text', text: label },
-        { type: 'image_url', image_url: { url: resolveImage(content, baseUrl) } },
+        { type: 'image_url', image_url: { url: await Promise.resolve(resolveImage(content, baseUrl)) } },
       ],
     };
   }
@@ -365,7 +365,7 @@ function buildMessageContent(msg, baseUrl, options = {}) {
   return { role, content: body };
 }
 
-function buildHistoryApiMessages(history, baseUrl, options = {}) {
+async function buildHistoryApiMessages(history, baseUrl, options = {}) {
   if (!history?.length) return [];
   try { require('./emoji-helper').applyCallChannelMarks(history); } catch {}
   const { timeNoteUserId } = options;
@@ -411,7 +411,9 @@ function buildHistoryApiMessages(history, baseUrl, options = {}) {
     }
     if (lastRobotFrameIdx >= 0 && lastRobotMicIdx >= 0) break;
   }
-  return history.map((msg, idx) => {
+  const out = [];
+  for (let idx = 0; idx < history.length; idx++) {
+    const msg = history[idx];
     const isTimeNoteTarget = timeNoteUserId != null
       ? String(msg.id) === String(timeNoteUserId)
       : idx === fallbackUserIdx;
@@ -419,7 +421,7 @@ function buildHistoryApiMessages(history, baseUrl, options = {}) {
     const imageTextOnly = isImage && idx !== lastUserImageIdx && !lastAssistantImageIdxs.includes(idx);
     const isUserVoice = msg.role === 'user' && msg.type === 'voice' && parseUserVoicePayload(msg.content);
     const voiceTextOnly = isUserVoice && idx !== lastUserVoiceIdx;
-    return buildMessageContent(msg, baseUrl, {
+    out.push(await buildMessageContent(msg, baseUrl, {
       ...options,
       isLast: isTimeNoteTarget,
       imageTextOnly,
@@ -428,8 +430,9 @@ function buildHistoryApiMessages(history, baseUrl, options = {}) {
         && (options.noRobotFrameImage || idx !== lastRobotFrameIdx),
       robotMicTextOnly: isRobotMicMessage(msg)
         && (options.noRobotMicAudio || idx !== lastRobotMicIdx),
-    });
-  });
+    }));
+  }
+  return out;
 }
 
 function detectAvatarChangeIntent(history) {
@@ -860,7 +863,7 @@ function stripInlineAudioFromMessages(messages) {
   return changed;
 }
 
-async function postChatCompletionsOnce(apiUrl, apiKey, body, timeout) {
+async function postChatCompletionsOnce(apiUrl, apiKey, body, timeout, signal) {
   const r = await fetchWithTimeout(`${apiUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -869,6 +872,7 @@ async function postChatCompletionsOnce(apiUrl, apiKey, body, timeout) {
     },
     body: JSON.stringify(body),
     timeout: timeout || 120000,
+    signal,
   });
   const ct = r.headers.get('content-type') || '';
   const txtProbe = !ct.includes('application/json');
@@ -880,19 +884,33 @@ async function postChatCompletionsOnce(apiUrl, apiKey, body, timeout) {
   return r.json();
 }
 
-async function postChatCompletions(baseUrl, apiKey, body, timeout, retries = 2) {
+function clientAbortError() {
+  const e = new Error('请求已取消');
+  e.code = 'CLIENT_ABORT';
+  return e;
+}
+
+function isClientAbortError(err, signal) {
+  if (signal?.aborted || err?.code === 'CLIENT_ABORT') return true;
+  return false;
+}
+
+async function postChatCompletions(baseUrl, apiKey, body, timeout, retries = 2, signal) {
   const root = String(baseUrl || '').replace(/\/+$/, '');
   const maxAttempts = Math.max(1, Number(retries) + 1) || 3;
   let lastErr;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) throw clientAbortError();
     try {
       try {
-        return await postChatCompletionsOnce(root, apiKey, body, timeout);
+        return await postChatCompletionsOnce(root, apiKey, body, timeout, signal);
       } catch (e1) {
+        if (isClientAbortError(e1, signal)) throw clientAbortError();
         if (!root.endsWith('/v1')) {
           try {
-            return await postChatCompletionsOnce(`${root}/v1`, apiKey, body, timeout);
+            return await postChatCompletionsOnce(`${root}/v1`, apiKey, body, timeout, signal);
           } catch (e2) {
+            if (isClientAbortError(e2, signal)) throw clientAbortError();
             throw e1;
           }
         }
@@ -900,6 +918,7 @@ async function postChatCompletions(baseUrl, apiKey, body, timeout, retries = 2) 
       }
     } catch (e) {
       lastErr = e;
+      if (isClientAbortError(e, signal)) throw clientAbortError();
       if (!isRetryableChatUpstreamError(e) || attempt >= maxAttempts - 1) throw e;
       const waitMs = 800 * (attempt + 1);
       console.warn(`[chat] 上游瞬时失败，${waitMs}ms 后重试 ${attempt + 1}/${maxAttempts - 1}:`, String(e?.message || e).slice(0, 160));
@@ -932,6 +951,7 @@ async function completeChatTurn(opts = {}) {
     : parseFloat((opts.settings && opts.settings.chat_temperature) || '0.8');
   const maxTokens = parseInt(opts.maxTokens || opts.max_tokens || '1000', 10) || 1000;
   const timeout = opts.timeout || 120000;
+  const signal = opts.signal;
   const messages = Array.isArray(opts.messages) ? opts.messages.slice() : [];
   let tools = Array.isArray(opts.tools) && opts.tools.length ? opts.tools : null;
 
@@ -967,11 +987,11 @@ async function completeChatTurn(opts = {}) {
   })();
   async function postOrRetryWithoutAudio(withTools, choice) {
     try {
-      return await postChatCompletions(baseUrl, apiKey, makeBody(messages, withTools, choice), timeout);
+      return await postChatCompletions(baseUrl, apiKey, makeBody(messages, withTools, choice), timeout, 2, signal);
     } catch (err) {
       if (looksLikeInlineAudioRejected(err) && messagesHaveInlineAudio(messages) && stripInlineAudioFromMessages(messages)) {
         console.warn('[chat-voice] 音频附件被拒，去掉后再请求：', err.message);
-        return await postChatCompletions(baseUrl, apiKey, makeBody(messages, withTools, choice), timeout);
+        return await postChatCompletions(baseUrl, apiKey, makeBody(messages, withTools, choice), timeout, 2, signal);
       }
       throw err;
     }
@@ -1177,7 +1197,7 @@ async function completeChatTurn(opts = {}) {
       });
     }
     try {
-      const data2 = await postChatCompletions(baseUrl, apiKey, makeBody(followMsgs, true, 'auto'), timeout);
+      const data2 = await postChatCompletions(baseUrl, apiKey, makeBody(followMsgs, true, 'auto'), timeout, 2, signal);
       const msg2 = data2?.choices?.[0]?.message || {};
       const nextPending = [];
       for (const c of robotTools.parseToolCalls(msg2)) {
@@ -1785,15 +1805,265 @@ function buildTtsAudioSetting(settings, forSpeaker) {
   };
 }
 
+function normalizeElevenTtsBase(raw) {
+  let base = String(raw || '').trim().replace(/\/+$/, '');
+  if (!base) return 'https://api.elevenlabs.io';
+  base = base.replace(/\/v1\/text-to-speech(?:\/[^/?]*)?(?:\?.*)?$/i, '');
+  base = base.replace(/\/v1\/sound-generation(?:\?.*)?$/i, '');
+  base = base.replace(/\/v1$/i, '');
+  return base.replace(/\/+$/, '') || 'https://api.elevenlabs.io';
+}
+
+function resolveElevenTtsModel(settings) {
+  const raw = String(settings?.elevenlabs_tts_model || '').trim();
+  if (/^eleven_[a-z0-9_]+$/i.test(raw)) return raw.slice(0, 64);
+  return 'eleven_v4';
+}
+
+function elevenTtsErrorText(buf) {
+  const errText = Buffer.isBuffer(buf) ? buf.toString('utf8').slice(0, 400) : String(buf || '').slice(0, 400);
+  try {
+    const j = JSON.parse(errText);
+    const detail = j?.detail;
+    if (typeof detail === 'string') return detail;
+    if (detail?.message) return String(detail.message);
+    if (j?.message) return String(j.message);
+  } catch { /* keep text */ }
+  return errText || 'ElevenLabs 语音失败';
+}
+
+/**
+ * ElevenLabs 语音合成。方括号表演标签原样送进去。
+ * 音色可以是语音库、预设或克隆，voice_id 填在角色上。
+ */
+async function callElevenLabsTTS(settings, text, voiceId, opts = {}) {
+  const apiKey = String(settings?.elevenlabs_api_key || '').trim();
+  if (!apiKey) throw new Error('请先在设置中填写 ElevenLabs API Key');
+  const vid = String(voiceId || '').trim();
+  if (!vid) throw new Error('请先在角色中填写 ElevenLabs 声音 ID');
+
+  const forSpeaker = !!opts.forSpeaker;
+  const inCall = !!opts.inCall && !forSpeaker;
+  const {
+    sanitizeForSpeech,
+    extractSpeechRateTag,
+    extractVoiceLaneSegments,
+    stripVoiceLaneTags,
+    voiceLaneNeedsSplit,
+    voiceLaneProsody,
+  } = require('./speech-text-helper');
+  const taggedSpeed = extractSpeechRateTag(text);
+  const rawDisplay = stripImageDirectiveForDisplay(text);
+  const naturalPhoneLike = inCall || !forSpeaker;
+  const sanitizeOpts = { dropAsides: forSpeaker || naturalPhoneLike, keepAudioTags: true };
+
+  let laneSegs;
+  if (naturalPhoneLike && !voiceLaneNeedsSplit(rawDisplay)) {
+    const flat = sanitizeForSpeech(stripVoiceLaneTags(rawDisplay), sanitizeOpts);
+    laneSegs = flat ? [{ lane: 'normal', text: flat }] : [];
+  } else {
+    laneSegs = extractVoiceLaneSegments(rawDisplay)
+      .map((s) => ({ lane: s.lane, text: sanitizeForSpeech(s.text, sanitizeOpts) }))
+      .filter((s) => s.text);
+  }
+  if (!laneSegs.length) throw new Error('TTS 文本为空');
+
+  const model = resolveElevenTtsModel(settings);
+  const base = normalizeElevenTtsBase(settings?.elevenlabs_api_url);
+  const loudPlace = isLoudCallTts(opts);
+
+  async function synthesizeOne(speakText, lane) {
+    const prosody = voiceLaneProsody(lane);
+    let speed = resolveTtsSpeed(text, {
+      forSpeaker,
+      settings,
+      emotion: '',
+      taggedSpeed,
+      speed: opts?.speed,
+      inCall: naturalPhoneLike,
+    });
+    speed = clampTtsSpeed(speed * (prosody.speedMul || 1));
+    if (loudPlace) speed = clampTtsSpeed(speed * 0.86);
+    const elSpeed = Math.max(0.7, Math.min(1.2, Math.round(speed * 100) / 100));
+    const url = `${base}/v1/text-to-speech/${encodeURIComponent(vid)}?output_format=mp3_44100_128`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        Accept: 'audio/mpeg',
+      },
+      body: JSON.stringify({
+        text: speakText,
+        model_id: model,
+        apply_text_normalization: 'off',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          speed: elSpeed,
+        },
+      }),
+      timeout: 60000,
+    });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const ct = String(resp.headers.get('content-type') || '');
+    if (!resp.ok || (/json/i.test(ct) && !isMp3Buffer(buf))) {
+      throw new Error(elevenTtsErrorText(buf) || `ElevenLabs 语音失败 HTTP ${resp.status}`);
+    }
+    if (buf.length < MIN_TTS_AUDIO_BYTES || !isMp3Buffer(buf)) {
+      throw new Error(elevenTtsErrorText(buf) || 'ElevenLabs 返回的音频为空');
+    }
+    console.log('[TTS] eleven model=%s lane=%s bytes=%d', model, lane || 'normal', buf.length);
+    return buf;
+  }
+
+  if (laneSegs.length === 1) return synthesizeOne(laneSegs[0].text, laneSegs[0].lane);
+  const buffers = [];
+  for (const seg of laneSegs) buffers.push(await synthesizeOne(seg.text, seg.lane));
+  const merged = await concatTtsMp3Buffers(buffers);
+  if (!merged?.length) throw new Error('TTS 分段拼接失败');
+  console.log('[TTS] eleven merged lanes=%d bytes=%d', laneSegs.length, merged.length);
+  return merged;
+}
+
+function normalizeFishBase(raw) {
+  let base = String(raw || '').trim().replace(/\/+$/, '');
+  if (!base) return 'https://api.fish.audio';
+  base = base.replace(/\/v1\/tts(?:\?.*)?$/i, '');
+  base = base.replace(/\/v1$/i, '');
+  return base.replace(/\/+$/, '') || 'https://api.fish.audio';
+}
+
+function resolveFishTtsModel(settings) {
+  const raw = String(settings?.fish_tts_model || '').trim();
+  if (/^[a-z0-9][a-z0-9._-]{0,40}$/i.test(raw)) return raw;
+  return 's2.1-pro';
+}
+
+function fishTtsErrorText(buf, status) {
+  const errText = Buffer.isBuffer(buf) ? buf.toString('utf8').slice(0, 400) : String(buf || '').slice(0, 400);
+  try {
+    const j = JSON.parse(errText);
+    if (j?.message) return String(j.message);
+  } catch { /* keep text */ }
+  return errText || `Fish Audio 语音失败 HTTP ${status || ''}`.trim();
+}
+
+/**
+ * Fish Audio 语音合成。reference_id 填在角色的声音 ID 上。
+ * 方括号如 [laugh] [whisper] 原样送进去。
+ */
+async function callFishTTS(settings, text, voiceId, opts = {}) {
+  const apiKey = String(settings?.fish_api_key || '').trim();
+  if (!apiKey) throw new Error('请先在设置中填写 Fish Audio API Key');
+  const vid = String(voiceId || '').trim();
+  if (!vid) throw new Error('请先在角色中填写 Fish Audio 声音 ID');
+
+  const forSpeaker = !!opts.forSpeaker;
+  const inCall = !!opts.inCall && !forSpeaker;
+  const {
+    sanitizeForSpeech,
+    extractSpeechRateTag,
+    extractVoiceLaneSegments,
+    stripVoiceLaneTags,
+    voiceLaneNeedsSplit,
+    voiceLaneProsody,
+  } = require('./speech-text-helper');
+  const taggedSpeed = extractSpeechRateTag(text);
+  const rawDisplay = stripImageDirectiveForDisplay(text);
+  const naturalPhoneLike = inCall || !forSpeaker;
+  const sanitizeOpts = { dropAsides: forSpeaker || naturalPhoneLike, keepAudioTags: true };
+
+  let laneSegs;
+  if (naturalPhoneLike && !voiceLaneNeedsSplit(rawDisplay)) {
+    const flat = sanitizeForSpeech(stripVoiceLaneTags(rawDisplay), sanitizeOpts);
+    laneSegs = flat ? [{ lane: 'normal', text: flat }] : [];
+  } else {
+    laneSegs = extractVoiceLaneSegments(rawDisplay)
+      .map((s) => ({ lane: s.lane, text: sanitizeForSpeech(s.text, sanitizeOpts) }))
+      .filter((s) => s.text);
+  }
+  if (!laneSegs.length) throw new Error('TTS 文本为空');
+
+  const model = resolveFishTtsModel(settings);
+  const base = normalizeFishBase(settings?.fish_api_url);
+  const loudPlace = isLoudCallTts(opts);
+
+  async function synthesizeOne(speakText, lane) {
+    const prosody = voiceLaneProsody(lane);
+    let speed = resolveTtsSpeed(text, {
+      forSpeaker,
+      settings,
+      emotion: '',
+      taggedSpeed,
+      speed: opts?.speed,
+      inCall: naturalPhoneLike,
+    });
+    speed = clampTtsSpeed(speed * (prosody.speedMul || 1));
+    if (loudPlace) speed = clampTtsSpeed(speed * 0.86);
+    const fishSpeed = Math.max(0.5, Math.min(2, Math.round(speed * 100) / 100));
+    const lang = inferLanguageBoost(speakText) === 'Chinese' ? 'zh-CN' : '';
+    const resp = await fetch(`${base}/v1/tts`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        model,
+      },
+      body: JSON.stringify({
+        text: speakText,
+        reference_id: vid,
+        format: 'mp3',
+        mp3_bitrate: 128,
+        sample_rate: 44100,
+        latency: 'normal',
+        temperature: 0.7,
+        top_p: 0.7,
+        normalize: true,
+        ...(lang ? { language: lang } : {}),
+        prosody: { speed: fishSpeed, volume: 0, normalize_loudness: true },
+      }),
+      timeout: 60000,
+    });
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const ct = String(resp.headers.get('content-type') || '');
+    if (!resp.ok || (/json/i.test(ct) && !isMp3Buffer(buf))) {
+      throw new Error(fishTtsErrorText(buf, resp.status));
+    }
+    if (buf.length < MIN_TTS_AUDIO_BYTES || !isMp3Buffer(buf)) {
+      throw new Error(fishTtsErrorText(buf, resp.status) || 'Fish Audio 返回的音频为空');
+    }
+    console.log('[TTS] fish model=%s lane=%s bytes=%d', model, lane || 'normal', buf.length);
+    return buf;
+  }
+
+  if (laneSegs.length === 1) return synthesizeOne(laneSegs[0].text, laneSegs[0].lane);
+  const buffers = [];
+  for (const seg of laneSegs) buffers.push(await synthesizeOne(seg.text, seg.lane));
+  const merged = await concatTtsMp3Buffers(buffers);
+  if (!merged?.length) throw new Error('TTS 分段拼接失败');
+  console.log('[TTS] fish merged lanes=%d bytes=%d', laneSegs.length, merged.length);
+  return merged;
+}
+
 /**
  * @param {object} settings
  * @param {string} text
  * @param {string} voiceId
- * @param {{ emotion?: string, mood?: string, forSpeaker?: boolean }} [opts]
+ * @param {{ emotion?: string, mood?: string, forSpeaker?: boolean, provider?: string }} [opts]
  *   forSpeaker：这段是要从小机喇叭放出来的，旁白不念、按设备采样率合成
+ *   provider：minimax | elevenlabs | fish，由角色决定
  *   文本里可用 [软声]…[/软声] / [沉声]…[/沉声]：同一 voice_id 上分段调 pitch 再拼接
  */
 async function callTTS(settings, text, voiceId, opts = {}) {
+  const { normalizeTtsProvider } = require('./voice-lane-helper');
+  const provider = normalizeTtsProvider(opts?.provider);
+  if (provider === 'elevenlabs') {
+    return callElevenLabsTTS(settings, text, voiceId, opts);
+  }
+  if (provider === 'fish') {
+    return callFishTTS(settings, text, voiceId, opts);
+  }
   const apiKey = normalizeMinimaxApiKey(settings.minimax_api_key);
   if (!apiKey) {
     throw new Error('请先在设置中填写 MiniMax API Key');
@@ -7951,7 +8221,7 @@ async function describeUserAppearance(settings, imageUrl, publicBase = '') {
   if (!abs) return '';
   try {
     const picMsg = { id: 'user_selfie_' + Date.now(), role: 'user', content: abs, type: 'image' };
-    const apiHistory = buildHistoryApiMessages([picMsg], publicBase || '', {});
+    const apiHistory = await buildHistoryApiMessages([picMsg], publicBase || '', {});
     const ask = '仔细看这张用户自拍，用中文写一段客观外貌描述（40～100字），供聊天角色认识用户长相。须包含：性别观感、大致年龄段、发色发型、五官与肤色、体型/穿着风格、显著特征。只输出描述本身，不要称呼、不要推测性格、不要寒暄、不要用「照片里」。';
     if (apiHistory.length) {
       const last = apiHistory[apiHistory.length - 1];
@@ -7987,7 +8257,7 @@ async function describeCallWatchScene(settings, imageUrl, publicBase = '') {
   if (!abs) return '';
   try {
     const picMsg = { id: 'call_watch_' + Date.now(), role: 'user', content: abs, type: 'image' };
-    const apiHistory = buildHistoryApiMessages([picMsg], publicBase || '', {});
+    const apiHistory = await buildHistoryApiMessages([picMsg], publicBase || '', {});
     const ask = `根据这张手机画面，用中文写 2～4 句「你们正在一起看什么」。
 优先写：片名/节目/视频类型（能认就写）、此刻剧情或画面在发生什么、重要对白/字幕要点（若有）。
 禁止写：截图、屏幕、界面、状态栏、图标、通知、识图、照片。

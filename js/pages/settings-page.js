@@ -291,20 +291,35 @@ window.initSettingsPage = async function() {
         </div>
       </div>
       <div class="settings-section">
-        <div class="settings-section-title">ElevenLabs 环境音效</div>
+        <div class="settings-section-title">ElevenLabs</div>
         <div class="settings-group">
           <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:6px">
             <label class="input-label">API Key</label>
             <input class="input" id="s-elevenlabs-key" type="password" value="${escapeHtml(settings.elevenlabs_api_key||'')}" placeholder="sk_… ElevenLabs API Key">
             <span style="font-size:11px;color:var(--text-secondary);line-height:1.5">
-              环境音和角色演奏共用此 Key。申请：
+              环境音、角色演奏，以及选了 ElevenLabs 的角色语音，共用此 Key。申请：
               <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">elevenlabs.io/app/settings/api-keys</a>
-              创建 Key 时若选了 Restrict，勾选 Sound Effects（Text to Sound Effects）；选 All 不用再点。
+              创建 Key 时若选了 Restrict，勾选 Text to Speech 和 Sound Effects；选 All 不用再点。
             </span>
           </div>
           <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:6px">
             <label class="input-label">API Base URL（可选）</label>
             <input class="input" id="s-elevenlabs-url" value="${escapeHtml(settings.elevenlabs_api_url||'')}" placeholder="留空即 https://api.elevenlabs.io">
+          </div>
+          <div class="settings-row" style="flex-wrap:wrap;gap:8px">
+            <span class="settings-row-label">语音模型</span>
+            <input class="input" id="s-elevenlabs-tts-model" value="${escapeHtml(settings.elevenlabs_tts_model||'eleven_v4')}"
+              style="flex:1;min-width:140px" list="s-elevenlabs-tts-model-list">
+            <datalist id="s-elevenlabs-tts-model-list">
+              <option value="eleven_v4">
+              <option value="eleven_v4_turbo">
+              <option value="eleven_v3">
+            </datalist>
+          </div>
+          <div class="settings-row" style="gap:8px;flex-wrap:wrap;padding:12px 16px">
+            <input class="input" id="s-elevenlabs-test-voice" placeholder="测试用 voice id" style="flex:1;min-width:140px">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="testElevenlabsTts()">测试语音</button>
+            <span id="elevenlabs-tts-result" style="font-size:12px;color:var(--text-secondary);flex:1;min-width:120px"></span>
           </div>
           <div class="settings-row" style="gap:8px;flex-wrap:wrap;padding:12px 16px">
             <input class="input" id="s-sfx-test-prompt" placeholder="测试描述，如 ocean wind and waves" style="flex:1;min-width:160px">
@@ -321,6 +336,45 @@ window.initSettingsPage = async function() {
           ${sfxVolSlider('s-sfx-vol-close', '贴身声', sfxPct(settings.sfx_vol_close, 32))}
           ${sfxVolSlider('s-sfx-vol-duck', '说话时还留多少', sfxPct(settings.sfx_vol_duck, 88))}
           ${sfxVolSlider('s-sfx-vol-call-voice', '通话角色声音（100=系统音量；觉得小就拉大，最大 200）', sfxPct(settings.sfx_vol_call_voice, 115), { min: 50, max: 200 })}
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-section-title">Fish Audio 语音</div>
+        <div class="settings-group">
+          <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:6px">
+            <label class="input-label">API Key</label>
+            <input class="input" id="s-fish-key" type="password" value="${escapeHtml(settings.fish_api_key||'')}" placeholder="Fish Audio API Key">
+            <span style="font-size:11px;color:var(--text-secondary);line-height:1.5">
+              选了 Fish Audio 的角色用这把 Key。申请：
+              <a href="https://fish.audio/app/api-keys" target="_blank" rel="noopener">fish.audio/app/api-keys</a>
+              声音 ID 是语音库或自己克隆的 reference id，在音色页复制。
+            </span>
+          </div>
+          <div class="settings-row" style="flex-direction:column;align-items:flex-start;padding:14px;gap:6px">
+            <label class="input-label">API Base URL（可选）</label>
+            <input class="input" id="s-fish-url" value="${escapeHtml(settings.fish_api_url||'')}" placeholder="留空即 https://api.fish.audio">
+          </div>
+          <div class="settings-row" style="flex-wrap:wrap;gap:8px">
+            <span class="settings-row-label">语音模型</span>
+            <input class="input" id="s-fish-model" value="${escapeHtml(settings.fish_tts_model||'s2.1-pro')}"
+              style="flex:1;min-width:140px" list="s-fish-model-list">
+            <datalist id="s-fish-model-list">
+              <option value="s2.1-pro">
+              <option value="s2.1-pro-free">
+              <option value="s2-pro">
+              <option value="drama-3">
+            </datalist>
+          </div>
+          <div class="settings-row" style="gap:8px;flex-wrap:wrap;padding:12px 16px">
+            <input class="input" id="s-fish-test-voice" placeholder="测试用 reference id" style="flex:1;min-width:140px">
+            <button class="btn btn-ghost btn-sm" type="button" onclick="testFishTts()">测试语音</button>
+            <span id="fish-tts-result" style="font-size:12px;color:var(--text-secondary);flex:1;min-width:120px"></span>
+          </div>
+          <div class="settings-row settings-row--stack">
+            <div class="settings-row-sub" style="line-height:1.55">
+              没充值时模型填 s2.1-pro-free。充值后用 s2.1-pro。角色里把语音合成选成 Fish Audio，声音 ID 填 reference id。
+            </div>
+          </div>
         </div>
       </div>
       <div class="settings-section">
@@ -926,6 +980,10 @@ const API_CONFIG_FIELD_MAP = {
   minimax_model: 's-minimax-model',
   elevenlabs_api_key: 's-elevenlabs-key',
   elevenlabs_api_url: 's-elevenlabs-url',
+  elevenlabs_tts_model: 's-elevenlabs-tts-model',
+  fish_api_key: 's-fish-key',
+  fish_api_url: 's-fish-url',
+  fish_tts_model: 's-fish-model',
   image_api_url: 's-img-url',
   image_api_key: 's-img-key',
   image_model: 's-img-model',
@@ -1101,6 +1159,10 @@ window.saveAllSettings = async function() {
     minimax_model:    document.getElementById('s-minimax-model')?.value || 'speech-02-hd',
     elevenlabs_api_key: document.getElementById('s-elevenlabs-key')?.value || '',
     elevenlabs_api_url: document.getElementById('s-elevenlabs-url')?.value || '',
+    elevenlabs_tts_model: document.getElementById('s-elevenlabs-tts-model')?.value || 'eleven_v4',
+    fish_api_key: document.getElementById('s-fish-key')?.value || '',
+    fish_api_url: document.getElementById('s-fish-url')?.value || '',
+    fish_tts_model: document.getElementById('s-fish-model')?.value || 's2.1-pro',
     ...readSfxMixFromForm(),
     image_api_url:    document.getElementById('s-img-url')?.value     || '',
     image_api_key:    document.getElementById('s-img-key')?.value     || '',
@@ -1542,6 +1604,74 @@ window.fetchMinimaxModels = async function() {
   } catch(e) {
     if (btn) { btn.textContent = '获取模型'; btn.disabled = false; }
     window.showToast?.('获取失败: ' + e.message);
+  }
+};
+
+window.testFishTts = async function() {
+  const voiceId = document.getElementById('s-fish-test-voice')?.value?.trim();
+  const resultEl = document.getElementById('fish-tts-result');
+  if (!voiceId) {
+    window.showToast?.('请先填写测试用 reference id');
+    return;
+  }
+  if (resultEl) resultEl.textContent = '测试中…';
+  try {
+    const payload = {
+      fish_api_key: document.getElementById('s-fish-key')?.value || '',
+      fish_api_url: document.getElementById('s-fish-url')?.value || '',
+      fish_tts_model: document.getElementById('s-fish-model')?.value || 's2.1-pro',
+    };
+    await api.saveSettings(payload);
+    const data = await postJsonSafe('/api/fish/tts-test', {
+      voiceId,
+      key: payload.fish_api_key,
+      url: payload.fish_api_url,
+      model: payload.fish_tts_model,
+    });
+    if (resultEl) {
+      resultEl.innerHTML = data?.ok
+        ? `<span style="color:#43a047">成功，音频 ${data.bytes} 字节</span>`
+        : `<span style="color:#e57373">${escapeHtml(data?.error || '失败')}</span>`;
+    }
+    if (!data?.ok) window.showToast?.(data?.error || '语音测试失败');
+    else window.showToast?.('Fish Audio 语音测试成功');
+  } catch (e) {
+    if (resultEl) resultEl.innerHTML = `<span style="color:#e53935">${escapeHtml(e.message || '失败')}</span>`;
+    window.showToast?.('测试失败: ' + (e.message || '失败'));
+  }
+};
+
+window.testElevenlabsTts = async function() {
+  const voiceId = document.getElementById('s-elevenlabs-test-voice')?.value?.trim();
+  const resultEl = document.getElementById('elevenlabs-tts-result');
+  if (!voiceId) {
+    window.showToast?.('请先填写测试用 voice id');
+    return;
+  }
+  if (resultEl) resultEl.textContent = '测试中…';
+  try {
+    const payload = {
+      elevenlabs_api_key: document.getElementById('s-elevenlabs-key')?.value || '',
+      elevenlabs_api_url: document.getElementById('s-elevenlabs-url')?.value || '',
+      elevenlabs_tts_model: document.getElementById('s-elevenlabs-tts-model')?.value || 'eleven_v4',
+    };
+    await api.saveSettings(payload);
+    const data = await postJsonSafe('/api/elevenlabs/tts-test', {
+      voiceId,
+      key: payload.elevenlabs_api_key,
+      url: payload.elevenlabs_api_url,
+      model: payload.elevenlabs_tts_model,
+    });
+    if (resultEl) {
+      resultEl.innerHTML = data?.ok
+        ? `<span style="color:#43a047">成功，音频 ${data.bytes} 字节</span>`
+        : `<span style="color:#e57373">${escapeHtml(data?.error || '失败')}</span>`;
+    }
+    if (!data?.ok) window.showToast?.(data?.error || '语音测试失败');
+    else window.showToast?.('ElevenLabs 语音测试成功');
+  } catch (e) {
+    if (resultEl) resultEl.innerHTML = `<span style="color:#e53935">${escapeHtml(e.message || '失败')}</span>`;
+    window.showToast?.('测试失败: ' + (e.message || '失败'));
   }
 };
 

@@ -10,6 +10,20 @@ function trimVoiceId(raw) {
   return String(raw || '').trim().slice(0, 200);
 }
 
+/** 角色说话走哪家语音。空和未知都当 MiniMax，避免旧角色被切走。 */
+function normalizeTtsProvider(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'elevenlabs') return 'elevenlabs';
+  if (s === 'fish' || s === 'fishaudio') return 'fish';
+  return 'minimax';
+}
+
+function ttsProviderVoiceLabel(provider) {
+  if (provider === 'elevenlabs') return 'ElevenLabs';
+  if (provider === 'fish') return 'Fish Audio';
+  return 'MiniMax';
+}
+
 function parseEmotionState(raw) {
   if (raw == null || raw === '') return null;
   if (typeof raw === 'object') return raw;
@@ -55,6 +69,8 @@ function hasCharacterVoice(char) {
 
 module.exports = {
   trimVoiceId,
+  normalizeTtsProvider,
+  ttsProviderVoiceLabel,
   inferNsfwVoiceLane,
   pickCharacterVoiceId,
   hasCharacterVoice,

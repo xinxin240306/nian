@@ -802,6 +802,11 @@ function stripResidualDirectiveTags(text, opts = {}) {
   t = t.replace(/[\[【［]\s*(?:文字|语音|语音条|语音消息)\s*[\]】］]\s*/g, '');
   // 单独一行的空标记残骸（引用/撤回等），但保留位置/链接/网页卡开闭行、以及单独的小黄豆
   t = t.replace(/^\s*[\[【][^\]】]{0,12}[\]】]\s*$/gm, (line) => {
+    try {
+      const { isElevenAudioTag } = require('./speech-text-helper');
+      const inner = line.replace(/^\s*[\[【［]\s*|\s*[\]】］]\s*$/g, '');
+      if (isElevenAudioTag(inner)) return line.trim();
+    } catch { /* ignore */ }
     if (/[\[【［]\s*\/?\s*(?:发送\s*)?(?:位置|链接|分享|网页卡|前端卡)\s*[\]】］]/i.test(line)) return line;
     // [换头像] 要留到换头像判断之后再剥，单独一行时不能当空标记删掉
     if (/[\[【［]\s*(?:换头像|同意换头像)\s*[\]】］]/.test(line)) return line;
@@ -852,6 +857,9 @@ function isBareMediaLabel(text) {
 function isDirectiveOnlyText(text) {
   const raw = String(text || '').trim();
   if (!raw) return true;
+  try {
+    if (require('./speech-text-helper').containsOnlyElevenAudio(raw)) return false;
+  } catch { /* ignore */ }
   if (isPeriodOnlyText(raw) || isBareMediaLabel(raw)) return true;
   if (isBeanOnlyText(raw)) return false;
   const cleaned = stripResidualDirectiveTags(raw);
@@ -2526,7 +2534,14 @@ function userRequestsVoiceMessage(text) {
 function buildVoiceMessagePromptSection(char) {
   if (Number(char?.voice_messages) !== 1) return '';
   if (!String(char?.voice_id || '').trim()) return '';
-  return `【语音条】照常按【语言风格】写要说的话；可能整轮是文字或语音条。不要写「语音」「（语音）」「[语音]」「这是语音」当正文。不要写 (laughs)(sighs)、emmm；玩笑骂人时句首写 [语气:调侃]（用户看不见）。
+  let act = '不要写 (laughs)(sighs)、emmm；';
+  try {
+    const provider = require('./voice-lane-helper').normalizeTtsProvider(char?.tts_provider);
+    const speech = require('./speech-text-helper');
+    if (provider === 'elevenlabs') act = `${speech.buildElevenAudioTagHint()} `;
+    else if (provider === 'fish') act = `${speech.buildFishAudioTagHint()} `;
+  } catch { /* ignore */ }
+  return `【语音条】照常按【语言风格】写要说的话；可能整轮是文字或语音条。不要写「语音」「（语音）」「[语音]」「这是语音」当正文。${act}玩笑骂人时句首写 [语气:调侃]（用户看不见）。
 语音条≠电话：想实时听对方、连着聊，用【电话 / 视频】自己打过去，不要只让对方发语音条。`;
 }
 

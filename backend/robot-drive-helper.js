@@ -1172,7 +1172,7 @@ async function executeRobotOutreach(char, settings, opts = {}) {
   });
 
   const userContent = '（桌边主动靠近：按【本次意图】对用户说或做，不要长文）';
-  const apiHistory = buildHistoryApiMessages(history, reqBase, {});
+  const apiHistory = await buildHistoryApiMessages(history, reqBase, {});
   while (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'user') apiHistory.pop();
 
   let rawAi = '';
@@ -1283,6 +1283,7 @@ async function executeRobotOutreach(char, settings, opts = {}) {
         emotion: parsed.emotion,
         mood: char.mood,
         forSpeaker: true,
+        provider: require('./voice-lane-helper').normalizeTtsProvider(char.tts_provider),
       });
       const rel = saveRobotSpeechFile(buffer);
       if (rel) {

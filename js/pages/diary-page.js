@@ -678,6 +678,39 @@ window.initDiaryPage = async function() {
   }
 };
 
+function readCachedList(key) {
+  const row = lsGet(key, null);
+  return Array.isArray(row) ? row : null;
+}
+
+function writeCachedList(key, items) {
+  if (!key || !Array.isArray(items)) return;
+  lsSet(key, items);
+}
+
+function diaryListKey() {
+  const book = _currentBook;
+  if (!book) return '';
+  return book.type === 'user' ? 'secret_diary_user' : `secret_diary_ai_${book.charId}`;
+}
+
+const SHELF_CACHE_KEY = 'secret_shelf_meta';
+const MEMO_CACHE_KEY = 'secret_memo_user';
+
+function sectionShell(body) {
+  return `<div class="secret-section-body" style="position:relative;z-index:1">
+      <div class="secret-open-desk">
+        <div class="secret-open-book is-list">
+          <div class="secret-open-book-binding" aria-hidden="true"></div>
+          <div class="secret-open-book-sheet">
+            <div class="secret-section-hint">${escapeHtml(SECTION_HINTS[_section] || '')}</div>
+            ${body}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function showShelf() {
   _view = 'shelf';
   _currentBook = null;
@@ -710,10 +743,12 @@ async function showShelf() {
   const oldPat = content.querySelector('.secret-paper-pattern');
   if (oldPat) oldPat.remove();
 
-  const cacheFresh = _shelfCache && (Date.now() - (_shelfCache.at || 0) < 30_000);
-  if (_shelfCache?.diaries && _shelfCache?.sharedBooks) {
-    paintShelf(_shelfCache.diaries, _shelfCache.sharedBooks);
-    if (cacheFresh) return;
+  const storedShelf = readCachedList(SHELF_CACHE_KEY);
+  if (_shelfCache?.diaries) {
+    paintShelf(_shelfCache.diaries, _shelfCache.sharedBooks || []);
+  } else if (storedShelf) {
+    _shelfCache = { diaries: storedShelf, sharedBooks: [], at: 0 };
+    paintShelf(storedShelf, []);
   } else {
     content.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
   }
@@ -725,9 +760,10 @@ async function showShelf() {
       api.getDiaries({ meta: '1' }),
     ]);
     _shelfCache = { diaries: allDiaries, sharedBooks: [], at: Date.now() };
-    paintShelf(allDiaries, []);
+    writeCachedList(SHELF_CACHE_KEY, allDiaries);
+    if (_view === 'shelf') paintShelf(allDiaries, []);
   } catch (e) {
-    if (!_shelfCache) {
+    if (!_shelfCache && !storedShelf) {
       content.innerHTML = `<div class="empty-state"><div class="empty-text">${escapeHtml(e.message)}</div></div>`;
     }
   }
@@ -950,50 +986,81 @@ window.switchSecretSection = async function(sec) {
 
 async function renderBookSection() {
   const content = document.getElementById('diary-content');
-  content.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+  if (_section === 'us' || _section === 'heart') {
+    _section = 'diary';
+  }
+  const token = `${_currentBook?.type || ''}:${_currentBook?.charId || 0}:${_section}`;
+  const cachedBody = cachedSectionBody();
+  if (cachedBody != null) {
+    content.innerHTML = sectionShell(cachedBody);
+    applySectionChrome(content);
+  } else {
+    content.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+  }
 
   try {
-    if (_section === 'us' || _section === 'heart') {
-      _section = 'diary';
-    }
     let body = '';
     if (_section === 'diary') body = await renderDiaryListHtml();
     else if (_section === 'memo') body = await renderPhoneMemoListHtml();
+    if (_view !== 'section') return;
+    if (`${_currentBook?.type || ''}:${_currentBook?.charId || 0}:${_section}` !== token) return;
 
-    content.innerHTML = `<div class="secret-section-body" style="position:relative;z-index:1">
-      <div class="secret-open-desk">
-        <div class="secret-open-book is-list">
-          <div class="secret-open-book-binding" aria-hidden="true"></div>
-          <div class="secret-open-book-sheet">
-            <div class="secret-section-hint">${escapeHtml(SECTION_HINTS[_section] || '')}</div>
-            ${body}
-          </div>
-        </div>
-      </div>
-    </div>`;
-    content.style.position = 'relative';
-    content.style.minHeight = '100%';
-    if (_section === 'memo') {
-      content.style.background = '';
-    } else {
-      // 列表用木质桌面底，纸张效果留给点开后的打开本子
-      content.style.background = '#d9cbb8';
-      const oldPat = content.querySelector('.secret-paper-pattern');
-      if (oldPat) oldPat.remove();
-    }
+    content.innerHTML = sectionShell(body);
+    applySectionChrome(content);
   } catch (e) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-text">${escapeHtml(e.message || '加载失败')}</div></div>`;
+    if (cachedBody == null) {
+      content.innerHTML = `<div class="empty-state"><div class="empty-text">${escapeHtml(e.message || '加载失败')}</div></div>`;
+    }
   }
 }
 
-async function renderDiaryListHtml() {
-  const { type, charId } = _currentBook;
-  let entries;
-  if (type === 'user') {
-    entries = (await api.getDiaries({ role: 'user' })).filter(d => !d.character_id);
+function applySectionChrome(content) {
+  content.style.position = 'relative';
+  content.style.minHeight = '100%';
+  if (_section === 'memo') {
+    content.style.background = '';
   } else {
-    entries = await api.getDiaries({ charId, role: 'ai' });
+    content.style.background = '#d9cbb8';
+    const oldPat = content.querySelector('.secret-paper-pattern');
+    if (oldPat) oldPat.remove();
   }
+}
+
+function slimDiaryEntry(d) {
+  return {
+    id: d.id,
+    date: d.date || '',
+    title: d.title || '',
+    content: String(d.content || '').slice(0, 80),
+    user_peeked: d.user_peeked ? 1 : 0,
+    character_id: d.character_id || 0,
+  };
+}
+
+function slimMemoNote(n) {
+  return {
+    id: n.id,
+    content: String(n.content || ''),
+    note_at: n.note_at || n.date || '',
+    date: n.date || '',
+  };
+}
+
+function cachedSectionBody() {
+  if (_section === 'diary') {
+    const entries = readCachedList(diaryListKey());
+    if (!entries) return null;
+    return diaryEntriesToHtml(entries, _currentBook?.type);
+  }
+  if (_section === 'memo') {
+    const notes = readCachedList(MEMO_CACHE_KEY);
+    if (!notes) return null;
+    return memoNotesToHtml(notes);
+  }
+  return null;
+}
+
+function diaryEntriesToHtml(entries, type) {
   if (!entries.length) {
     return type === 'user'
       ? `<div class="empty-state"><div class="empty-icon">📒</div><div class="empty-text">还没有日记<br>点右上角「＋」开始写</div></div>`
@@ -1036,9 +1103,28 @@ async function renderDiaryListHtml() {
   return html;
 }
 
-/** 手机式备忘录：按时间倒序，点进全屏编辑 */
-async function renderPhoneMemoListHtml() {
-  const notes = await api.getSecretNotes({ charId: 0, role: 'user', section: 'memo' });
+window.prefetchSecretDiary = async function(charId) {
+  const id = Number(charId);
+  if (!id) return;
+  try {
+    const entries = await api.getDiaries({ charId: id, role: 'ai' });
+    writeCachedList(`secret_diary_ai_${id}`, entries.map(slimDiaryEntry));
+  } catch { /* 下次打开再拉 */ }
+};
+
+async function renderDiaryListHtml() {
+  const { type, charId } = _currentBook;
+  let entries;
+  if (type === 'user') {
+    entries = (await api.getDiaries({ role: 'user' })).filter(d => !d.character_id);
+  } else {
+    entries = await api.getDiaries({ charId, role: 'ai' });
+  }
+  writeCachedList(diaryListKey(), entries.map(slimDiaryEntry));
+  return diaryEntriesToHtml(entries, type);
+}
+
+function memoNotesToHtml(notes) {
   if (!notes.length) {
     return `<div class="empty-state"><div class="empty-icon">📝</div>
       <div class="empty-text">还没有备忘录<br>点右上角「＋」新建，不限格式</div></div>`;
@@ -1058,6 +1144,14 @@ async function renderPhoneMemoListHtml() {
   }).join('')}</div>`;
 }
 
+/** 手机式备忘录：按时间倒序，点进全屏编辑 */
+async function renderPhoneMemoListHtml() {
+  const notes = await api.getSecretNotes({ charId: 0, role: 'user', section: 'memo' });
+  notes.sort((a, b) => String(b.note_at || b.date || '').localeCompare(String(a.note_at || a.date || '')));
+  writeCachedList(MEMO_CACHE_KEY, notes.map(slimMemoNote));
+  return memoNotesToHtml(notes);
+}
+
 window.openPhoneMemoEditor = async function(id = null) {
   _phoneMemoEditId = id;
   const ta = document.getElementById('memo-content-input');
@@ -1069,16 +1163,27 @@ window.openPhoneMemoEditor = async function(id = null) {
     if (delBtn) delBtn.style.display = 'none';
     if (timeEl) timeEl.textContent = '';
   } else {
+    const cached = (readCachedList(MEMO_CACHE_KEY) || []).find((x) => Number(x.id) === Number(id));
+    if (cached) {
+      ta.value = cached.content || '';
+      if (delBtn) delBtn.style.display = '';
+      if (timeEl) timeEl.textContent = (cached.note_at || cached.date || '').replace('T', ' ').slice(0, 16);
+    }
     try {
       const notes = await api.getSecretNotes({ charId: 0, role: 'user', section: 'memo' });
+      writeCachedList(MEMO_CACHE_KEY, notes.map(slimMemoNote));
       const n = notes.find(x => x.id === id);
-      if (!n) return;
-      ta.value = n.content || '';
-      if (delBtn) delBtn.style.display = '';
-      if (timeEl) timeEl.textContent = (n.note_at || n.date || '').replace('T', ' ').slice(0, 16);
+      if (!n && !cached) return;
+      if (n) {
+        ta.value = n.content || '';
+        if (delBtn) delBtn.style.display = '';
+        if (timeEl) timeEl.textContent = (n.note_at || n.date || '').replace('T', ' ').slice(0, 16);
+      }
     } catch (e) {
-      window.showToast?.(e.message || '加载失败');
-      return;
+      if (!cached) {
+        window.showToast?.(e.message || '加载失败');
+        return;
+      }
     }
   }
   document.getElementById('memo-edit-overlay')?.classList.add('active');

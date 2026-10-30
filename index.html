@@ -122,7 +122,7 @@
       100% { opacity: 0; transform: scale(1.04); filter: blur(4px); }
     }
   </style>
-  <link rel="stylesheet" href="/css/style.css?v=167">
+  <link rel="stylesheet" href="/css/style.css?v=171">
   <link rel="stylesheet" href="/css/circle.css?v=1">
   <link rel="stylesheet" href="/css/music-card.css?v=1">
   <link rel="stylesheet" href="/css/music-sync.css?v=1">
@@ -1107,8 +1107,19 @@
             <div class="settings-section-title">语音</div>
             <div class="settings-group">
               <div class="settings-row" style="align-items:center;gap:10px">
-                <span class="settings-row-label" style="flex:1">MiniMax 声音 ID</span>
-                <input type="text" id="cs-voice-id" class="input" placeholder="如 Chinese (Mandarin)_Warm_Girl" style="width:160px;text-align:right">
+                <div class="settings-row-label" style="flex:1">
+                  <div>语音合成</div>
+                  <div class="settings-row-sub">MiniMax、ElevenLabs 或 Fish Audio。声音 ID 填对应平台的音色；方括号表演只在后两家生效</div>
+                </div>
+                <select class="input" id="cs-tts-provider" style="width:140px">
+                  <option value="minimax">MiniMax</option>
+                  <option value="elevenlabs">ElevenLabs</option>
+                  <option value="fish">Fish Audio</option>
+                </select>
+              </div>
+              <div class="settings-row" style="align-items:center;gap:10px">
+                <span class="settings-row-label" style="flex:1">声音 ID</span>
+                <input type="text" id="cs-voice-id" class="input" placeholder="对应平台的声音 ID" style="width:160px;text-align:right">
               </div>
               <div class="settings-row">
                 <div class="settings-row-label">
@@ -1387,6 +1398,8 @@
 <div id="series-page" class="page"></div>
 <div id="robot-page" class="page"></div>
 <div id="mcp-page" class="page"></div>
+<div id="xhs-screen-page" class="page"></div>
+<div id="xhs-me-page" class="page"></div>
 <div id="impression-page" class="page"></div>
 <div id="wardrobe-page" class="page"></div>
 <div id="appearance-page" class="page"></div>
@@ -1396,7 +1409,7 @@
 <div id="postoffice-page" class="page"></div>
 <div id="tieba-page" class="page"></div>
 
-  <script type="module" src="/js/app.js?v=174"></script>
+  <script type="module" src="/js/app.js?v=183"></script>
 
 <script>
 // 全局工具函数（非模块）

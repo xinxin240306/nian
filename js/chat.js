@@ -3,7 +3,7 @@ import * as api from './api.js';
 import { playNotifySound, playTTS } from './tts.js';
 import { getChatSettings } from './storage.js';
 import { resolvePaperFont } from './diary-paper.js';
-import { shouldInsertTimeDivider, formatRelativeTime, formatAbsTime, formatDetailTime, resolveDisplayTimestamp, escapeHtml, stripImageDirective, stripVoiceLaneTags, stripAiContextLabels, stripDisplayPeriod, keepVoicePeriod, parseCallSystemRecord, isBareMediaLabel, looksLikeWebCardPayload, looksLikeStandaloneHtml } from './memory.js';
+import { shouldInsertTimeDivider, formatRelativeTime, formatAbsTime, formatDetailTime, resolveDisplayTimestamp, escapeHtml, stripImageDirective, stripVoiceLaneTags, stripElevenAudioTags, stripAiContextLabels, stripDisplayPeriod, keepVoicePeriod, parseCallSystemRecord, isBareMediaLabel, looksLikeWebCardPayload, looksLikeStandaloneHtml } from './memory.js';
 import { ensureInlineEmojis, renderInlineEmojiHtml, stripInlineBeanTokens } from './inline-emoji.js';
 ensureInlineEmojis().catch(() => {});
 
@@ -1002,7 +1002,7 @@ function buildVoiceMessage(msg, char) {
     ? (album.label || '语音')
     : (userVoice
       ? (userVoice.transcript || (isScore ? '♪ 演奏' : (isSfx ? '环境音' : (isVocal ? '……' : '语音'))))
-      : stripImageDirective(msg.content || '', { keepVoiceLanes: true }));
+      : stripImageDirective(msg.content || '', { keepVoiceLanes: true, keepAudioTags: true }));
   const labelOnly = !album && !userVoice && isBareMediaLabel(stripAiContextLabels(String(voiceTextRaw || '')));
   // 语音气泡不带小黄豆（转文字 / TTS 都不保留）
   const voiceFallback = album || userVoice
@@ -1010,7 +1010,8 @@ function buildVoiceMessage(msg, char) {
     : '语音';
   let voiceTextForTts = labelOnly ? '' : (stripInlineBeanTokens(voiceTextRaw) || (album || userVoice ? voiceFallback : ''));
   if (!album && !isScore && !isSfx && voiceTextForTts) voiceTextForTts = keepVoicePeriod(voiceTextForTts) || voiceTextForTts;
-  let voiceText = stripVoiceLaneTags(voiceTextForTts).trim();
+  let voiceText = stripElevenAudioTags(stripVoiceLaneTags(voiceTextForTts)).trim();
+  if (!voiceText && String(voiceTextForTts || '').trim()) voiceText = '……';
   if (labelOnly || isBareMediaLabel(voiceText)) voiceText = '';
   if (!album && !isScore && !isSfx && voiceText) voiceText = keepVoicePeriod(voiceText) || voiceText;
   const dur = Math.max(1, Math.min(60, Math.round(Number(

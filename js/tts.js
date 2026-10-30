@@ -301,7 +301,7 @@ export async function playVoiceClipUrl(url, { onStart, onEnd } = {}) {
 /** 聊天语音条：每条消息 TTS 只请求一次，之后复用缓存 */
 export async function playVoiceAudio(text, msgId, { onStart, onEnd, characterId, emotion, tone } = {}) {
   if (!text?.trim() || !characterId) {
-    lastTtsError = '请先在角色中填写 MiniMax 声音 ID';
+    lastTtsError = '请先在角色中填写声音 ID';
     return false;
   }
 
@@ -345,7 +345,7 @@ export async function playVoiceAudio(text, msgId, { onStart, onEnd, characterId,
 /** 先拉 TTS，接通后再播，避免接通后干等 */
 export async function prefetchTTS(text, characterId, { inCall, emotion, tone } = {}) {
   if (!characterId) {
-    lastTtsError = '请先在角色中填写 MiniMax 声音 ID';
+    lastTtsError = '请先在角色中填写声音 ID';
     return null;
   }
   lastTtsError = '';
@@ -414,7 +414,7 @@ export async function playReadyTTS(url, onEnd, { volume } = {}) {
 /** 通话等场景：不缓存，每次新请求 */
 export async function playTTS(text, onEnd, characterId) {
   if (!characterId) {
-    lastTtsError = '请先在角色中填写 MiniMax 声音 ID';
+    lastTtsError = '请先在角色中填写声音 ID';
     onEnd?.();
     return false;
   }

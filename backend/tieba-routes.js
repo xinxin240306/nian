@@ -21,6 +21,8 @@ function registerTiebaRoutes(app, { tieba }) {
     createThread,
     listPosts,
     replyThread,
+    setThreadPinned,
+    deleteThread,
   } = tieba;
 
   function ensure(res) {
@@ -124,7 +126,12 @@ function registerTiebaRoutes(app, { tieba }) {
   app.get('/api/tieba/bars', (req, res) => {
     try {
       if (!ensure(res)) return;
-      const bars = listBars({ q: req.query.q || '', limit: req.query.limit });
+      const bars = listBars({
+        q: req.query.q || '',
+        limit: req.query.limit,
+        cityMode: req.query.cityMode === 'split' ? 'split' : 'merge',
+        account: getAccountFromReq(req),
+      });
       res.json(bars);
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -134,7 +141,7 @@ function registerTiebaRoutes(app, { tieba }) {
   app.get('/api/tieba/bars/:id', (req, res) => {
     try {
       if (!ensure(res)) return;
-      const bar = getBar(req.params.id);
+      const bar = getBar(req.params.id, getAccountFromReq(req));
       if (!bar) return res.status(404).json({ error: '吧不存在' });
       res.json(bar);
     } catch (e) {
@@ -157,11 +164,14 @@ function registerTiebaRoutes(app, { tieba }) {
   app.get('/api/tieba/bars/:id/threads', (req, res) => {
     try {
       if (!ensure(res)) return;
-      const bar = getBar(req.params.id);
+      const acc = getAccountFromReq(req);
+      const bar = getBar(req.params.id, acc);
       if (!bar) return res.status(404).json({ error: '吧不存在' });
+      const sort = ['live', 'hot', 'new'].includes(req.query.sort) ? req.query.sort : 'live';
       const threads = listThreads(bar.id, {
         limit: req.query.limit,
         offset: req.query.offset,
+        sort,
       });
       res.json({ bar, threads });
     } catch (e) {
@@ -190,7 +200,7 @@ function registerTiebaRoutes(app, { tieba }) {
         limit: req.query.limit,
         offset: req.query.offset,
       });
-      const bar = getBar(thread.bar_id);
+      const bar = getBar(thread.bar_id, getAccountFromReq(req));
       res.json({ thread, posts, bar });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -202,10 +212,36 @@ function registerTiebaRoutes(app, { tieba }) {
       if (!ensure(res)) return;
       const acc = requireAccount(req, res);
       if (!acc) return;
-      const post = replyThread(acc, req.params.id, (req.body || {}).content);
+      const body = req.body || {};
+      const post = replyThread(acc, req.params.id, body.content, body.replyToFloor);
       res.json(post);
     } catch (e) {
       res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/tieba/threads/:id/pin', (req, res) => {
+    try {
+      if (!ensure(res)) return;
+      const acc = requireAccount(req, res);
+      if (!acc) return;
+      const thread = setThreadPinned(acc, req.params.id, !!(req.body || {}).pinned);
+      res.json(thread);
+    } catch (e) {
+      const status = e.needsTiebaAuth ? 401 : 400;
+      res.status(status).json({ error: e.message, needsTiebaAuth: !!e.needsTiebaAuth });
+    }
+  });
+
+  app.delete('/api/tieba/threads/:id', (req, res) => {
+    try {
+      if (!ensure(res)) return;
+      const acc = requireAccount(req, res);
+      if (!acc) return;
+      res.json(deleteThread(acc, req.params.id));
+    } catch (e) {
+      const status = e.needsTiebaAuth ? 401 : 400;
+      res.status(status).json({ error: e.message, needsTiebaAuth: !!e.needsTiebaAuth });
     }
   });
 }

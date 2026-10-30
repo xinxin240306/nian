@@ -25,7 +25,7 @@ import {
   insertInlineEmojiAtCursor,
 } from '../inline-emoji.js';
 import { getPaperFonts, isValidPaperFontId } from '../diary-paper.js';
-import { shouldInsertTimeDivider, escapeHtml, splitAiSegments, stripVoiceLaneTags, stripAiContextLabels, looksLikeWebCardPayload } from '../memory.js';
+import { shouldInsertTimeDivider, escapeHtml, splitAiSegments, stripVoiceLaneTags, stripElevenAudioTags, stripAiContextLabels, looksLikeWebCardPayload } from '../memory.js';
 
 function voiceBubbleSegments(content) {
   const raw = String(content || '').trim();
@@ -4991,7 +4991,7 @@ function fallbackSpeakFromVideoText(text) {
 }
 
 function callDisplayText(text) {
-  const tidy = (s) => stripVoiceLaneTags(stripCallSoundFxLines(stripAiContextLabels(s)))
+  const tidy = (s) => stripElevenAudioTags(stripVoiceLaneTags(stripCallSoundFxLines(stripAiContextLabels(s))))
     .replace(/[\[【［]\s*语气\s*[:：][^\]】］\n]{0,12}[\]】］]/gi, '')
     .replace(/\n{2,}/g, '\n')
     .trim();
@@ -9891,7 +9891,7 @@ window.playVoiceMsg = async function(el) {
   }
 
   if (!charHasVoiceId(currentChar) && !(bubbleEl.dataset.voiceId || '').trim()) {
-    window.showToast?.('请先在角色中填写 MiniMax 声音 ID');
+    window.showToast?.('请先在角色中填写声音 ID');
     return;
   }
 
@@ -9908,7 +9908,7 @@ window.playVoiceMsg = async function(el) {
 
   if (!played) {
     setPlaying(false);
-    window.showToast?.('语音播放失败: ' + (getLastTtsError() || '请检查 MiniMax API Key、Group ID 与声音 ID'));
+    window.showToast?.('语音播放失败: ' + (getLastTtsError() || '请检查语音 API Key 与声音 ID'));
   }
 };
 
@@ -10107,6 +10107,11 @@ window.openChatSettings = async function() {
       tzEl.value = char.timezone || houseTz;
     }
 
+    const ttsProviderEl = document.getElementById('cs-tts-provider');
+    if (ttsProviderEl) {
+      const p = String(char.tts_provider || '');
+      ttsProviderEl.value = (p === 'elevenlabs' || p === 'fish') ? p : 'minimax';
+    }
     const voiceIdEl = document.getElementById('cs-voice-id');
     if (voiceIdEl) voiceIdEl.value = char.voice_id || '';
     const voiceIdNsfwEl = document.getElementById('cs-voice-id-nsfw');
@@ -10286,6 +10291,8 @@ window.saveChatSettingsUI = async function() {
   if (charId && currentChar) {
     try {
       const timezone = document.getElementById('cs-timezone')?.value || 'Asia/Shanghai';
+      const ttsProviderRaw = document.getElementById('cs-tts-provider')?.value;
+      const ttsProvider = (ttsProviderRaw === 'elevenlabs' || ttsProviderRaw === 'fish') ? ttsProviderRaw : 'minimax';
       const voiceId = document.getElementById('cs-voice-id')?.value?.trim() || '';
       const voiceIdNsfw = document.getElementById('cs-voice-id-nsfw')?.value?.trim() || '';
       const voiceMessages = document.getElementById('cs-voice-messages')?.checked ? 1 : 0;
@@ -10311,6 +10318,7 @@ window.saveChatSettingsUI = async function() {
       const charUpdate = {
         ...currentChar,
         timezone,
+        tts_provider: ttsProvider,
         voice_id: voiceId,
         voice_id_nsfw: voiceIdNsfw,
         voice_messages: voiceMessages,

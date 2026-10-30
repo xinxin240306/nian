@@ -658,7 +658,7 @@ async function describeImageBrief(settings, imageUrl, publicBase) {
   try {
     const abs = toAbsoluteMediaUrl(imageUrl, publicBase || '');
     const picMsg = { id: 'sm_img_' + Date.now(), role: 'user', content: abs, type: 'image' };
-    const apiHistory = buildHistoryApiMessages([picMsg], publicBase || '', {});
+    const apiHistory = await buildHistoryApiMessages([picMsg], publicBase || '', {});
     // 在最后一条加文字说明
     if (apiHistory.length) {
       const last = apiHistory[apiHistory.length - 1];

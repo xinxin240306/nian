@@ -978,6 +978,20 @@ function meGroup(html) {
   return `<div class="settings-group">${html}</div>`;
 }
 
+function cycleSummary(settings) {
+  const interval = Number(settings.user_cycle_interval);
+  const period = Number(settings.user_period_days);
+  const cramps = String(settings.user_cramps || '') === '1';
+  const pain = Number(settings.user_cramp_days);
+  if (!interval && !period && !cramps) return '未设置';
+  const parts = [];
+  if (interval) parts.push(`${interval}天一次`);
+  if (period) parts.push(`来${period}天`);
+  if (cramps) parts.push(pain ? `痛经${pain}天` : '痛经');
+  else parts.push('不痛经');
+  return parts.join(' · ');
+}
+
 async function renderMe() {
   setMeTopbar('我');
   const content = document.getElementById('ct-content');
@@ -1014,6 +1028,10 @@ async function renderMe() {
 
       <div class="settings-section">
         ${meGroup(meCell('身份', personaSub, { onclick: 'openMeIdentity()' }))}
+      </div>
+
+      <div class="settings-section">
+        ${meGroup(meCell('例假', escapeHtml(cycleSummary(settings)), { onclick: 'openMeCycle()' }))}
       </div>
 
       <div class="settings-section">
@@ -1173,6 +1191,88 @@ window.openMePermissions = async function() {
   bindNativePermissionToggles();
   await refreshNativePermissionToggles();
   setTimeout(() => { refreshNativePermissionToggles(); }, 1600);
+};
+
+window.openMeCycle = async function() {
+  setMeTopbar('例假', { back: () => renderMe(), save: () => window.saveMeCycle() });
+  const content = document.getElementById('ct-content');
+  if (!content) return;
+  content.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>';
+  let settings = {};
+  try { settings = await api.getSettings(); } catch {}
+  const cramps = String(settings.user_cramps || '') === '1';
+  content.innerHTML = `
+    <div class="me-page me-page--detail">
+      <div class="settings-section">
+        ${meGroup(`
+          <div class="settings-row">
+            <div class="settings-row-label">几天来一次</div>
+            <input class="input" id="me-cycle-interval" type="number" min="15" max="60" inputmode="numeric" placeholder="28" value="${escapeHtml(settings.user_cycle_interval || '')}" style="width:88px">
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">一次来多久</div>
+            <input class="input" id="me-period-days" type="number" min="1" max="14" inputmode="numeric" placeholder="5" value="${escapeHtml(settings.user_period_days || '')}" style="width:88px">
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-label">痛经</div>
+            <label class="toggle">
+              <input type="checkbox" id="me-cramps" ${cramps ? 'checked' : ''} onchange="toggleMeCrampDays()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row" id="me-cramp-days-row" style="${cramps ? '' : 'display:none'}">
+            <div class="settings-row-label">痛几天</div>
+            <input class="input" id="me-cramp-days" type="number" min="1" max="10" inputmode="numeric" placeholder="2" value="${escapeHtml(settings.user_cramp_days || '')}" style="width:88px">
+          </div>
+        `)}
+      </div>
+      <div class="me-hint" style="padding:0 16px">跟角色说「今天来例假了」之后，按这里的间隔，在下次快到的前几天提醒一次。一次来几天、痛不痛，角色心里有数，不会天天追问。</div>
+    </div>
+  `;
+};
+
+window.toggleMeCrampDays = function() {
+  const on = !!document.getElementById('me-cramps')?.checked;
+  const row = document.getElementById('me-cramp-days-row');
+  if (row) row.style.display = on ? '' : 'none';
+};
+
+window.saveMeCycle = async function() {
+  const interval = Number(document.getElementById('me-cycle-interval')?.value);
+  const period = Number(document.getElementById('me-period-days')?.value);
+  const cramps = !!document.getElementById('me-cramps')?.checked;
+  const pain = Number(document.getElementById('me-cramp-days')?.value);
+  const intervalOk = Number.isFinite(interval) && interval >= 15 && interval <= 60;
+  const periodOk = !document.getElementById('me-period-days')?.value || (Number.isFinite(period) && period >= 1 && period <= 14);
+  const painOk = !cramps || (Number.isFinite(pain) && pain >= 1 && pain <= 10);
+  if (document.getElementById('me-cycle-interval')?.value && !intervalOk) {
+    window.showToast?.('几天来一次填 15 到 60');
+    return;
+  }
+  if (!periodOk) {
+    window.showToast?.('一次来多久填 1 到 14 天');
+    return;
+  }
+  if (!painOk) {
+    window.showToast?.('痛几天填 1 到 10');
+    return;
+  }
+  if (cramps && periodOk && document.getElementById('me-period-days')?.value && pain > period) {
+    window.showToast?.('痛的天数不能比来的天数还长');
+    return;
+  }
+  try {
+    await patchSettings({
+      user_cycle_interval: intervalOk ? String(Math.round(interval)) : '',
+      user_period_days: document.getElementById('me-period-days')?.value && periodOk ? String(Math.round(period)) : '',
+      user_cramps: cramps ? '1' : '0',
+      user_cramp_days: cramps && painOk ? String(Math.round(pain)) : '',
+    });
+    window.showToast?.('已保存');
+    renderMe();
+  } catch (e) {
+    window.showToast?.(e.message || '保存失败');
+  }
 };
 
 window.saveMeProfile = async function() {

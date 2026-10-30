@@ -365,7 +365,10 @@ async function renderCharEditor(charId) {
             </label>
           </div>
           <div class="settings-row">
-            <span class="settings-row-label">角色所在地名</span>
+            <div class="settings-row-label">
+              角色所在地名
+              <div class="settings-row-sub">贴吧会按这个地名推荐城市吧</div>
+            </div>
             <input class="input" id="cf-location" value="${escapeHtml(char.location_name||'')}" placeholder="如：星河之城" style="width:150px">
           </div>
           <div class="settings-row">

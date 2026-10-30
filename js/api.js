@@ -73,8 +73,8 @@ export async function apiFetch(path, options = {}) {
   const imageSlow = /test-selfie-image|\/image\/(generate|test)|img2img/.test(path);
   const chatSlow = /\/messages\/(send|trigger-ai)/.test(path);
   const slow = imageSlow || chatSlow || /\/send|trigger-ai|generate|import|butler|summarize|backfill|retrospect/.test(path);
-  // 聊天：与后端单次 API 超时对齐（120s）。配图已异步，不必再为生图加长等待
-  const timeoutMs = customTimeout ?? (imageSlow ? 15 * 60 * 1000 : (chatSlow ? 120000 : (slow ? 130000 : 45000)));
+  // 聊天：留给「准备上下文 + 模型 120s」。准备阶段也会占时间，120s 整段会在模型还没回时被手机掐掉
+  const timeoutMs = customTimeout ?? (imageSlow ? 15 * 60 * 1000 : (chatSlow ? 180000 : (slow ? 130000 : 45000)));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   if (outerSignal) {
@@ -200,6 +200,13 @@ export const getMcpServers = () => apiFetch('/api/mcp/servers');
 export const saveMcpServer = (data) => apiFetch('/api/mcp/servers', { method: 'POST', body: JSON.stringify(data || {}) });
 export const deleteMcpServer = (id) => apiFetch('/api/mcp/servers', { method: 'POST', body: JSON.stringify({ action: 'delete', id }) });
 export const testMcpServer = (id) => apiFetch(`/api/mcp/servers/${encodeURIComponent(id)}/test`, { method: 'POST', body: '{}', timeoutMs: 30000 });
+export const getXhsScreen = () => apiFetch('/api/xhs-screen');
+export const saveXhsScreen = (data) => apiFetch('/api/xhs-screen', { method: 'POST', body: JSON.stringify(data || {}) });
+export const getXhsScreenShot = () => apiFetch('/api/xhs-screen/shot', { timeoutMs: 25000 });
+export const clickXhsScreen = (data) => apiFetch('/api/xhs-screen/click', { method: 'POST', body: JSON.stringify(data || {}), timeoutMs: 25000 });
+export const startXhsStack = () => apiFetch('/api/xhs-screen/stack', { method: 'POST', body: '{}', timeoutMs: 30000 });
+export const getXhsMe = () => apiFetch('/api/xhs-me');
+export const saveXhsMe = (data) => apiFetch('/api/xhs-me', { method: 'POST', body: JSON.stringify(data || {}) });
 export const pushRobotFace = (json) =>
   apiFetch('/api/robot/face', { method: 'POST', body: JSON.stringify({ json }), timeoutMs: 30000 });
 export const resetRobotFace = () =>
@@ -1270,8 +1277,12 @@ export async function tiebaLogout() {
   }
 }
 
-export const tiebaListBars = (q = '') =>
-  apiFetch(`/api/tieba/bars${q ? `?q=${encodeURIComponent(q)}` : ''}`, { headers: tiebaHeaders() });
+export const tiebaListBars = (q = '', cityMode = 'merge') => {
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  params.set('cityMode', cityMode === 'split' ? 'split' : 'merge');
+  return apiFetch(`/api/tieba/bars?${params.toString()}`, { headers: tiebaHeaders() });
+};
 
 export const tiebaGetBar = (id) =>
   apiFetch(`/api/tieba/bars/${id}`, { headers: tiebaHeaders() });
@@ -1283,8 +1294,10 @@ export const tiebaCreateBar = (data) =>
     body: JSON.stringify(data || {}),
   });
 
-export const tiebaListThreads = (barId, { limit = 30, offset = 0 } = {}) =>
-  apiFetch(`/api/tieba/bars/${barId}/threads?limit=${limit}&offset=${offset}`, { headers: tiebaHeaders() });
+export const tiebaListThreads = (barId, { limit = 30, offset = 0, sort = 'live' } = {}) => {
+  const mode = ['live', 'hot', 'new'].includes(sort) ? sort : 'live';
+  return apiFetch(`/api/tieba/bars/${barId}/threads?limit=${limit}&offset=${offset}&sort=${mode}`, { headers: tiebaHeaders(), cache: 'no-store' });
+};
 
 export const tiebaCreateThread = (barId, data) =>
   apiFetch(`/api/tieba/bars/${barId}/threads`, {
@@ -1294,11 +1307,21 @@ export const tiebaCreateThread = (barId, data) =>
   });
 
 export const tiebaGetThread = (id, { limit = 50, offset = 0 } = {}) =>
-  apiFetch(`/api/tieba/threads/${id}?limit=${limit}&offset=${offset}`, { headers: tiebaHeaders() });
+  apiFetch(`/api/tieba/threads/${id}?limit=${limit}&offset=${offset}`, { headers: tiebaHeaders(), cache: 'no-store' });
 
-export const tiebaReply = (threadId, content) =>
+export const tiebaReply = (threadId, content, replyToFloor = 0) =>
   apiFetch(`/api/tieba/threads/${threadId}/replies`, {
     method: 'POST',
     headers: tiebaHeaders(),
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({ content, replyToFloor: Number(replyToFloor) || 0 }),
   });
+
+export const tiebaPinThread = (id, pinned) =>
+  apiFetch(`/api/tieba/threads/${id}/pin`, {
+    method: 'POST',
+    headers: tiebaHeaders(),
+    body: JSON.stringify({ pinned: !!pinned }),
+  });
+
+export const tiebaDeleteThread = (id) =>
+  apiFetch(`/api/tieba/threads/${id}`, { method: 'DELETE', headers: tiebaHeaders(), body: '{}' });

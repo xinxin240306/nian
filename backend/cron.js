@@ -4249,10 +4249,16 @@ function buildCallLineNote(history, presenceMode = '', opts = {}) {
   return '';
 }
 
-function callSpeech28Hint() {
+function callSpeech28Hint(characterId) {
   try {
     const { buildNaturalCallSpeechHint } = require('./speech-text-helper');
-    return buildNaturalCallSpeechHint();
+    const { normalizeTtsProvider } = require('./voice-lane-helper');
+    let provider = 'minimax';
+    try {
+      const row = db.prepare('SELECT tts_provider FROM characters WHERE id=?').get(characterId);
+      provider = normalizeTtsProvider(row?.tts_provider);
+    } catch { /* 列还没有时按 MiniMax */ }
+    return buildNaturalCallSpeechHint({ provider });
   } catch {
     return '';
   }
@@ -4314,8 +4320,8 @@ function buildCallExtraSystemPrompt(isVideo, history, characterId, opts = {}) {
     ? classifyCallSleepWake(history, { wakeStep: opts.hangoutWakeStep })
     : 'sleep';
   const speech28 = companion
-    ? [callSpeech28Hint(), callStorytellingHint()].filter(Boolean).join('\n')
-    : callSpeech28Hint();
+    ? [callSpeech28Hint(characterId), callStorytellingHint()].filter(Boolean).join('\n')
+    : callSpeech28Hint(characterId);
   const lineNote = buildCallLineNote(history, presenceMode, {
     charAsleepOnLine,
     sleepWake,
@@ -5066,6 +5072,11 @@ ${lectureVoiceLine}
     try { phoneLowBatteryBlock = require('./phone-llm-tools').lowBatteryPromptBlock(char?.id) || ''; } catch {}
   }
 
+  let xhsMeBlock = '';
+  if (!isDream && !forGame && !forDiaryPeek && !forDiary && !forTheater) {
+    try { xhsMeBlock = require('./xhs-me-helper').promptBlock(settings) || ''; } catch {}
+  }
+
   let taPromptBlock = '';
   if (!isDream && !forGame && !forDiaryPeek && char?.id) {
     try { taPromptBlock = require('./ta-helper').buildTaPromptBlock(char.id) || ''; } catch {}
@@ -5074,6 +5085,11 @@ ${lectureVoiceLine}
   let postOfficeBlock = '';
   if (!isDream && !forGame && !forDiaryPeek && char?.id) {
     try { postOfficeBlock = require('./post-office-helper').promptBlockForChar(char.id) || ''; } catch {}
+  }
+
+  let cycleBlock = '';
+  if (!isDream && !forGame && !forDiaryPeek && !forDiary && !forTheater && char?.id) {
+    try { cycleBlock = require('./cycle-helper').promptBlock(char.id) || ''; } catch {}
   }
 
   // 分层：你是谁 → 记忆/日程/能力 → 口吻加固 → 心里话 → 用户预设（硬性压轴）
@@ -5126,6 +5142,7 @@ ${lectureVoiceLine}
     affectionBlock,
     char.intro ? `【人物介绍】${char.intro}` : '',
     userBlock,
+    xhsMeBlock,
     relationshipDatesBlock,
     friendshipBlock,
     // L2/L3：印象与记忆紧挨人设/关系底色，不加「重要」字眼
@@ -5147,6 +5164,7 @@ ${lectureVoiceLine}
     (!isDream && !forGame && !scheduleBlock.charSchedule && dailyCtx) ? `【今日动态】${dailyCtx}` : '',
     (!isDream && !forGame && scheduleBlock.userSchedule) ? scheduleBlock.userSchedule : '',
     specialDayCtx ? `【今日特别】${specialDayCtx}` : '',
+    cycleBlock,
     livingSenseBlock,
     replyToneBlock,
     (!isDream && !forGame && !forDiaryPeek && opts.understandingBlock) ? String(opts.understandingBlock) : '',
@@ -5945,6 +5963,7 @@ ${mindSlice}
 【闲聊·低权】下雨、饭不好吃、随口一句：优先 skip。若仍留一句，weight≤0.22，content 末尾加【闲聊】。约定、情绪锚、共同经历不要加这个标记，也不要 skip。
 【例外·须记】分手/吵架/和好/表白/重大委屈，以及**我自己生出的有原因的负面情绪**（没吵到翻脸也算：被敷衍后委屈、吃醋、心里堵、故意冷淡或推开），即使话是我说的、语气冲动，也**不要 skip**，记入「情感状态」或「重要时刻」。必须写清：导火索、我当时的感受（一句）、我因此对对方的态度、关系落到哪。不记逐句争吵，也不要堆情绪形容词。
 【身体不适·时效】用户说头疼/难受等属于临时状态。若同一段对话里用户后来表示「好了/不难受了/没事了」，gist 与 memories 必须写成「曾不适→已好转」，不要写成仍在难受；若已明确好转，不要再单独留一条未了结的「用户在难受」。
+【例假·须记】对方说自己来例假、痛经、在生理期/经期，必须写入 gist 与 memories，原词留下（例假/痛经/生理期/经期/大姨妈/姨妈）。不要 skip，不要收成「不舒服」，也不要只写进 impressions。
 【具体词·硬性】用户亲口说的**具体词必须原样留下**，禁止收成笼统说法。包括但不限于：药名（布洛芬≠止痛药）、病症/生理（例假/痛经）、地名、店名、作品名、人名昵称、具体物品（热水袋/娃娃/睫毛）、品牌、数字与约定原文。gist 与 memories 都要能检索到这些原词；可以补一句概括，但不能只用概括替换原词。
 【认错与纠正·硬性】角色自己的猜测、调侃、看图认错，不是发生过的事。对方纠正了物品或意图之后，只能按对方的说法记。禁止把角色猜的名字或用途写成已经发生的事实，也不要据此再编一套动作。
 【禁止】断章取义短句、重复已显然的内容、流水账式过程描写。
@@ -8176,6 +8195,15 @@ ${lengthGuide || '口语短句即可，只输出要发的正文。'}`;
     })}
 ${continuityNote}`;
     userContent = '（你点开了和对方的对话框）';
+  } else if (scenario === 'cycle_remind') {
+    let cycleExtra = '';
+    try { cycleExtra = require('./cycle-helper').promptBlock(char.id, { force: true }) || ''; } catch {}
+    extra = `${cycleExtra}
+这轮你是自己想起来才开口，不是健康软件在推送。用你的口气提一句快到了就够：可以关心、可以轻、可以损，看性格。别列日期公式，别说「根据周期」，别追问痛不痛，别盘问。
+${offlineNote}
+${caretakerBan}
+一两句口语，只输出要发的正文。`;
+    userContent = '你想起对方的例假大概这几天要来了（对方未必在看）。';
   } else if (scenario === 'travel_arrive' || scenario === 'process_done') {
     let pending = null;
     try { pending = require('./process-time-helper').getDueProcess(char.id); } catch {}
@@ -8402,7 +8430,11 @@ async function checkProactiveMessage() {
         const silence = computeUserSilenceSinceCharOutreach(char.id);
         idleMinutes = silence.minutes;
         outreachAnchor = silence.charAnchor;
-        if (nightEmotionGate) {
+        let cycleDue = null;
+        try { cycleDue = require('./cycle-helper').dueReminder(char.id, today); } catch {}
+        if (cycleDue && !nightEmotionGate && idleMinutes >= 20) {
+          scenario = 'cycle_remind';
+        } else if (nightEmotionGate) {
           // 深夜情绪破例：跟句门槛约 50±10 分钟
           const followupMin = jitterMinutesStable(
             char.id,
@@ -8677,6 +8709,9 @@ async function checkProactiveMessage() {
         }
         const textContent = aiMessages.filter(m => m.type === 'text' || m.type === 'voice').map(m => m.content).join('\n') || cleanText;
         if (mode === 'life_share') markLifeShareSent(char.id);
+        if (mode === 'cycle_remind') {
+          try { require('./cycle-helper').markReminded(char.id); } catch {}
+        }
         if (mode === 'travel_arrive' || mode === 'process_done') {
           try { require('./process-time-helper').clearPending(char.id); } catch {}
         }
@@ -9125,7 +9160,6 @@ function isJunkImpressionFact(content) {
   if (s.length < 2) return true;
   if (IMPRESSION_TIME_SLOT_RE.test(s)) return true;
   if (/^[\d\s:：\-./点分秒年月日期]+$/.test(s)) return true;
-  if (/经期|生理期|痛经|例假|大姨妈/i.test(s)) return true;
   if (/[？?]$/.test(s)) return true;
   // 只剩「了的呢」等虚词
   if (/^[了的呢啊呀吧嘛哦嗯]+$/.test(s)) return true;

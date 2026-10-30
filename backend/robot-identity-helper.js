@@ -47,7 +47,7 @@ async function inferSubjectFromImage(settings, sceneImageUrl, publicBase = '') {
     { id: 'id_ref', role: 'user', content: ref, type: 'image' },
     { id: 'id_scene', role: 'user', content: scene, type: 'image' },
   ];
-  let apiHistory = buildHistoryApiMessages(picMsgs, publicBase, {});
+  let apiHistory = await buildHistoryApiMessages(picMsgs, publicBase, {});
   const ask = '第二张摄像头画面里主要那个人，是不是第一张参考照里的同一人？只输出 JSON。';
   if (apiHistory.length) {
     const last = apiHistory[apiHistory.length - 1];

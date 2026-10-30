@@ -104,6 +104,17 @@ function ensureTiebaTables() {
   d.run(`CREATE INDEX IF NOT EXISTS idx_tieba_posts_thread ON tieba_posts(thread_id, floor)`);
   d.run(`CREATE INDEX IF NOT EXISTS idx_tieba_sessions_account ON tieba_sessions(account_id)`);
 
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN theme TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN owner_mode TEXT DEFAULT 'user'`); } catch {}
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN kind TEXT DEFAULT 'custom'`); } catch {}
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN city_key TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN character_id INTEGER DEFAULT 0`); } catch {}
+  try { d.run(`ALTER TABLE tieba_bars ADD COLUMN source_names TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_threads ADD COLUMN pinned INTEGER DEFAULT 0`); } catch {}
+  try { d.run(`ALTER TABLE tieba_threads ADD COLUMN pinned_at TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_posts ADD COLUMN reply_to_floor INTEGER DEFAULT 0`); } catch {}
+  d.run(`CREATE INDEX IF NOT EXISTS idx_tieba_bars_city ON tieba_bars(kind, city_key, character_id)`);
+
   seedDefaultBars();
 }
 
@@ -268,61 +279,189 @@ function logoutToken(token) {
   db.prepare('DELETE FROM tieba_sessions WHERE token=?').run(token);
 }
 
-function mapBar(row) {
+const CITY_COLORS = [
+  '#c9a0dc', '#74b9ff', '#fd79a8', '#fdcb6e',
+  '#55efc4', '#a29bfe', '#ff7675', '#81ecec',
+];
+
+function colorForKey(key) {
+  let n = 0;
+  const s = String(key || '');
+  for (let i = 0; i < s.length; i += 1) n = (n + s.charCodeAt(i) * (i + 1)) % CITY_COLORS.length;
+  return CITY_COLORS[n];
+}
+
+function placeCore(place) {
+  const p = String(place || '').trim();
+  return p.endsWith('吧') ? p.slice(0, -1) : p;
+}
+
+function locatedCharacters() {
+  try {
+    const cols = new Set((db.prepare('PRAGMA table_info(characters)').all() || []).map((c) => c.name));
+    if (!cols.has('location_name') || !cols.has('name')) return [];
+    const fields = ['id', 'name', 'location_name'];
+    if (cols.has('intro')) fields.push('intro');
+    let sql = `SELECT ${fields.join(', ')} FROM characters WHERE TRIM(COALESCE(location_name,'')) != ''`;
+    if (cols.has('circle_npc_id')) sql += ` AND IFNULL(circle_npc_id,0)=0`;
+    if (cols.has('source')) sql += ` AND IFNULL(source,'') != 'circle_npc'`;
+    return db.prepare(sql).all() || [];
+  } catch (e) {
+    console.warn('[tieba] city characters', e.message);
+    return [];
+  }
+}
+
+function freeBarName(desired) {
+  let name = String(desired || '城市吧').slice(0, 30);
+  if (!db.prepare('SELECT id FROM tieba_bars WHERE name=?').get(name)) return name;
+  const base = name.endsWith('吧') ? name.slice(0, -1) : name;
+  for (let n = 2; n <= 30; n += 1) {
+    const suffix = String(n);
+    name = `${base.slice(0, 29 - suffix.length)}${suffix}吧`.slice(0, 30);
+    if (!db.prepare('SELECT id FROM tieba_bars WHERE name=?').get(name)) return name;
+  }
+  return `${base.slice(0, 18)}${Date.now().toString().slice(-6)}吧`.slice(0, 30);
+}
+
+function upsertCityBar(group, mode) {
+  const charId = mode === 'split' ? Number(group.chars[0].id) : 0;
+  const names = group.chars.map((c) => String(c.name || '').trim()).filter(Boolean);
+  const sourceNames = names.join('、').slice(0, 80);
+  const core = placeCore(group.place) || '这里';
+  const who = names[0] || '角色';
+  const desired = (mode === 'split' ? `${core}·${who}吧` : `${core}吧`).slice(0, 30);
+  const intro = mode === 'split' ? String(group.chars[0].intro || '').trim() : '';
+  const theme = (intro || (mode === 'split'
+    ? `${who}在${core}的日常`
+    : `${core}。常在这里的人：${sourceNames || '还没有人'}`)).slice(0, 200);
+  const slogan = theme.replace(/\s+/g, ' ').slice(0, 40);
+  const color = colorForKey(`${group.key}:${charId}`);
+  const members = Math.max(1, group.chars.length);
+  const existing = db.prepare(`
+    SELECT * FROM tieba_bars WHERE kind='city' AND city_key=? AND IFNULL(character_id,0)=?
+  `).get(group.key, charId);
+  if (!existing) {
+    const name = freeBarName(desired);
+    db.prepare(`
+      INSERT INTO tieba_bars
+        (name, slogan, theme, color, creator_id, member_count, thread_count, created_at, owner_mode, kind, city_key, character_id, source_names)
+      VALUES (?, ?, ?, ?, NULL, ?, 0, ?, 'npc', 'city', ?, ?, ?)
+    `).run(name, slogan, theme, color, members, nowIso(), group.key, charId, sourceNames);
+    return;
+  }
+  let name = existing.name;
+  if (existing.name !== desired) {
+    const taken = db.prepare('SELECT id FROM tieba_bars WHERE name=? AND id!=?').get(desired, existing.id);
+    if (!taken) name = desired;
+  }
+  if (name === existing.name
+    && slogan === (existing.slogan || '')
+    && theme === (existing.theme || '')
+    && color === (existing.color || '')
+    && members === Number(existing.member_count || 0)
+    && sourceNames === (existing.source_names || '')
+    && existing.owner_mode === 'npc') return;
+  db.prepare(`
+    UPDATE tieba_bars
+    SET name=?, slogan=?, theme=?, color=?, member_count=?, source_names=?, owner_mode='npc', kind='city'
+    WHERE id=?
+  `).run(name, slogan, theme, color, members, sourceNames, existing.id);
+}
+
+function syncCityBars(mode) {
+  const want = mode === 'split' ? 'split' : 'merge';
+  const groups = new Map();
+  for (const c of locatedCharacters()) {
+    const place = String(c.location_name || '').trim().replace(/\s+/g, '');
+    if (!place) continue;
+    const key = place;
+    if (want === 'split') {
+      groups.set(`${key}#${c.id}`, { key, place, chars: [c] });
+    } else {
+      const g = groups.get(key) || { key, place, chars: [] };
+      g.chars.push(c);
+      groups.set(key, g);
+    }
+  }
+  for (const g of groups.values()) upsertCityBar(g, want);
+}
+
+function mapBar(row, account = null) {
   if (!row) return null;
+  const ownerMode = row.owner_mode === 'npc' ? 'npc' : 'user';
+  const kind = row.kind === 'city' ? 'city' : 'custom';
+  const creatorId = row.creator_id || null;
   return {
     id: row.id,
     name: row.name,
     slogan: row.slogan || '',
+    theme: row.theme || '',
     color: row.color || '#c9a0dc',
     avatar: row.avatar || '',
-    creator_id: row.creator_id || null,
+    creator_id: creatorId,
     member_count: row.member_count || 0,
     thread_count: row.thread_count || 0,
     created_at: row.created_at,
+    owner_mode: ownerMode,
+    kind,
+    city_key: row.city_key || '',
+    character_id: Number(row.character_id) || 0,
+    source_names: row.source_names || '',
+    is_owner: !!(account && ownerMode === 'user' && Number(creatorId) === Number(account.id)),
   };
 }
 
-function listBars({ q = '', limit = 50 } = {}) {
+function listBars({ q = '', limit = 50, cityMode = 'merge', account = null } = {}) {
+  const mode = cityMode === 'split' ? 'split' : 'merge';
+  syncCityBars(mode);
   const lim = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
-  let rows;
-  if (q) {
-    rows = db.prepare(`
-      SELECT * FROM tieba_bars
-      WHERE name LIKE ? OR slogan LIKE ?
-      ORDER BY thread_count DESC, id DESC
-      LIMIT ?
-    `).all(`%${q}%`, `%${q}%`, lim);
-  } else {
-    rows = db.prepare(`
-      SELECT * FROM tieba_bars
-      ORDER BY thread_count DESC, id DESC
-      LIMIT ?
-    `).all(lim);
-  }
-  return rows.map(mapBar);
+  const query = String(q || '').trim();
+  const like = `%${query}%`;
+  const whereQ = query
+    ? `AND (name LIKE ? OR slogan LIKE ? OR IFNULL(theme,'') LIKE ? OR IFNULL(source_names,'') LIKE ?)`
+    : '';
+  const paramsQ = query ? [like, like, like, like] : [];
+  const custom = db.prepare(`
+    SELECT * FROM tieba_bars
+    WHERE IFNULL(kind,'custom') != 'city' ${whereQ}
+    ORDER BY thread_count DESC, id DESC
+    LIMIT ?
+  `).all(...paramsQ, lim);
+  const city = db.prepare(`
+    SELECT * FROM tieba_bars
+    WHERE kind='city'
+      AND (
+        (? = 'split' AND IFNULL(character_id,0) > 0)
+        OR (? = 'merge' AND IFNULL(character_id,0) = 0)
+      )
+      ${whereQ}
+    ORDER BY member_count DESC, thread_count DESC, id DESC
+    LIMIT ?
+  `).all(mode, mode, ...paramsQ, lim);
+  return [...city, ...custom].map((row) => mapBar(row, account));
 }
 
-function getBar(id) {
-  return mapBar(db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(id));
+function getBar(id, account = null) {
+  return mapBar(db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(id), account);
 }
 
-function createBar(account, { name, slogan, color } = {}) {
+function createBar(account, { name, slogan, color, theme, ownerMode } = {}) {
   const barName = safeName(name, 20);
   if (!barName || barName.length < 2) throw new Error('吧名至少 2 个字');
-  if (!barName.endsWith('吧')) {
-    // 允许不带「吧」，自动补
-  }
   const finalName = barName.endsWith('吧') ? barName : `${barName}吧`;
   const exists = db.prepare('SELECT id FROM tieba_bars WHERE name=?').get(finalName);
   if (exists) throw new Error('这个吧已经存在了');
-  const sloganText = String(slogan || '').trim().slice(0, 40);
-  const colorText = String(color || '#c9a0dc').slice(0, 20);
+  const themeText = String(theme || '').trim().slice(0, 200);
+  const sloganText = String(slogan || '').trim().slice(0, 40) || themeText.replace(/\s+/g, ' ').slice(0, 40);
+  const colorText = /^#[0-9a-fA-F]{3,8}$/.test(String(color || '').trim()) ? String(color).trim() : '#c9a0dc';
+  const owner = ownerMode === 'npc' ? 'npc' : 'user';
   const r = db.prepare(`
-    INSERT INTO tieba_bars (name, slogan, color, creator_id, member_count, thread_count, created_at)
-    VALUES (?, ?, ?, ?, 1, 0, ?)
-  `).run(finalName, sloganText, colorText, account.id, nowIso());
-  return getBar(r.lastInsertRowid);
+    INSERT INTO tieba_bars
+      (name, slogan, theme, color, creator_id, member_count, thread_count, created_at, owner_mode, kind, city_key, character_id, source_names)
+    VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, 'custom', '', 0, '')
+  `).run(finalName, sloganText, themeText, colorText, account.id, nowIso(), owner);
+  return getBar(r.lastInsertRowid, account);
 }
 
 function mapThread(row) {
@@ -339,17 +478,26 @@ function mapThread(row) {
     last_floor: row.last_floor || 1,
     last_reply_at: row.last_reply_at,
     created_at: row.created_at,
+    pinned: Number(row.pinned) === 1,
+    pinned_at: row.pinned_at || '',
     bar_name: row.bar_name || undefined,
   };
 }
 
-function listThreads(barId, { limit = 30, offset = 0 } = {}) {
+const THREAD_SORTS = {
+  live: 'IFNULL(pinned,0) DESC, last_reply_at DESC, id DESC',
+  hot: 'IFNULL(pinned,0) DESC, reply_count DESC, last_reply_at DESC, id DESC',
+  new: 'IFNULL(pinned,0) DESC, created_at DESC, id DESC',
+};
+
+function listThreads(barId, { limit = 30, offset = 0, sort = 'live' } = {}) {
   const lim = Math.min(50, Math.max(1, parseInt(limit, 10) || 30));
   const off = Math.max(0, parseInt(offset, 10) || 0);
+  const order = THREAD_SORTS[sort] || THREAD_SORTS.live;
   const rows = db.prepare(`
     SELECT * FROM tieba_threads
     WHERE bar_id=?
-    ORDER BY last_reply_at DESC, id DESC
+    ORDER BY ${order}
     LIMIT ? OFFSET ?
   `).all(barId, lim, off);
   return rows.map(mapThread);
@@ -398,6 +546,7 @@ function mapPost(row) {
     author_name: row.author_name,
     author_avatar: row.author_avatar || '',
     created_at: row.created_at,
+    reply_to_floor: Number(row.reply_to_floor) || 0,
   };
 }
 
@@ -413,23 +562,65 @@ function listPosts(threadId, { limit = 50, offset = 0 } = {}) {
   return rows.map(mapPost);
 }
 
-function replyThread(account, threadId, content) {
+function replyThread(account, threadId, content, replyToFloor) {
   const thread = db.prepare('SELECT * FROM tieba_threads WHERE id=?').get(threadId);
   if (!thread) throw new Error('帖子不存在');
   const c = String(content || '').trim().slice(0, 4000);
   if (!c) throw new Error('请填写回复内容');
   const now = nowIso();
   const nextFloor = (thread.last_floor || 1) + 1;
+  let replyFloor = parseInt(replyToFloor, 10) || 0;
+  if (replyFloor > 0) {
+    const hit = db.prepare('SELECT floor FROM tieba_posts WHERE thread_id=? AND floor=?').get(threadId, replyFloor);
+    if (!hit || replyFloor >= nextFloor) replyFloor = 0;
+  }
   const r = db.prepare(`
-    INSERT INTO tieba_posts (thread_id, floor, content, author_id, author_name, author_avatar, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(threadId, nextFloor, c, account.id, account.username, account.avatar || '', now);
+    INSERT INTO tieba_posts (thread_id, floor, content, author_id, author_name, author_avatar, created_at, reply_to_floor)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(threadId, nextFloor, c, account.id, account.username, account.avatar || '', now, replyFloor);
   db.prepare(`
     UPDATE tieba_threads
     SET reply_count = reply_count + 1, last_floor = ?, last_reply_at = ?
     WHERE id=?
   `).run(nextFloor, now, threadId);
   return mapPost(db.prepare('SELECT * FROM tieba_posts WHERE id=?').get(r.lastInsertRowid));
+}
+
+function assertBarOwner(account, barRow) {
+  if (!account) {
+    const err = new Error('请先登录贴吧账号');
+    err.needsTiebaAuth = true;
+    throw err;
+  }
+  if (!barRow || barRow.owner_mode === 'npc' || Number(barRow.creator_id) !== Number(account.id)) {
+    throw new Error('只有吧主可以操作');
+  }
+}
+
+function setThreadPinned(account, threadId, pinned) {
+  const thread = db.prepare('SELECT * FROM tieba_threads WHERE id=?').get(threadId);
+  if (!thread) throw new Error('帖子不存在');
+  const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(thread.bar_id);
+  assertBarOwner(account, bar);
+  const on = pinned ? 1 : 0;
+  db.prepare('UPDATE tieba_threads SET pinned=?, pinned_at=? WHERE id=?')
+    .run(on, on ? nowIso() : '', threadId);
+  return getThread(threadId);
+}
+
+function deleteThread(account, threadId) {
+  const thread = db.prepare('SELECT * FROM tieba_threads WHERE id=?').get(threadId);
+  if (!thread) throw new Error('帖子不存在');
+  const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(thread.bar_id);
+  assertBarOwner(account, bar);
+  db.prepare('DELETE FROM tieba_posts WHERE thread_id=?').run(threadId);
+  db.prepare('DELETE FROM tieba_threads WHERE id=?').run(threadId);
+  db.prepare(`
+    UPDATE tieba_bars
+    SET thread_count = CASE WHEN thread_count > 0 THEN thread_count - 1 ELSE 0 END
+    WHERE id=?
+  `).run(thread.bar_id);
+  return { ok: true, bar_id: thread.bar_id };
 }
 
 function initTiebaModule() {
@@ -456,4 +647,6 @@ module.exports = {
   createThread,
   listPosts,
   replyThread,
+  setThreadPinned,
+  deleteThread,
 };

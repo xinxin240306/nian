@@ -168,9 +168,25 @@ export function stripVoiceLaneTags(text) {
     .replace(/[ \t]{2,}/g, ' ');
 }
 
+/** ElevenLabs 表演标签：合成要留着，气泡和转写里不给用户看。 */
+function isElevenAudioTag(inner) {
+  const s = String(inner || '').trim();
+  if (s.length < 4 || s.length > 48) return false;
+  if (/[:：/\\]/.test(s)) return false;
+  if (/[\u3400-\u9fff]/.test(s)) return false;
+  if (!/^[A-Za-z][A-Za-z0-9'’.,\- ]*$/.test(s)) return false;
+  return /[A-Za-z]/.test(s);
+}
+
+export function stripElevenAudioTags(text) {
+  return String(text || '').replace(/\[([^[\]\n]{1,48})\]/g, (full, inner) => (
+    isElevenAudioTag(inner) ? '' : full
+  )).replace(/[ \t]{2,}/g, ' ');
+}
+
 /**
  * 去掉 AI 回复里的「配图：…」「自拍：…」等系统指令。
- * @param {{ keepVoiceLanes?: boolean }} [opts] 语音条 TTS 需保留 [软声]/[沉声] 标记
+ * @param {{ keepVoiceLanes?: boolean, keepAudioTags?: boolean }} [opts] 语音条 TTS 需保留 [软声]/[沉声] 和 ElevenLabs 表演标签
  */
 export function stripImageDirective(text, opts = {}) {
   if (!text) return text;
@@ -194,6 +210,7 @@ export function stripImageDirective(text, opts = {}) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   if (!opts.keepVoiceLanes) t = stripVoiceLaneTags(t).trim();
+  if (!opts.keepAudioTags) t = stripElevenAudioTags(t).trim();
   return t;
 }
 
