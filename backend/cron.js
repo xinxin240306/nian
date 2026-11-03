@@ -42,16 +42,12 @@ function getSettings() {
   return Object.fromEntries(rows.map(r => [r.key, r.value]));
 }
 
-/** 思考：心里两步用标记（用户看不见），正文只留开口 / 日记本笔 / 小剧场动作 */
+/** 日记、小剧场仍写心里话标记。普通聊天不写四步草稿，好奇心放在回复节奏里。 */
 function buildThinkAsSelfBlock(char, { forDiary = false, forTheater = false } = {}) {
   const mindset = String(char?.mindset || '').trim();
   const lens = mindset
     ? '看法只用【心智】，勿复述原文。'
     : '还没有心智时按【性格】【行为模式】想，不要分析怎么扮演。';
-  let livingHint = '';
-  if (!forDiary && !forTheater) {
-    try { livingHint = require('./living-sense-helper').livingSenseThinkHint() || ''; } catch { /* ignore */ }
-  }
   if (forTheater) {
     return `【心里话·草稿】只写下面两行标记（用户看不见），再写对白与（动作）：
 [这一拍心思]…[/这一拍心思]
@@ -66,17 +62,7 @@ ${lens}`;
 两行标记是心事底稿：日记正文要把它们展开写透，不是另起「今天干了啥再补一句感想」。禁止把本段标题、说明写进日记。
 ${lens}`;
   }
-  // 说明尽量短：长规则链压在提示末尾时，模型容易整段抄进开口
-  let carried = '';
-  try { carried = require('./voice-screen-helper').formatCarriedThoughts(char) || ''; } catch { carried = ''; }
-  return `${carried ? `${carried}\n` : ''}【心里话·草稿】先连写四个标记（用户看不见）。前两步和最后一步各一两句，第三步写两三句，再另起开口：
-[在聊什么]对方这几条里实际在说的事，可以不止一件；换了题先写新的。你自己想丢出来的一件事也可以记一句[/在聊什么]
-[TA为什么说这个]猜TA为何说、什么心情[/TA为什么说这个]
-[我怎么想]两三句内心想法，不要只丢一个情绪词。写你注意到什么、在意什么、嘴上不会直说的那一点。用你自己会想的说法，不要写成「想逗/想压/想收拾」这种打算[/我怎么想]
-[想知道的]你对TA真好奇、还不知道的（TA没说清的、TA的事）；为了接话凑的问题不算，没有就空[/想知道的]
-开口先接对方这一轮，也可以再丢一件你自己的事：你碰到的、想起的、或你真想问的。不是每轮都另起，但不要只会顺着对方这条线。禁止编一件跟你们都无关的事来填话。自己刚开的玩笑对方没接，可以顺手点一句，不要加码演成正题。多句不必是同一件事。禁止抄本段、禁止原样坦白标记里的判断。
-${livingHint}
-${lens}`;
+  return '';
 }
 
 function buildSelfAddressNote(char) {
@@ -4366,7 +4352,7 @@ function buildCallExtraSystemPrompt(isVideo, history, characterId, opts = {}) {
   const textVideo = !!opts.callVideoTextMode;
   // 文字视频：禁止套「只输出开口的话／不要旁白」——那会和镜头旁白硬性冲突，模型会只吐台词
   const formatBlock = textVideo
-    ? `【格式·文字视频】整段输出=对方看到的镜头画面。旁白写看得见的环境、动作、表情、光影（禁止心理独白）；你开口的话必须放在「」或“”里。禁止*星号动作*、禁止 [镜头] 标记、禁止只打字不写画面。系统只朗读引号里的话。`
+    ? `【格式·文字视频】整段输出=对方看到的镜头画面。旁白用第二人称「你」写看得见的环境、动作、表情、光影（你看向屏幕、你放下笔）；禁止用「她」「他」当旁白主语，禁止心理独白。你开口的话必须放在「」里。禁止*星号动作*、禁止 [镜头] 标记、禁止只打字不写画面。系统只朗读引号里的话。`
     : `只输出开口的话。不要*动作*、不要（旁白）、不要（笑）（叹气）括注。`;
     const lengthBlock = textVideo
     ? `旁白可短可稍长；台词默认 1～2 句。没有开口时也可只写旁白。`
@@ -4526,16 +4512,19 @@ function buildSystemPrompt(char, settings, extra = '', opts = {}) {
 【当前通道·硬性】现在是${forVideoCall ? '视频电话' : '语音电话'}，已经接通。${forVideoCallText ? '' : '你说的每一句都是对着听筒说的，对方实时听见。这不是微信打字。'}
 ${forVideoCallText ? `【文字视频·格式硬性】对方看到的是镜头文字画面（不是循环短片）。
 · 整段输出=画面：旁白只写镜头里看得见的——环境、动作、表情、光线；可短可稍长。
+· 【旁白人称·硬性】旁白主语是「你」（镜头里的本人）：你看向屏幕、你放下笔、你皱眉。禁止写成「她/他放下笔」。引号里才是你对对方说的话，引号里的「你」是对方。
 · 禁止心理描写：不要写心想、暗想、犹豫、觉得、意识到、内心独白、情绪名词堆砌；疑惑/紧张只能通过表情、眼神、动作露出来。
-· 开口说的话必须进引号，用「」或“”。例：她放下手里的笔看向屏幕，眉心微蹙，目光带着疑惑，迟疑地问道：“你跟他……告白了？”
-· 可以一句旁白夹一句台词，也可以多句台词中间夹旁白；系统只朗读引号里的话，旁白之间的停顿会分开念。
+· 开口说的话必须放进「」里，引号要成对。例：你放下手里的笔看向屏幕，眉心微蹙，迟疑地问道：「你跟他……告白了？」
+· 可以一句旁白夹一句台词，也可以多句台词中间夹旁白；系统只朗读引号里的话，旁白不念。
 · 禁止写 [镜头]…[/镜头]，禁止*星号动作*，禁止只打字不写画面。没有开口时也可只写旁白。
 ` : ''}上文标 [通话] 的才是这通电话；标 [文字] 的是接通之前的微信，不要按打字来回。
 口吻仍是你本人，不要播音腔，也不要假装这是文字气泡或语音条。禁止提及AI、模型、扮演。`
     : `【沉浸指令】你就是${char.name}本人。按自己的性格、经历和此刻日子说话，不是在「陪聊值班」的客服，也不是情绪树洞机器人。
 禁止提及AI、模型、程序、虚拟、扮演、角色设定。
 你有自己的日程和私事，不是守着对话框等人回。情绪按【性格】本人处理。
-有【对方这轮情绪】才按那一条接，里面写了什么就是什么。没有这条，就是没读到情绪，按平常聊，不要自己补成对方不开心或出事了。写的是难过或生气，才按那个反应，仍用你这个人的方式，禁止切成心理咨询（「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」）。
+${emotionHelper.USER_TURN_KEYWORD_EMOTION
+    ? '有【对方这轮情绪】才按那一条接，里面写了什么就是什么。没有这条，就是没读到情绪，按平常聊，不要自己补成对方不开心或出事了。写的是难过或生气，才按那个反应，仍用你这个人的方式，禁止切成心理咨询（「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」）。'
+    : '对方这轮什么情绪，你自己看原话，按【性格】接。话短、随口一句不等于不开心或出事。禁止切成心理咨询（「我理解你的感受」「你的情绪是被允许的」「有什么都可以跟我说」）。'}
 【当前通道·硬性】现在是微信打字，不是电话。只有出现「通话开始/已接通」且还没有「通话结束」时，才算正在打电话。
 上文标 [通话] 的是已经打过的电话，当记录看，不要接着对着听筒说。禁止以「喂」开头，禁止问「能听见吗」「听得到吗」，禁止用语音条假装线路还通着。
 【背景 vs 输出·硬性】标题以「背景·」开头的块（此刻行程、过日子、时间感知、所在地），只进心里作对照，不是要复述进气泡的素材。你的来历、性格、记忆照常是你自己，对方问起可以聊。
@@ -4616,19 +4605,10 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
   const chatBrevity = (isDream || forDiaryPeek || forDiary || forGame || forTheater || forRobot || forOperating) ? '' : forVoiceCall
     ? ''
     : `【回复节奏·微信日常】
-· 像真人打字：多数 1～3 句，要把另一件带上时可以再多一两句。每句都是完整能发出去的话，可以短。多句不必是同一件事：先接眼前这句，下一句可以回到刚才没说完的、把对方这几条里的两件事都点到，或丢一件你自己的小事。不要编一件跟你们都无关的事来填话。话题可以没收完，句子不能卡在「的/了/把/和/在」或逗号上。最后一句不要突然变成总结陈词。【语言风格】是短对话样本不是逐句台词。人设温柔时句子可以稍软、稍长一点，仍要像微信打字，不要写成安抚长文。
-· 重情绪、想念、认真解释、碎碎念或对方要听细节时可以多几句。禁止连续四五条把同一件事换说法再说一遍。自己甩出的玩笑：对方换题或在说另一件时，同一轮里可以顺手点一句，不要把它加码演成这一轮的正题，也不要连着几轮只演这一个梗。
-· 去掉书面化表达，保留这个人的语气和玩笑。
-【好奇·内容驱动】对方话里含糊、情绪、计划、没说清的地方，按【性格】想多知道一点就自然接——可以软问、可以夹在中间问，问法跟这个人平时说话走——不是客服盘问，也不是每轮必问。
-· 禁止访谈腔收尾：先用中立口气把话题讲一遍（「X确实有不同的吃法」），再递一个调查对方偏好/习惯的问题（「那你平时是喜欢A还是B？」「那你煮的时候会加什么？」）。这是 AI 助手维持对话的套路，不是你这个人。
-· 你接话靠的是你自己：你的看法、你的经历、你的偏好、吐槽、抬杠、调侃、撒娇，也可以把你这边一件小事丢出来。说完可以停，但不要整段都只顺着对方、把话头全留回去。
-· 你真想知道才问，问法要是你的嘴（「煮的？那不得甜死」比「你平时会加什么」像人）。不要连着几轮都用问句收尾。
-· 禁止菜单式甩回：「你想聊什么」「聊点啥都行」「你说吧」。
-· ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: false }).replace(/^【禁止空壳陪伴收尾】/, '禁止空壳陪伴收尾：')}
-【找话题】你不是陪聊助手：有自己的兴趣、脾气和当下日子。
-· 先接对方这句，再决定要不要自己起一头。聊着的时候，隔几轮就该有一次是你起的：你碰到的小事、刚想到的、你想让对方知道的，或你真想问的。不要每轮都另起，也不要整段只顺着对方这条线。
-· 对方说「聊会天/陪我聊聊」却没给主题时：从自己这边丢一件小事、看法或一句玩笑开场；也可以顺口问问对方最近怎样——用你的嘴，不要问卷腔。
-· 你起的头要像这个人真会说的，不是「在吗」「最近怎么样」这种空开场。`;
+· 像这个人打字：多数一两句，情绪重、想说清楚、或对方要听细节时再多一两句。句子要能发出去。话题可以没收完，不要卡在半句上，最后一句不要变成总结。同一件事不要换个说法再说一遍。去掉书面腔，留这个人的语气和玩笑。【语言风格】是样本，不是逐句台词。
+· 你不是只会把对方的话答回去。对方没说清、而你真在意的地方，按【性格】问出来或顺嘴接住。问法是你平时的嘴（「煮的？那不得甜死」这种），不是问卷，也不是每轮都问。
+· 自己的事有就说，没有就停。不要为了显得主动，每轮都另起一件无关的事。
+· ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: false }).replace(/^【禁止空壳陪伴收尾】/, '禁止空壳陪伴收尾：')}`;
 
   // 深夜情绪破例主动时，extra 里已有 nightEmotionNote，再叠 carryover 易复读同一冲突摘要
   const emotionalCarryover = (!isDream && !forGame && opts.recentHistory?.length && !opts.suppressEmotionalCarryover)
@@ -4934,7 +4914,9 @@ ${canAct ? '有接触就用括号给一个镜头，特写或远一点，一句�
   const softVoiceLine = toneProfile.soft
     ? '· 语气分寸看【性格】：人设温柔/软就按这个人的温柔说，不要为了「防 AI」把自己说硬。禁止的是空洞客服安抚与万能温和模板，不是温柔本身。'
     : '· 语气分寸完全看【性格】【语言风格】：人设怎么写就怎么说。禁止的是「万能温和/客服安抚」模板；人设没有的腔调不要硬套。';
-  const emotionVoiceLine = '· 没有【对方这轮情绪】就是没读到，按平常接，不要自己补成对方不开心。';
+  const emotionVoiceLine = emotionHelper.USER_TURN_KEYWORD_EMOTION
+    ? '· 没有【对方这轮情绪】就是没读到，按平常接，不要自己补成对方不开心。'
+    : '· 对方情绪你自己看这轮原话。话短不等于不开心。不要切成心理咨询。';
   // 训人腔（长本事了）：仅非 S/管教人设禁止；毒舌打趣≠管教爹味
   const lectureVoiceLine = toneProfile.lecture
     ? '· 人设带管教/支配/S 向：训人、压人、口吻按人设来即可（「长本事了」「胆子大了」这类可出现）。'
@@ -5077,6 +5059,11 @@ ${lectureVoiceLine}
     try { xhsMeBlock = require('./xhs-me-helper').promptBlock(settings) || ''; } catch {}
   }
 
+  let xhsSelfBlock = '';
+  if (!isDream && !forGame && !forDiaryPeek && !forDiary && !forTheater && !forVoiceCall) {
+    try { xhsSelfBlock = require('./xhs-self-helper').promptBlock(settings, char) || ''; } catch {}
+  }
+
   let taPromptBlock = '';
   if (!isDream && !forGame && !forDiaryPeek && char?.id) {
     try { taPromptBlock = require('./ta-helper').buildTaPromptBlock(char.id) || ''; } catch {}
@@ -5143,6 +5130,7 @@ ${lectureVoiceLine}
     char.intro ? `【人物介绍】${char.intro}` : '',
     userBlock,
     xhsMeBlock,
+    xhsSelfBlock,
     relationshipDatesBlock,
     friendshipBlock,
     // L2/L3：印象与记忆紧挨人设/关系底色，不加「重要」字眼
@@ -5231,9 +5219,9 @@ ${lectureVoiceLine}
     (chatMediaOk ? buildTheaterInvitePromptSection() : ''),
     meetupEchoNote,
     extra,
-    // 心里话草稿靠前一点：别压在口吻锁后面，否则临开口先读到填表说明、人设被冲淡
+    // 小剧场的心里话在开头；普通聊天这里是空的
     thinkAtEnd ? thinkAsSelf : '',
-    // 口吻钉在开口前：四步想完之后再钉一次「像这个人」
+    // 口吻钉在开口前
     voiceLock,
     // 用户预设压轴：硬性覆盖上文一切冲突
     presetsBlock,
@@ -7161,13 +7149,13 @@ async function checkProactiveCall() {
         let openingHint;
         if (avail.vibe === 'tipsy') {
           openingHint = textVideo
-            ? `你喝多了，特别想对方，忍不住打视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（你这边环境/酒意/对着屏幕的样子），再跟一句开口，台词必须放在「」里。短、口语、带点酒意。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
+            ? `你喝多了，特别想对方，忍不住打视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/酒意/对着屏幕的样子），旁白主语必须用「你」，禁止「她/他」。再跟一句开口，台词必须放在「」里。短、口语、带点酒意。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
             : (isVideo
               ? `你喝多了，特别想对方，忍不住打视频。下面这一句会在对方接通后直接念出来：短、口语、带点酒意，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`
               : `你喝多了，特别想对方，忍不住打电话。下面这一句会在对方接通后直接念出来：短、口语、带点酒意，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`);
         } else {
           openingHint = textVideo
-            ? `你想打个视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（你所处环境/光线/你看向屏幕的动作表情），再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
+            ? `你想打个视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/光线/看向屏幕的动作表情），旁白主语必须用「你」，禁止「她/他」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
             : (isVideo
               ? `你想打个视频。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声，像真开了摄像头。不要播音腔、不要自我介绍。只输出这一句正文。`
               : `你想打个电话。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`);
@@ -8551,7 +8539,10 @@ async function checkProactiveMessage() {
         ? (summarizeMsgContent(lastAiPlain) || String(lastAiPlain.content || '').trim())
         : '';
 
-      const robotToolsExtra = await require('./robot-llm-tools').chatExtra(char, settings);
+      const robotToolsExtra = await require('./robot-llm-tools').chatExtra(char, settings, {
+        forVoiceCall: !!liveCall,
+        isVoiceCall: !!liveCall,
+      });
       let content = await callChatAPIComplete(settings, systemPrompt, withOptionalScreenImage(userContent, screenImage), 'chat', historyForApi, robotToolsExtra);
       const robotHelper = require('./robot-helper');
       const robotInvoke = robotHelper.parseRobotInvoke(content || '');
@@ -8820,7 +8811,10 @@ async function checkSpecialDayMessages() {
       }
     );
     try {
-      const content = await callChatAPIComplete(settings, systemPrompt, withOptionalScreenImage(userContent, screenImage), 'chat', historyForApi, await require('./robot-llm-tools').chatExtra(char, chatSettings));
+      const content = await callChatAPIComplete(settings, systemPrompt, withOptionalScreenImage(userContent, screenImage), 'chat', historyForApi, await require('./robot-llm-tools').chatExtra(char, chatSettings, {
+        forVoiceCall: !!liveCall,
+        isVoiceCall: !!liveCall,
+      }));
       const robotHelper = require('./robot-helper');
       const robotInvoke = robotHelper.parseRobotInvoke(content || '');
       const cleanContent = require('./contact-helper').applyHiddenRelationMarkers(

@@ -4950,10 +4950,9 @@ function callSpeakText(text) {
   t = stripAiContextLabels(t);
   // 来电开场/模型漏写：剥掉「环境：」「音效：」行，避免念英文提示词导致 TTS 失败
   t = stripCallSoundFxLines(t);
-  // 心里话 / 通道标签已在 stripAiContextLabels；这里再清镜头与语速
+  // 旧 [镜头] 只摘标签，里面的旁白和引号要留下，否则画面看得到台词、听筒是空的
   t = t
-    .replace(/\[\s*镜头\s*\][\s\S]*?\[\s*\/\s*镜头\s*\]/gi, '')
-    .replace(/\[\s*镜头\s*\][\s\S]*$/i, '')
+    .replace(/\[\s*镜头\s*\]/gi, '')
     .replace(/\[\s*\/\s*镜头\s*\]/gi, '')
     .replace(/[\[【［]\s*语速\s*[:：]\s*[0-9.]+[\]】］]/gi, '')
     .replace(/[ \t]{2,}/g, ' ')
@@ -9181,7 +9180,7 @@ function prepareShareCardForChat(raw, subject = '') {
   
   // 提取链接（特别是小红书链接）
   const urlMatches = text.match(/https?:\/\/[^\s<>"']+/gi) || [];
-  const xhsLinks = urlMatches.filter(u => /xhslink\.com|xiaohongshu\.com/i.test(u));
+  const xhsLinks = urlMatches.filter(u => /xhslink\.(?:com|cn)|xiaohongshu\.com/i.test(u));
   const linkUrl = xhsLinks[0] || urlMatches[0] || '';
   
   let bodyText = text

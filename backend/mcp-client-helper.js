@@ -96,6 +96,13 @@ function authHeaders(server) {
   return h;
 }
 
+/** 念进程里 global.fetch 被换成 node-fetch，MCP SDK 需要带 body.cancel 的原生 fetch。 */
+function mcpFetch() {
+  const native = globalThis.__nianNativeFetch;
+  if (typeof native === 'function') return native;
+  return global.fetch.bind(globalThis);
+}
+
 async function connectClient(server) {
   const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
@@ -103,12 +110,13 @@ async function connectClient(server) {
 
   const url = new URL(server.url);
   const requestInit = { headers: authHeaders(server) };
+  const fetchImpl = mcpFetch();
   const errors = [];
 
   // 1) Streamable HTTP
   try {
     const client = new Client(CLIENT_INFO);
-    const transport = new StreamableHTTPClientTransport(url, { requestInit });
+    const transport = new StreamableHTTPClientTransport(url, { requestInit, fetch: fetchImpl });
     await client.connect(transport);
     return { client, transport, mode: 'streamable-http' };
   } catch (e) {
@@ -124,7 +132,7 @@ async function connectClient(server) {
         fetch: async (input, init = {}) => {
           const headers = new Headers(init.headers || {});
           for (const [k, v] of Object.entries(authHeaders(server))) headers.set(k, v);
-          return fetch(input, { ...init, headers });
+          return fetchImpl(input, { ...init, headers });
         },
       },
     });
@@ -137,11 +145,19 @@ async function connectClient(server) {
   throw new Error(errors.join(' | ') || 'MCP 连接失败');
 }
 
+let _mcpBusy = 0;
+
+function mcpBusy() {
+  return _mcpBusy > 0;
+}
+
 async function withClient(server, fn) {
+  _mcpBusy += 1;
   const { client, transport } = await connectClient(server);
   try {
     return await fn(client);
   } finally {
+    _mcpBusy = Math.max(0, _mcpBusy - 1);
     try { await client.close?.(); } catch {}
     try { await transport.close?.(); } catch {}
   }
@@ -228,7 +244,7 @@ function invalidateServer(serverId) {
  * 聊天用：合并所有已启用 MCP 的 OpenAI tools schema。
  */
 async function schemasForChat(getSettingsFn, opts = {}) {
-  if (opts.isDream || opts.forTheater || opts.forGame) return [];
+  if (opts.isDream || opts.forTheater || opts.forGame || opts.isMusicSync || opts.isVoiceCall || opts.forVoiceCall) return [];
   const servers = loadServers(getSettingsFn).filter((s) => s.enabled !== false);
   if (!servers.length) return [];
 
@@ -245,8 +261,14 @@ async function schemasForChat(getSettingsFn, opts = {}) {
         }
         const n = schema?.function?.name;
         if (!n || nameMap.has(n)) continue;
-        out.push(schema);
         const meta = entry.nameMap.get(n);
+        let xhsSelf = null;
+        try { xhsSelf = require('./xhs-self-helper'); } catch {}
+        if (meta && xhsSelf?.skipTool(meta.toolName)) continue;
+        let exposed = schema;
+        if (meta && xhsSelf?.annotatePublishSchema) exposed = xhsSelf.annotatePublishSchema(exposed, meta.toolName);
+        if (meta && xhsSelf?.annotateFeedSchema) exposed = xhsSelf.annotateFeedSchema(exposed, meta.toolName);
+        out.push(exposed);
         if (meta) nameMap.set(n, meta);
       }
     } catch (e) {
@@ -322,7 +344,7 @@ function serializeToolResult(result) {
   }
 }
 
-async function executeToolCall(call, getSettingsFn) {
+async function executeToolCall(call, getSettingsFn, callOpts = {}) {
   const meta = resolveMappedTool(call?.name, getSettingsFn);
   if (!meta) {
     return { ok: false, error: `未知 MCP 工具: ${call?.name || ''}` };
@@ -332,19 +354,48 @@ async function executeToolCall(call, getSettingsFn) {
   if (!server) return { ok: false, error: 'MCP 服务不存在' };
   if (server.enabled === false) return { ok: false, error: 'MCP 服务未启用' };
 
+  let xhsSelf = null;
+  try { xhsSelf = require('./xhs-self-helper'); } catch {}
+  if (xhsSelf) {
+    const blocked = xhsSelf.precheck(meta.toolName);
+    if (blocked) return blocked;
+  }
+
   try {
     // 确保有 nameMap；必要时刷新
     if (!_cache.get(server.id)?.nameMap?.size) {
       await refreshServerTools(server, { force: true });
     }
+    let args = call.args && typeof call.args === 'object' ? call.args : {};
+    if (xhsSelf?.prepareFeedArgs) {
+      const opened = await xhsSelf.prepareFeedArgs(meta.toolName, args);
+      if (opened.error) return opened.error;
+      args = opened.args;
+    }
+    if (xhsSelf && (meta.toolName === 'publish_content' || meta.toolName === 'publish_with_video')) {
+      const settings = typeof getSettingsFn === 'function' ? getSettingsFn() : {};
+      const prepared = await xhsSelf.preparePublish(meta.toolName, args, callOpts.characterId, settings);
+      if (prepared.error) return prepared.error;
+      args = prepared.args;
+    }
     const result = await withClient(server, async (client) =>
       client.callTool({
         name: meta.toolName,
-        arguments: call.args && typeof call.args === 'object' ? call.args : {},
+        arguments: args,
       })
     );
     console.log(`[mcp] call ${server.name}.${meta.toolName}`);
-    return serializeToolResult(result);
+    const serialized = serializeToolResult(result);
+    let finalResult = serialized;
+    if (meta.toolName === 'get_feed_detail' && xhsSelf?.watchVideo) {
+      try {
+        finalResult = await xhsSelf.watchVideo(serialized);
+      } catch (err) {
+        console.warn('[xhs-self] video', err.message);
+      }
+    }
+    try { xhsSelf?.recordBrowse?.(meta.toolName, args, finalResult, callOpts.characterId); } catch {}
+    return finalResult;
   } catch (e) {
     console.warn(`[mcp] call ${server.name}.${meta.toolName}:`, e.message);
     return JSON.stringify({ ok: false, error: e.message || 'mcp_call_failed' });
@@ -397,6 +448,21 @@ function deleteServer(getSettingsFn, setSettingFn, id) {
   return { ok: true };
 }
 
+async function invokeTool(getSettingsFn, toolName, args) {
+  const name = String(toolName || '').trim();
+  const servers = loadServers(getSettingsFn);
+  const server = servers.find((s) => {
+    const label = `${s.name || ''} ${s.url || ''}`;
+    return /小红书|xiaohongshu|:18060/i.test(label);
+  }) || servers[0];
+  if (!server) throw new Error('没有小红书连接');
+  const result = await withClient(server, async (client) => client.callTool({
+    name,
+    arguments: args && typeof args === 'object' ? args : {},
+  }));
+  return serializeToolResult(result);
+}
+
 function listPublicServers(getSettingsFn) {
   return loadServers(getSettingsFn).map(publicServer);
 }
@@ -415,6 +481,8 @@ module.exports = {
   schemasForChat,
   isMcpToolName,
   executeToolCall,
+  invokeTool,
+  mcpBusy,
   invalidateServer,
   normalizeServer,
 };

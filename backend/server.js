@@ -2,6 +2,10 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 // 始终覆盖为 node-fetch：Node 18+ 自带 fetch 会忽略 timeout 选项，
 // 聊天 API 卡住时请求永不结束，前端表现为发送无响应、其它页面一直转圈。
 // 聊天热路径另用 fetchWithTimeout（timeout + AbortSignal）。
+// MCP SDK 会调用 response.body.cancel，node-fetch 没有这个方法。先留下原生 fetch 给 MCP 用。
+if (typeof global.fetch === 'function' && !globalThis.__nianNativeFetch) {
+  globalThis.__nianNativeFetch = global.fetch.bind(globalThis);
+}
 global.fetch = require('node-fetch');
 const fetch = global.fetch;
 const express = require('express');
@@ -725,7 +729,7 @@ async function generateChatIncomingOpening(char, settings, { video = false, chat
   const textVideo = video && isCharCallVideoTextMode(char);
   let hint;
   if (textVideo) {
-    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时你这边镜头里的一小段画面：先一两句旁白（你所处的环境/光线/你对着屏幕的动作表情），再跟一句开口的话，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。禁止写「环境：」「音效：」或任何音效指令行。`;
+    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时镜头里的一小段画面：先一两句旁白（环境/光线/对着屏幕的动作表情），旁白主语必须用「你」，禁止写成「她/他」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else if (video) {
     hint = `你刚在微信跟用户说完话，现在视频电话已经打通了。写一句刚接通时对着摄像头说的开场：短、口语，可先喂一声，自然想看看对方。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else {
@@ -2465,6 +2469,24 @@ app.post('/api/xhs-screen/stack', async (req, res) => {
   }
 });
 
+app.get('/api/xhs-browse', (req, res) => {
+  try {
+    const items = require('./xhs-self-helper').listBrowse(req.query.limit);
+    res.json({ items });
+  } catch (e) {
+    res.status(500).json({ error: e.message || '读取失败' });
+  }
+});
+
+app.post('/api/xhs-browse/ack', (req, res) => {
+  try {
+    const removed = require('./xhs-self-helper').ackBrowse(req.body?.ids);
+    res.json({ ok: true, removed });
+  } catch (e) {
+    res.status(500).json({ error: e.message || '确认失败' });
+  }
+});
+
 app.get('/api/xhs-me', (req, res) => {
   try {
     res.json(require('./xhs-me-helper').read(getSettings()));
@@ -2473,7 +2495,7 @@ app.get('/api/xhs-me', (req, res) => {
   }
 });
 
-app.post('/api/xhs-me', (req, res) => {
+app.post('/api/xhs-me', async (req, res) => {
   try {
     const me = require('./xhs-me-helper');
     const body = req.body || {};
@@ -2481,7 +2503,8 @@ app.post('/api/xhs-me', (req, res) => {
       me.clear(setSetting);
       return res.json({ ok: true, nickname: '', redId: '', userId: '' });
     }
-    res.json({ ok: true, ...me.save(setSetting, body) });
+    const userId = await me.resolveUserId(body.userId);
+    res.json({ ok: true, ...me.save(setSetting, { ...body, userId }) });
   } catch (e) {
     res.status(400).json({ error: e.message || '保存失败' });
   }
@@ -2495,6 +2518,26 @@ app.post('/api/xhs-screen/click', async (req, res) => {
   } catch (e) {
     const status = e.code === 'unconfigured' || /地址|位置/.test(String(e.message || '')) ? 400 : 502;
     res.status(status).json({ error: e.message || '点按失败' });
+  }
+});
+
+app.post('/api/xhs-screen/qr', (req, res) => {
+  try {
+    const result = require('./xhs-self-helper').pullLoginQr(getSettings);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message || '二维码没拉起来' });
+  }
+});
+
+app.post('/api/xhs-screen/type', async (req, res) => {
+  try {
+    const screen = require('./xhs-screen-helper');
+    const result = await screen.typeCode(getSettings(), req.body || {});
+    res.json(result);
+  } catch (e) {
+    const status = e.code === 'unconfigured' || e.code === 'bad_code' || /地址|位置|验证码|手机号/.test(String(e.message || '')) ? 400 : 502;
+    res.status(status).json({ error: e.message || '填入失败' });
   }
 });
 
@@ -5429,38 +5472,61 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
 
   const apiMessages = [{ role: 'system', content: systemPrompt }, ...apiHistory];
   const lookUrl = String(callLookImage || '').trim();
+  // 本轮若附图被上游拒绝，把画面摘掉再发文字，避免整轮 400
+  let detachCallLookFrame = null;
   // 观影：截图只用于上游生成「一起看」摘要，不把图塞给角色（避免从截图角度说话）
   if (isVideoMode && lookUrl && String(callPresenceMode || '').trim() !== 'watch') {
-    const abs = toAbsoluteMediaUrl(lookUrl, reqBase);
-    if (abs) {
+    // 和聊天识图一样内嵌。远程网址中转站拉不到，会直接 400；挂断后不再附图所以聊天正常
+    const inline = await resolveChatImageUrl(lookUrl, reqBase);
+    if (String(inline || '').startsWith('data:image/')) {
+      const promptBeforeLook = apiMessages[0].content;
       const lookNote = '【视频通话·你正看着对方】下面这一帧就是你屏幕上此刻的画面——像真人视频通话，不是相册、不是任务清单。\n'
         + '画面清楚：有值得一提的再随口带一句，像顺眼瞥到，别每轮点名「我看见你」「你穿了…」，也不要盘点。\n'
         + '画面黑、糊、暗、挡镜头、几乎看不清：你就当真没看清——可以眯眼辨认、凑近屏幕、随口问一句「你那边怎么黑了？」「挡着了？」之类，按你自己的性格来，不要像客服报障，也不要假装看见表情/穿着/动作。\n'
         + '不要提截图、系统、摄像头权限。';
-      extraSystemPrompt = extraSystemPrompt ? `${extraSystemPrompt}\n${lookNote}` : lookNote;
-      apiMessages[0].content = buildSystemPrompt(char, settings, extraSystemPrompt, promptOpts);
+      const lookExtra = extraSystemPrompt ? `${extraSystemPrompt}\n${lookNote}` : lookNote;
+      apiMessages[0].content = buildSystemPrompt(char, settings, lookExtra, promptOpts);
+      const lookText = '（这是你视频通话屏幕上此刻看到的对方画面。清楚就当真人视频里瞥见；黑了/糊了就当没看清，可以自然问一句。）';
+      const imagePart = { type: 'image_url', image_url: { url: inline } };
       let attached = false;
       for (let i = apiMessages.length - 1; i >= 1; i--) {
         if (apiMessages[i].role !== 'user') continue;
         const prev = apiMessages[i].content;
+        const wasString = typeof prev === 'string';
         const parts = Array.isArray(prev)
           ? prev.slice()
           : [{ type: 'text', text: String(prev || '') }];
-        parts.push({ type: 'text', text: '（这是你视频通话屏幕上此刻看到的对方画面。清楚就当真人视频里瞥见；黑了/糊了就当没看清，可以自然问一句。）' });
-        parts.push({ type: 'image_url', image_url: { url: abs } });
+        const textPart = { type: 'text', text: lookText };
+        parts.push(textPart);
+        parts.push(imagePart);
         apiMessages[i].content = parts;
+        const idx = i;
+        detachCallLookFrame = () => {
+          apiMessages[0].content = promptBeforeLook;
+          apiMessages[idx].content = wasString
+            ? prev
+            : parts.filter((p) => p !== imagePart && p !== textPart);
+        };
         attached = true;
         break;
       }
       if (!attached) {
-        apiMessages.push({
+        const msg = {
           role: 'user',
           content: [
-            { type: 'text', text: '（这是你视频通话屏幕上此刻看到的对方画面。清楚就当真人视频里瞥见；黑了/糊了就当没看清，可以自然问一句。）' },
-            { type: 'image_url', image_url: { url: abs } },
+            { type: 'text', text: lookText },
+            imagePart,
           ],
-        });
+        };
+        apiMessages.push(msg);
+        detachCallLookFrame = () => {
+          apiMessages[0].content = promptBeforeLook;
+          const at = apiMessages.indexOf(msg);
+          if (at >= 0) apiMessages.splice(at, 1);
+        };
       }
+    } else {
+      console.warn('[call-look] 画面未能内嵌，本轮不附图');
     }
   } else if (String(callPresenceMode || '').trim() === 'watch' && lookUrlEarly) {
     // 刷新「一起看」后，给角色一句当面追剧提示（摘要已在 system）
@@ -5487,7 +5553,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
       userMessage: lastUserContent,
       recentHistory: history,
     });
-    const turn = await completeChatTurn({
+    const runTurn = () => completeChatTurn({
       url: endpoint,
       apiKey,
       model: apiModel,
@@ -5499,6 +5565,20 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
       tools: robotChatTools,
       characterId: char.id,
     });
+    let turn;
+    try {
+      turn = await runTurn();
+    } catch (err) {
+      const msg = String(err?.message || err || '');
+      if (detachCallLookFrame && /\b(?:400|413)\b|image|vision|multimodal/i.test(msg)) {
+        console.warn('[call-look] 画面被上游拒绝，去掉后再请求:', msg.slice(0, 180));
+        detachCallLookFrame();
+        detachCallLookFrame = null;
+        turn = await runTurn();
+      } else {
+        throw err;
+      }
+    }
     const data = turn.data || { choices: [{ message: turn.message, finish_reason: turn.finishReason }] };
     if (data.choices?.[0] && turn.finishReason) data.choices[0].finish_reason = turn.finishReason;
     let rawAiContent = String(turn.content || '').trim();
@@ -15082,6 +15162,9 @@ dbModule.initDB().then(() => {
     });
     initWS(server);
     startCronJobs(aiInteractWithMoment, aiNpcInteractWithMoment, replyOwnerToNpcComments);
+    try { require('./xhs-keepalive').start(getSettings); } catch (e) {
+      console.warn('[xhs-keepalive]', e.message);
+    }
     try {
       robotDeviceBridge.startRobotDeviceBridge({
         getSettings,

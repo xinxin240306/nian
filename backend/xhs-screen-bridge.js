@@ -136,6 +136,19 @@ async function handle(req, res) {
     sendJson(res, 200, { ok: true, px, py, width: w, height: h });
     return;
   }
+  if (req.method === 'POST' && url.pathname === '/type') {
+    const body = await readBody(req);
+    const code = String(body.text || '').replace(/\s+/g, '');
+    if (!/^1\d{10}$/.test(code) && !/^\d{4,8}$/.test(code)) {
+      sendJson(res, 400, { error: '填 11 位手机号，或 4 到 8 位验证码' });
+      return;
+    }
+    await run('xdotool', ['key', 'ctrl+a']);
+    await run('xdotool', ['key', 'BackSpace']);
+    await run('xdotool', ['key', '--delay', '40', ...code.split('')]);
+    sendJson(res, 200, { ok: true, length: code.length });
+    return;
+  }
   sendJson(res, 404, { error: '没有这个接口' });
 }
 

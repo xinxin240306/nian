@@ -40,8 +40,8 @@ function renderXhsMe(page, me, note) {
           </div>
           <div class="settings-row settings-row--stack">
             <div class="settings-row-label">用户 ID</div>
-            <input class="input" id="xhs-me-uid" type="text" maxlength="120" value="${escapeHtml(me.userId || '')}" placeholder="主页链接，或 profile/ 后面那段">
-            <div class="settings-row-sub">有这项，他回复你的评论时才能对着你的号回。你会收到回复提醒。</div>
+            <input class="input" id="xhs-me-uid" type="text" maxlength="500" value="${escapeHtml(me.userId || '')}" placeholder="分享短链、主页链接，或 profile/ 后面那段">
+            <div class="settings-row-sub">小红书里复制主页链接，整段贴进来就行。有这项，他回复你的评论时才能对着你的号回。你会收到回复提醒。</div>
           </div>
           <div style="padding:4px 16px 12px">
             <div class="settings-row-sub" id="xhs-me-note">${escapeHtml(note || '')}</div>

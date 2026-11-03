@@ -120,6 +120,32 @@ async function clickAt(settings, body) {
   };
 }
 
+async function typeCode(settings, body) {
+  const code = String(body?.text ?? '').replace(/\s+/g, '');
+  if (!/^1\d{10}$/.test(code) && !/^\d{4,8}$/.test(code)) {
+    const e = new Error('填 11 位手机号，或 4 到 8 位验证码');
+    e.code = 'bad_code';
+    throw e;
+  }
+  if (body?.x != null && body?.y != null && body.x !== '' && body.y !== '') {
+    await clickAt(settings, body);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  const { href, token } = endpoint(settings, '/type');
+  const resp = await bridgeFetch(href, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: code }),
+  });
+  const text = await resp.text();
+  let data = {};
+  try { data = JSON.parse(text || '{}'); } catch {}
+  if (!resp.ok || data.ok === false) {
+    throw new Error(data.error || `填入失败 ${resp.status}`);
+  }
+  return { ok: true, length: code.length };
+}
+
 module.exports = {
   URL_KEY,
   TOKEN_KEY,
@@ -128,6 +154,7 @@ module.exports = {
   saveConfig,
   fetchShot,
   clickAt,
+  typeCode,
   normalizePoint,
   assertBaseUrl,
 };

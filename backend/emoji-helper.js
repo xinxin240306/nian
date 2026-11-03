@@ -3176,8 +3176,14 @@ function formatMessageForAi(msg) {
     return `[位置]${body}[/位置]`;
   }
   if (type === 'link') {
+    const xhsUrl = ((content.match(/https?:\/\/[^\s<>"'，。]+/gi) || [])
+      .map((url) => url.replace(/[)）]+$/, ''))
+      .find((url) => /xhslink\.(?:com|cn)|xiaohongshu\.com/i.test(url))) || '';
     const { title, body } = parseLinkPayload(content);
     const card = serializeLinkContent(title, body);
+    if (role === 'user' && xhsUrl) {
+      return `[用户分享的小红书笔记]${card}\n链接: ${xhsUrl}\n[/用户分享的小红书笔记]（这是一篇小红书笔记。想看就把上面整段链接原样放进 feed_id。看不看、看完说不说，按性格。没打开就不要说自己看过。）`;
+    }
     if (role === 'user') {
       return `[用户分享的链接卡]${card}[/用户分享的链接卡]（卡片里的标题和文案你都能读到，按内容接话；不要说去打开网页）`;
     }

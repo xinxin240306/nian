@@ -10,15 +10,69 @@ function clip(value, max) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-function extractUserId(raw) {
+const USER_ID_RE = /^[0-9a-zA-Z]{6,32}$/;
+
+function parseUserId(raw) {
   const text = String(raw || '').trim();
   if (!text) return '';
   const fromUrl = text.match(/\/user\/profile\/([0-9a-zA-Z]+)/);
-  const id = fromUrl ? fromUrl[1] : text;
-  if (!/^[0-9a-zA-Z]{6,32}$/.test(id)) {
-    throw new Error('用户 ID 不对。填主页链接里 profile/ 后面那段，或只填那一串字符。');
+  if (fromUrl && USER_ID_RE.test(fromUrl[1])) return fromUrl[1];
+  if (USER_ID_RE.test(text)) return text;
+  return null;
+}
+
+function extractUserId(raw) {
+  const id = parseUserId(raw);
+  if (id == null) {
+    throw new Error('用户 ID 不对。可以贴分享短链、主页链接，或 profile/ 后面那段。');
   }
   return id;
+}
+
+function pickShortLink(raw) {
+  const m = String(raw || '').match(/https?:\/\/(?:www\.)?xhslink\.cn\/[^\s<>"']+/i);
+  if (!m) return '';
+  return m[0].replace(/[，。,.]+$/, '');
+}
+
+function followOnce(url) {
+  const https = require('https');
+  const target = new URL(url);
+  if (target.protocol !== 'https:' || !/^(?:www\.)?(?:xhslink\.cn|xiaohongshu\.com)$/i.test(target.hostname)) {
+    return Promise.reject(new Error('只接受小红书的分享链接。'));
+  }
+  return new Promise((resolve, reject) => {
+    const req = https.get(target, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      },
+      timeout: 8000,
+    }, (res) => {
+      res.resume();
+      resolve(String(res.headers.location || ''));
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('分享链接没打开。'));
+    });
+    req.on('error', () => reject(new Error('分享链接没打开。')));
+  });
+}
+
+async function resolveUserId(raw) {
+  const direct = parseUserId(raw);
+  if (direct != null) return direct;
+  const short = pickShortLink(raw);
+  if (!short) extractUserId(raw);
+  let current = short;
+  for (let i = 0; i < 3; i += 1) {
+    const location = await followOnce(current);
+    const id = parseUserId(location);
+    if (id) return id;
+    if (!location) break;
+    current = location;
+  }
+  throw new Error('这条分享链接里没有主页 ID。打开自己的主页，重新复制链接再贴一次。');
 }
 
 function extractRedId(raw) {
@@ -81,4 +135,5 @@ module.exports = {
   save,
   clear,
   promptBlock,
+  resolveUserId,
 };

@@ -385,7 +385,13 @@ async function toolsForChat(char, settings, opts = {}) {
 
 async function chatExtra(char, settings, opts = {}) {
   const tools = await toolsForChat(char, settings, opts);
-  return tools ? { tools, characterId: Number(char?.id) || 0 } : {};
+  if (!tools) return {};
+  const hasMcp = tools.some((t) => String(t?.function?.name || '').startsWith('mcp_'));
+  return {
+    tools,
+    characterId: Number(char?.id) || 0,
+    ...(hasMcp ? { timeout: 120000 } : {}),
+  };
 }
 
 function toolFollowUpPayload(calls) {

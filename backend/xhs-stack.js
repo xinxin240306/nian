@@ -150,7 +150,7 @@ async function doStart(getSettings, setSetting) {
     if (!bin) {
       mcpNote = '没找到小红书 MCP 程序。放到 /usr/local/bin/xiaohongshu-mcp 后再按一次。';
     } else {
-      spawnDetached(bin, [], { DISPLAY });
+      spawnDetached(bin, ['-headless=false', '-port', '127.0.0.1:18060'], { DISPLAY });
       started.push('小红书 MCP');
     }
   }

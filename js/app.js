@@ -17,6 +17,7 @@ import { promptAppUpdateIfNeeded } from './app-update.js';
 import { startPhoneNotificationSync } from './phone-bridge.js';
 import { installMediaCacheResolver } from './chat-media-cache.js';
 import { startChatArchiveSync } from './chat-archive.js';
+import { startXhsBrowseSync, syncXhsBrowse } from './xhs-browse-store.js';
 import { playCallRingtone, stopCallRingtone, prefetchTTS, unlockAudioPlayback, useSystemCallRingtone } from './tts.js';
 import { initHomeDesktop, refreshHomeDesktop, tickWidgetClocks } from './home-desktop.js';
 import {
@@ -86,6 +87,7 @@ const PAGE_LOADERS = {
   mcp: () => import('./pages/mcp-page.js'),
   'xhs-screen': () => import('./pages/xhs-screen-page.js'),
   'xhs-me': () => import('./pages/xhs-me-page.js'),
+  'xhs-browse': () => import('./pages/xhs-browse-page.js'),
   impression: () => import('./pages/impression-page.js'),
   wardrobe: () => import('./pages/wardrobe-page.js'),
   appearance: () => import('./pages/appearance-page.js'),
@@ -1227,6 +1229,7 @@ async function init() {
         if (isActive) {
           hideNativeCapsule().catch(() => {});
           try { window.__nianReconcileCall?.(); } catch {}
+          syncXhsBrowse().catch(() => {});
         }
       });
     } catch {}
@@ -1270,6 +1273,7 @@ async function init() {
     await Promise.all([loadSettings(), loadCharacters()]);
     installMediaCacheResolver();
     startChatArchiveSync(characters);
+    startXhsBrowseSync();
     applyTheme();
     applyBackground();
     applyThemeBackground();

@@ -779,8 +779,14 @@ function wordRe(word) {
   return re;
 }
 
+/** 「随便逛逛 / 随便看看」是副词，不是「随便」「随便你」那种冷淡。 */
+function isCasualSuibian(text) {
+  return /随便(?!你|吧|啊|呀|哦|噢|呗|了|[。！!？?～~…\s]|$)/.test(String(text || ''));
+}
+
 function wordHit(word, text) {
   if (word.length < 2) return false;
+  if (word === '随便' && isCasualSuibian(text)) return false;
   return text.includes(word) || wordRe(word).test(text);
 }
 

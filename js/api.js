@@ -204,7 +204,11 @@ export const getXhsScreen = () => apiFetch('/api/xhs-screen');
 export const saveXhsScreen = (data) => apiFetch('/api/xhs-screen', { method: 'POST', body: JSON.stringify(data || {}) });
 export const getXhsScreenShot = () => apiFetch('/api/xhs-screen/shot', { timeoutMs: 25000 });
 export const clickXhsScreen = (data) => apiFetch('/api/xhs-screen/click', { method: 'POST', body: JSON.stringify(data || {}), timeoutMs: 25000 });
+export const typeXhsScreen = (data) => apiFetch('/api/xhs-screen/type', { method: 'POST', body: JSON.stringify(data || {}), timeoutMs: 25000 });
 export const startXhsStack = () => apiFetch('/api/xhs-screen/stack', { method: 'POST', body: '{}', timeoutMs: 30000 });
+export const pullXhsLoginQr = () => apiFetch('/api/xhs-screen/qr', { method: 'POST', body: '{}', timeoutMs: 20000 });
+export const getXhsBrowse = () => apiFetch('/api/xhs-browse');
+export const ackXhsBrowse = (ids) => apiFetch('/api/xhs-browse/ack', { method: 'POST', body: JSON.stringify({ ids: ids || [] }) });
 export const getXhsMe = () => apiFetch('/api/xhs-me');
 export const saveXhsMe = (data) => apiFetch('/api/xhs-me', { method: 'POST', body: JSON.stringify(data || {}) });
 export const pushRobotFace = (json) =>

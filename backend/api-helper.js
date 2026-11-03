@@ -234,7 +234,7 @@ function fallbackMessageTextForAi(msg) {
     const raw = String(msg?.content || '').trim();
     if (!raw) return '[链接]';
     // 检查是否包含小红书链接
-    const hasXhsLink = /xhslink\.com|xiaohongshu\.com/i.test(raw);
+    const hasXhsLink = /xhslink\.(?:com|cn)|xiaohongshu\.com/i.test(raw);
     const linkLabel = hasXhsLink ? '小红书链接' : '链接';
     if (role === 'user') return `[用户分享的${linkLabel}]\n${raw}\n[/用户分享的${linkLabel}]`;
     return `[${linkLabel}]${raw}[/${linkLabel}]`;
@@ -1132,8 +1132,21 @@ async function completeChatTurn(opts = {}) {
         payload = JSON.stringify(result);
       } else if (mcpHelper && mcpHelper.isMcpToolName(c.name)) {
         try {
-          const raw = await mcpHelper.executeToolCall(c, () => opts.settings || {});
-          payload = typeof raw === 'string' ? raw : JSON.stringify(raw || { ok: true });
+          const raw = await mcpHelper.executeToolCall(c, () => opts.settings || {}, {
+            characterId: opts.characterId,
+          });
+          if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            payload = String(raw.content || '');
+            const images = Array.isArray(raw.images) ? raw.images : [];
+            for (const url of images) {
+              if (typeof url === 'string' && url.startsWith('data:image/')) {
+                visionParts.push({ type: 'image_url', image_url: { url } });
+              }
+            }
+            if (images.length && raw.visionHint) visionHint = String(raw.visionHint);
+          } else {
+            payload = typeof raw === 'string' ? raw : JSON.stringify(raw || { ok: true });
+          }
         } catch (e) {
           payload = JSON.stringify({ ok: false, error: e.message || 'mcp_failed' });
         }
@@ -5348,8 +5361,8 @@ function pickHandDrawnMedium(texts, imageStyle) {
 }
 
 /** 聊天配图：根据「配图：」描述与正文拼生图 prompt（纯文生图，不走参考图） */
-function buildChatContextImagePrompt(char, { presetQuery, captionText, placeHint, drawMode, userMessage } = {}) {
-  const imageStyle = char?.image_style || 'anime';
+function buildChatContextImagePrompt(char, { presetQuery, captionText, placeHint, drawMode, userMessage, realOnly } = {}) {
+  const imageStyle = realOnly ? 'real' : (char?.image_style || 'anime');
   let subject = String(presetQuery || '').trim();
   if (/[\u4e00-\u9fff]/.test(subject)) {
     const mapped = extractImageQueryFromText(subject);
@@ -5363,13 +5376,15 @@ function buildChatContextImagePrompt(char, { presetQuery, captionText, placeHint
   }
   subject = subject.replace(/^["'`]|["'`]$/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
 
-  const mode = drawMode
-    || detectDrawingMediaIntent({
-      userMessage: userMessage || '',
-      query: presetQuery || '',
-      caption: captionText || '',
-    })
-    || 'photo';
+  const mode = realOnly
+    ? 'photo'
+    : (drawMode
+      || detectDrawingMediaIntent({
+        userMessage: userMessage || '',
+        query: presetQuery || '',
+        caption: captionText || '',
+      })
+      || 'photo');
 
   // 你画我猜 / 简笔画：故意画糊一点，方便猜
   if (mode === 'doodle') {
@@ -5429,6 +5444,7 @@ function buildChatContextImagePrompt(char, { presetQuery, captionText, placeHint
     ...placeBits,
     subject,
     CHAT_CONTEXT_NO_FACE_HINT,
+    realOnly ? 'real photograph taken by a phone, not anime, not cartoon, not illustration, not 3D, not a game render' : '',
     'high quality, sharp focus on the scenery or object not on bystanders',
   ].filter(Boolean).join(', ');
 }
@@ -5460,15 +5476,17 @@ async function generateChatContextImage(settings, char, contentText, presetQuery
   const captionText = String(contentText || '').trim();
   const query = typeof presetQuery === 'string' ? presetQuery : '';
   // drawMode='photo'：调用方已判定为实拍，不再按正文重判
-  const drawMode = opts.drawMode === 'photo'
-    ? null
-    : (opts.drawMode
-      || detectDrawingMediaIntent({
-        userMessage: opts.userMessage || '',
-        query,
-        caption: captionText,
-      })
-      || null);
+  const drawMode = opts.realOnly
+    ? 'photo'
+    : (opts.drawMode === 'photo'
+      ? null
+      : (opts.drawMode
+        || detectDrawingMediaIntent({
+          userMessage: opts.userMessage || '',
+          query,
+          caption: captionText,
+        })
+        || null));
   // 画画不要掉进 Unsplash 实拍风景兜底
   const allowUnsplashFallback = !drawMode && opts.allowUnsplash !== false;
   const nsfw = inferNsfwMediaRequest(opts, `${captionText}\n${query}`);
@@ -5500,6 +5518,7 @@ async function generateChatContextImage(settings, char, contentText, presetQuery
     placeHint: opts.placeHint || '',
     drawMode: drawMode || 'photo',
     userMessage: opts.userMessage || '',
+    realOnly: !!opts.realOnly,
   });
 
   for (const aspect of aspects) {
@@ -7100,15 +7119,17 @@ async function fetchImg2VideoModelsFromApi(settings, overrides = {}) {
   };
 }
 
-function buildChatContextVideoPrompt(char, { presetQuery, captionText, forImg2Video = false, nsfw = false } = {}) {
-  const imageStyle = char?.image_style || 'anime';
-  const styleDesc = forImg2Video
+function buildChatContextVideoPrompt(char, { presetQuery, captionText, forImg2Video = false, nsfw = false, realOnly = false } = {}) {
+  const imageStyle = realOnly ? 'real' : (char?.image_style || 'anime');
+  const styleDesc = realOnly
+    ? 'Generate a short casual iPhone camera-roll clip from this exact real photograph. Keep it photoreal, not anime, not cartoon, not illustration, not 3D, not a game render'
+    : (forImg2Video
     ? (imageStyle === 'real'
       ? 'Generate a short casual iPhone camera-roll clip that starts from this exact photo as the first frame, keep face hair body and layout unchanged, ordinary unposed phone video feel'
       : 'Generate a short casual phone clip that starts from this exact illustration as the first frame, keep character face hair body and layout unchanged')
     : (imageStyle === 'real'
       ? 'casual accidental iPhone video clip, slight handheld shake, mild soft focus, phone grain, natural light, no cinematic look'
-      : 'casual phone video clip, smooth natural motion');
+      : 'casual phone video clip, smooth natural motion'));
 
   let subject = nsfw ? String(presetQuery || '').trim() : softenSmileInSceneQuery(presetQuery);
   if (/[\u4e00-\u9fff]/.test(subject)) {
@@ -7435,11 +7456,16 @@ async function fetchPexelsVideoForMoment(settings, contentText, presetQuery = nu
  * 朋友圈「配视频」关闭图库时：不锁角色脸，先按内容/关键词文生图出一张静图，
  * 再交给「图生视频」API 把这张图当起始帧做成短片。需要设置里配好「图生视频」（img2video_*）。
  */
-async function generateMomentVideoViaAI(settings, char, contentText, presetQuery = null) {
+async function generateMomentVideoViaAI(settings, char, contentText, presetQuery = null, opts = {}) {
   const query = typeof presetQuery === 'string' ? presetQuery : null;
-  const stillUrl = await generateChatContextImage(settings, char, contentText, query);
+  const stillUrl = await generateChatContextImage(settings, char, contentText, query, opts);
   if (!stillUrl) return null;
-  const prompt = buildChatContextVideoPrompt(char, { presetQuery: query, captionText: contentText });
+  const prompt = buildChatContextVideoPrompt(char, {
+    presetQuery: query,
+    captionText: contentText,
+    forImg2Video: !!opts.realOnly,
+    realOnly: !!opts.realOnly,
+  });
   return generateImageToVideo(settings, {
     prompt,
     referenceImageUrl: stillUrl,

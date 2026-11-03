@@ -155,7 +155,13 @@ function startIncomingFromCharacter(db, char, settings, { opening, video } = {})
   try {
     open = require('./emoji-helper').scrubUserVisibleText(open, char?.mindset);
   } catch { /* ignore */ }
-  open = open.replace(/\s+/g, ' ').trim().slice(0, 160);
+  const textVideo = !!video && String(char?.call_video_mode || 'video').trim().toLowerCase() === 'text';
+  if (textVideo) {
+    // 文字画面要保留换行和引号台词；压成一行并截到 160 会把「」切掉，来电文案和朗读一起坏
+    open = open.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim().slice(0, 420);
+  } else {
+    open = open.replace(/\s+/g, ' ').trim().slice(0, 160);
+  }
   const logId = logOutreach(db, char.id, 'call', open, { video: !!video });
   scheduleRingTimeout(db, logId, char.id);
   const { push } = require('./push');

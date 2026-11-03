@@ -205,6 +205,9 @@ function deriveEmotionInfluenceWeights(char = {}) {
   };
 }
 
+/** 关键词贴「对方这轮情绪」。暂时关掉：不准，改由角色自己看原话。表情读到的不走这里。 */
+const USER_TURN_KEYWORD_EMOTION = false;
+
 /** 从用户本轮消息推断其情绪倾向（供语气优先级使用，不写入角色数值） */
 function inferUserEmotionFromMessage(text) {
   const t = String(text || '').replace(/^【自动回复】/, '').trim();
@@ -1779,7 +1782,7 @@ function buildReplyToneBlock(char, state, opts = {}) {
   ];
 
   const userMsg = String(opts.userMessage || '').trim();
-  const inferred = inferUserEmotionFromMessage(userMsg);
+  const inferred = USER_TURN_KEYWORD_EMOTION ? inferUserEmotionFromMessage(userMsg) : null;
   const sensed = String(opts.userEmotion || '').trim();
 
   if (!state?.mood) {
@@ -2012,6 +2015,7 @@ module.exports = {
   witherChargeForPrimary,
   deriveTemperament,
   deriveEmotionInfluenceWeights,
+  USER_TURN_KEYWORD_EMOTION,
   inferUserEmotionFromMessage,
   defaultMood,
   normalizeMood,

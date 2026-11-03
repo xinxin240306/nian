@@ -33,7 +33,7 @@ function renderXhsScreen(page, cfg, note) {
       <div class="settings-section" style="margin-top:12px">
         <div class="settings-group">
           <div class="settings-row settings-row--stack">
-            <div class="settings-row-sub">这是云服务器上的那块屏幕。看到要他点的地方，在画面上点一下，再按「让他点这里」。</div>
+            <div class="settings-row-sub">这是云服务器上的那块屏幕。按「拉二维码」，过几秒再按刷新，用小红书扫。不想扫码：点画面上的手机号输入框，在下面填 11 位手机号，按「填入」。短信验证码也填在这个框，4 到 8 位。点一下画面里的输入框再填，会更准。</div>
           </div>
           <div class="settings-row settings-row--stack">
             <div class="settings-row-label">画面地址</div>
@@ -55,8 +55,13 @@ function renderXhsScreen(page, cfg, note) {
         <img id="xhs-shot" alt="云端画面" hidden>
         <div class="xhs-mark" id="xhs-mark" hidden></div>
       </div>
-      <div style="padding:0 16px 8px">
-        <div class="settings-row-sub" id="xhs-note">${escapeHtml(note || '点画面里要他点的位置。')}</div>
+      <div style="padding:12px 16px 8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="input" id="xhs-code" inputmode="numeric" autocomplete="one-time-code" maxlength="11" placeholder="手机号或验证码" style="flex:1">
+          <button type="button" class="btn btn-ghost" id="xhs-qr">拉二维码</button>
+          <button type="button" class="btn btn-primary" id="xhs-type">填入</button>
+        </div>
+        <div class="settings-row-sub" id="xhs-note" style="margin-top:10px">${escapeHtml(note || '拉二维码后刷新画面。手机号 11 位，验证码 4 到 8 位，都填在这个框。')}</div>
         <button type="button" class="btn btn-primary" id="xhs-go" disabled style="margin-top:10px">让他点这里</button>
       </div>
     </div>
@@ -66,6 +71,14 @@ function renderXhsScreen(page, cfg, note) {
   page.querySelector('#xhs-stack')?.addEventListener('click', () => { void startXhsStack(); });
   page.querySelector('#xhs-shot')?.addEventListener('click', onXhsShotClick);
   page.querySelector('#xhs-go')?.addEventListener('click', () => { void sendXhsClick(); });
+  page.querySelector('#xhs-type')?.addEventListener('click', () => { void sendXhsCode(); });
+  page.querySelector('#xhs-qr')?.addEventListener('click', () => { void pullXhsQr(); });
+  page.querySelector('#xhs-code')?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      void sendXhsCode();
+    }
+  });
 }
 
 function setNote(text) {
@@ -127,7 +140,7 @@ async function refreshXhsShot() {
     img.src = data.image;
     img.hidden = false;
     if (empty) empty.hidden = true;
-    setNote('点画面里要他点的位置。');
+    setNote('拉二维码后刷新画面。手机号 11 位，验证码 4 到 8 位，都填在这个框。');
   } catch (e) {
     img.hidden = true;
     if (empty) {
@@ -156,7 +169,73 @@ function onXhsShotClick(ev) {
   }
   const go = document.getElementById('xhs-go');
   if (go) go.disabled = false;
-  setNote('红点是你要他点的地方。确认后按「让他点这里」。');
+  setNote('红点标在画面上了。手机号或验证码按「填入」。确定按钮按「让他点这里」。');
+}
+
+async function sendXhsCode() {
+  const code = String(document.getElementById('xhs-code')?.value || '').replace(/\s+/g, '');
+  if (_busy) {
+    setNote('上一张画面还在处理，等一下再按填入。');
+    window.showToast?.('等一下再按');
+    return;
+  }
+  const phone = /^1\d{10}$/.test(code);
+  if (!phone && !/^\d{4,8}$/.test(code)) {
+    setNote('填 11 位手机号，或 4 到 8 位验证码。');
+    window.showToast?.('填手机号或验证码');
+    return;
+  }
+  _busy = true;
+  const btn = document.getElementById('xhs-type');
+  if (btn) btn.disabled = true;
+  setNote(phone ? '正在把手机号填进画面…' : '正在把验证码填进画面…');
+  window.showToast?.('正在填入');
+  try {
+    const body = { text: code };
+    if (_point) {
+      body.x = _point.x;
+      body.y = _point.y;
+    }
+    await api.typeXhsScreen(body);
+    const input = document.getElementById('xhs-code');
+    if (input) input.value = '';
+    window.showToast?.('已经填入');
+    _busy = false;
+    await refreshXhsShot();
+    setNote(phone ? '手机号已填入。点画面里的获取验证码，再按「让他点这里」。' : '验证码已填入。点画面里的确定，再按「让他点这里」。');
+  } catch (e) {
+    setNote(e.message || '填入失败');
+    window.showToast?.(e.message || '填入失败');
+  } finally {
+    _busy = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function pullXhsQr() {
+  if (_busy) {
+    setNote('上一张画面还在处理，等一下再拉。');
+    return;
+  }
+  _busy = true;
+  const btn = document.getElementById('xhs-qr');
+  if (btn) btn.disabled = true;
+  setNote('正在拉二维码…');
+  try {
+    const data = await api.pullXhsLoginQr();
+    setNote(data?.note || '过几秒按刷新，用小红书扫。');
+    window.showToast?.('正在拉二维码');
+    await new Promise((r) => setTimeout(r, 2500));
+    _busy = false;
+    await refreshXhsShot();
+    setNote(data?.note || '过几秒按刷新，用小红书扫。');
+  } catch (e) {
+    setNote(e.message || '二维码没拉起来');
+    window.showToast?.(e.message || '二维码没拉起来');
+  } finally {
+    _busy = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function sendXhsClick() {

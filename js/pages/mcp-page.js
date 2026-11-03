@@ -47,6 +47,7 @@ function renderMcpPage(page) {
               与桌宠小机网关是两回事。总开关以后再加；保存的服务聊天时直接可用。
               <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="window.navigateTo?.('xhs-screen')">看云端画面</button>
               <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px;margin-left:8px" onclick="window.navigateTo?.('xhs-me')">我的小红书号</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="margin-top:8px;margin-left:8px" onclick="window.navigateTo?.('xhs-browse')">他看过的帖子</button>
             </div>
           </div>
           ${listHtml}

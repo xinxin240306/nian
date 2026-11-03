@@ -13,7 +13,12 @@ backend/node_modules/
 backend/*.db
 backend/*.db-shm
 backend/*.db-wal
+backend/*.db.native
 backend/db_backups/
+
+# 小红书登录凭证只留在跑服务的那台机器上
+cookies.json
+**/cookies.json
 
 # 上传的图片/视频（可能很大，不上传）
 backend/uploads/

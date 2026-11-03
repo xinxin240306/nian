@@ -246,7 +246,8 @@ async function playAudioUrl(url, onEnd, { volume } = {}) {
   await unlockAudioPlayback();
   await duckMediaForSpeech();
   const audio = new Audio(src);
-  if (vol != null) audio.volume = vol;
+  // HTMLMediaElement.volume 只能 0～1；文字视频曾把 1.55 直接赋上，播放器抛错，引号台词就没声音
+  if (vol != null) audio.volume = Math.min(1, vol);
   try { audio.setAttribute?.('playsinline', ''); } catch {}
   await preferMediaAudioOutput(audio);
   currentAudio = audio;
