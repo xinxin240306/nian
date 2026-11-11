@@ -24,13 +24,15 @@ function registerTiebaRoutes(app, { tieba }) {
     setThreadPinned,
     deleteThread,
     refreshBarNpcPosts,
+    tiebaBarBusy,
     refreshThreadNpcReplies,
     barHasNpcThreads,
     tiebaBarHandles,
     respondToTiebaUser,
     listMyTiebaPosts,
-    tiebaContactCards,
     tiebaPerson,
+    settleBarPersonaHandles,
+    settleTiebaContacts,
   } = tieba;
 
   function ensure(res) {
@@ -179,9 +181,16 @@ function registerTiebaRoutes(app, { tieba }) {
       const offset = parseInt(req.query.offset, 10) || 0;
       const asked = String(req.query.refresh || '') === '1';
       if (offset === 0 && (asked || !barHasNpcThreads(bar.id))) {
-        await refreshBarNpcPosts(bar.id);
-        bar = getBar(bar.id, acc);
+        const job = refreshBarNpcPosts(bar.id);
+        if (asked) {
+          await job;
+          bar = getBar(bar.id, acc) || bar;
+        } else {
+          job.catch((err) => console.warn('[tieba] npc threads', err.message));
+        }
       }
+      bar.generating = tiebaBarBusy(bar.id);
+      try { await settleBarPersonaHandles(bar.id); } catch (e) { console.warn('[tieba] handles', e.message); }
       bar.cast_handles = tiebaBarHandles(bar.id);
       const threads = listThreads(bar.id, {
         limit: req.query.limit,
@@ -217,7 +226,10 @@ function registerTiebaRoutes(app, { tieba }) {
       const thread = getThread(req.params.id);
       if (!thread) return res.status(404).json({ error: '帖子不存在' });
       const bar = getBar(thread.bar_id, getAccountFromReq(req));
-      if (bar) bar.cast_handles = tiebaBarHandles(bar.id);
+      if (bar) {
+        try { await settleBarPersonaHandles(bar.id); } catch (e) { console.warn('[tieba] handles', e.message); }
+        bar.cast_handles = tiebaBarHandles(bar.id);
+      }
       const posts = listPosts(thread.id, {
         limit: req.query.limit,
         offset,
@@ -240,10 +252,10 @@ function registerTiebaRoutes(app, { tieba }) {
     }
   });
 
-  app.get('/api/tieba/contacts', (req, res) => {
+  app.get('/api/tieba/contacts', async (req, res) => {
     try {
       if (!ensure(res)) return;
-      res.json({ contacts: tiebaContactCards() });
+      res.json({ contacts: await settleTiebaContacts() });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

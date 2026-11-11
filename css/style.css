@@ -19766,6 +19766,7 @@ html[data-color-scheme="dark"] #tieba-page {
   padding: 42px 12px 20px;
 }
 .tb-empty-compact { padding-top: 28px; }
+.tb-empty-spin { margin: 8px auto 16px; }
 .tb-empty-mark {
   width: 64px;
   height: 64px;

@@ -21,6 +21,7 @@ let _pullLock = false;
 let _pullSuppressClick = 0;
 let _replyTo = null;
 let _barSeq = 0;
+let _barPoll = 0;
 let _threadSeq = 0;
 let _contacts = [];
 let _person = null;
@@ -967,11 +968,23 @@ async function revalidateBar(id, seq, sort, key) {
     snapSave(key, { bar: data.bar, threads: next });
     const feed = threadFeedChanged(_threads, next);
     const face = threadFaceChanged(_threads, next) || handlesKey(_bar) !== handlesKey(data.bar);
-    if (!feed && !face) return;
-    const prev = _threads.slice();
-    applyBar(data.bar, next);
-    if (feed) notePulledThreads(prev, _threads);
+    const wasGenerating = !!_bar?.generating;
+    if (feed || face || wasGenerating !== !!data.bar?.generating) {
+      const prev = _threads.slice();
+      applyBar(data.bar, next);
+      if (feed) notePulledThreads(prev, _threads);
+    }
+    if (data.bar?.generating) scheduleBarPoll(id, seq, sort, key);
   } catch { /* 后台对一下就行，失败仍留着刚才的列表 */ }
+}
+
+function scheduleBarPoll(id, seq, sort, key) {
+  if (_barPoll > 40) return;
+  _barPoll += 1;
+  setTimeout(() => {
+    if (seq !== _barSeq || _view !== 'bar' || Number(_bar?.id) !== Number(id)) return;
+    revalidateBar(id, seq, sort, key);
+  }, 4000);
 }
 
 async function openBar(id, opts = {}) {
@@ -979,6 +992,7 @@ async function openBar(id, opts = {}) {
   const seq = ++_barSeq;
   _threadSeq += 1;
   const refresh = !!(opts && opts.refresh);
+  _barPoll = 0;
   const sort = ['live', 'hot', 'new'].includes(_barSort) ? _barSort : 'live';
   const key = `bar:${id}:${sort}`;
   if (!refresh) {
@@ -1001,6 +1015,7 @@ async function openBar(id, opts = {}) {
     if (seq !== _barSeq) return;
     snapSave(key, { bar: data.bar, threads: data.threads || [] });
     applyBar(data.bar, data.threads || []);
+    if (data.bar?.generating) scheduleBarPoll(id, seq, sort, key);
     if (prevThreads) notePulledThreads(prevThreads, _threads);
   } catch (e) {
     if (seq !== _barSeq) return;
@@ -1096,9 +1111,9 @@ function renderBar() {
         </div>
       ` : `
         <div class="tb-empty">
-          <div class="tb-empty-mark">帖</div>
-          <div class="tb-empty-title">还没有帖子</div>
-          <div class="tb-empty-hint">下拉刷新，会有吧友来发帖</div>
+          ${_bar.generating ? '<div class="loading-spinner tb-empty-spin"></div>' : '<div class="tb-empty-mark">帖</div>'}
+          <div class="tb-empty-title">${_bar.generating ? '吧友正在写帖' : '还没有帖子'}</div>
+          <div class="tb-empty-hint">${_bar.generating ? '这个吧刚打开，写完会自己出现在这里' : '下拉刷新，会有吧友来发帖'}</div>
           <button type="button" class="btn btn-primary" onclick="tbOpenCompose(${_bar.id})">发帖</button>
         </div>
       `}

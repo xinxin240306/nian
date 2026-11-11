@@ -141,6 +141,7 @@ function ensureTiebaTables() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+  try { d.run(`ALTER TABLE tieba_handles ADD COLUMN chosen INTEGER DEFAULT 0`); } catch {}
 
   seedDefaultBars();
 }
@@ -680,8 +681,8 @@ const TIEBA_NPC_POOL_MIN = 12;
 
 const NPC_SYSTEM = `你在给一个虚拟贴吧写吧友发言。只输出一个 JSON 对象，不要 markdown，不要解释，不要思考过程。
 网名像真人随手起的，2 到 8 个字，彼此差得很远。性别和脾气都要岔开，不要全是同一类人。
-口气像贴吧：短、口语。不要小作文，不要小说腔，不要「作为AI」，不要官腔。
-标题不超过10个字，正文不超过18个字，回复不超过8个字。能短就短。`;
+口气像贴吧：口语，像真人发的。不要小作文，不要小说腔，不要「作为AI」，不要官腔。
+帖子要写明白。标题是一句人话，正文讲清楚一件事，回复接住楼上。不要只丢几个字。`;
 
 function clipText(raw, max) {
   return String(raw || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -943,8 +944,8 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
       const fresher = rosterNames.find((n) => !usedAuthors.has(n) && !recentAuthors.has(n));
       if (fresher) author = fresher;
     }
-    const title = clipText(t?.title || t?.标题, 24);
-    const content = clipText(t?.content || t?.正文 || t?.body, 48);
+    const title = clipText(t?.title || t?.标题, 40);
+    const content = clipText(t?.content || t?.正文 || t?.body, 240);
     if (title.length < 2 || content.length < 2) continue;
     if (titleSeen.has(title)) continue;
     titleSeen.add(title);
@@ -954,7 +955,7 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
       const r = asReplyItem(rawReply);
       const rn = bindSpeaker(r?.author || r?.name, { ...speak, blocked: replyNames });
       if (!rn) continue;
-      const rc = clipText(r?.content || r?.正文 || r?.body, 24);
+      const rc = clipText(r?.content || r?.正文 || r?.body, 80);
       if (rc.length < 2 || rc === content || rc === title || replyTextSeen.has(rc)) continue;
       if (allowed.has(rn)) {
         const used = castReplies.get(rn) || 0;
@@ -1043,7 +1044,7 @@ function shapeTiebaNpcReplies(raw, ctx = {}) {
     const r = asReplyItem(rawReply);
     const name = bindSpeaker(r?.author || r?.name, { ...speak, blocked: used });
     if (!name) continue;
-    const content = clipText(r?.content || r?.正文 || r?.body, 24);
+    const content = clipText(r?.content || r?.正文 || r?.body, 80);
     if (content.length < 2 || existing.has(content)) continue;
     let replyTo = parseInt(r?.reply_to_floor ?? r?.reply_to ?? r?.replyTo, 10) || 0;
     if (!floors.has(replyTo)) replyTo = floors.has(1) ? 1 : 0;
@@ -1304,6 +1305,60 @@ function postsUnderRealName(row) {
 const HANDLE_A = ['晚风', '半糖', '白噪', '北窗', '南风', '慢拍', '鱼灯', '汽水', '耳机', '云朵', '夜航', '柠檬', '旧信', '街灯', '雨停', '软糖', '月台', '候鸟', '半醒', '未读'];
 const HANDLE_B = ['收信', '去冰', '不回', '在逃', '发呆', '续命', '听雨', '晚点', '分你', '收藏', '路过', '已读', '关机', '在线', '掉线', '半拍', '不想睡', '刚醒'];
 
+function characterPersonaRow(id) {
+  const cols = characterColumns();
+  if (!cols.has('name') || !id) return null;
+  const fields = ['id', 'name'];
+  for (const c of ['intro', 'personality', 'description', 'avatar', 'language_style']) {
+    if (cols.has(c)) fields.push(c);
+  }
+  try {
+    return db.prepare(`SELECT ${fields.join(', ')} FROM characters WHERE id=?`).get(Number(id));
+  } catch {
+    return null;
+  }
+}
+
+function hydrateCharacter(row) {
+  const full = characterPersonaRow(row?.id);
+  if (!full) return row;
+  return { ...row, ...full, name: full.name || row?.name };
+}
+
+function applyTiebaHandle(character, handle, opts = {}) {
+  const id = Number(character?.id);
+  const name = cleanNpcName(handle);
+  if (!id || !name) return null;
+  const real = !!opts.real;
+  const chosen = opts.chosen ? 1 : 0;
+  const avatar = real && character.avatar
+    ? String(character.avatar)
+    : npcAvatarDataUri(`char:${id}:${name}`);
+  const existing = db.prepare('SELECT * FROM tieba_handles WHERE character_id=?').get(id);
+  const oldName = String(existing?.handle || '');
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO tieba_handles (character_id, handle, real_name, avatar, created_at, chosen)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, name, real ? 1 : 0, avatar, nowIso(), chosen);
+  } else {
+    db.prepare(`
+      UPDATE tieba_handles SET handle=?, real_name=?, avatar=?, chosen=? WHERE character_id=?
+    `).run(name, real ? 1 : 0, avatar, chosen, id);
+  }
+  if (oldName && oldName !== name) {
+    db.prepare(`
+      UPDATE tieba_threads SET author_name=?, author_avatar=?
+      WHERE author_id IS NULL AND author_name=?
+    `).run(name, avatar, oldName);
+    db.prepare(`
+      UPDATE tieba_posts SET author_name=?, author_avatar=?
+      WHERE author_id IS NULL AND author_name=?
+    `).run(name, avatar, oldName);
+  }
+  return { handle: name, avatar, real, chosen };
+}
+
 function fallbackHandle(character, taken) {
   const h = hashStr(`${character.id}:${character.name}`);
   const realName = String(character.name || '').trim();
@@ -1319,6 +1374,7 @@ function fallbackHandle(character, taken) {
 
 function ensureCharacterHandles(cast) {
   if (!cast?.length) return [];
+  ensureTiebaTables();
   const taken = new Set();
   try {
     for (const r of db.prepare('SELECT username FROM tieba_accounts').all()) {
@@ -1333,10 +1389,19 @@ function ensureCharacterHandles(cast) {
     if (name) taken.add(name);
   }
   const ready = [];
-  for (const c of cast) {
+  for (const raw of cast) {
+    const c = hydrateCharacter(raw);
     const realName = String(c.name || '').trim().slice(0, 16);
     if (!c.id || !realName) continue;
-    const existing = db.prepare('SELECT * FROM tieba_handles WHERE character_id=?').get(c.id);
+    const real = postsUnderRealName(c);
+    let existing = db.prepare('SELECT * FROM tieba_handles WHERE character_id=?').get(c.id);
+    if (real && (!existing || Number(existing.real_name) !== 1 || existing.handle !== realName)) {
+      applyTiebaHandle(c, realName, { real: true, chosen: true });
+      existing = db.prepare('SELECT * FROM tieba_handles WHERE character_id=?').get(c.id);
+    } else if (existing && Number(existing.real_name) === 1 && Number(existing.chosen) !== 1) {
+      db.prepare('UPDATE tieba_handles SET chosen=1 WHERE character_id=?').run(c.id);
+      existing.chosen = 1;
+    }
     if (existing?.handle) {
       taken.add(existing.handle);
       ready.push({
@@ -1345,23 +1410,154 @@ function ensureCharacterHandles(cast) {
         name: realName,
         handle: existing.handle,
         real: Number(existing.real_name) === 1,
+        chosen: Number(existing.chosen) === 1,
         avatar: existing.avatar || npcAvatarDataUri(`char:${c.id}:${existing.handle}`),
       });
       continue;
     }
-    const real = postsUnderRealName(c);
-    let handle = real ? realName : fallbackHandle(c, taken);
-    if (!handle || (!real && handle === realName)) handle = fallbackHandle({ ...c, id: `${c.id}x` }, taken);
-    if (taken.has(handle) && !real) handle = `${String(handle).slice(0, 12)}${c.id}`.slice(0, 16);
-    const avatar = real && c.avatar ? String(c.avatar) : npcAvatarDataUri(`char:${c.id}:${handle}`);
-    db.prepare(`
-      INSERT INTO tieba_handles (character_id, handle, real_name, avatar, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(c.id, handle, real ? 1 : 0, avatar, nowIso());
-    taken.add(handle);
-    ready.push({ id: c.id, characterId: c.id, name: realName, handle, real, avatar });
+    let handle = fallbackHandle(c, taken);
+    if (!handle || handle === realName) handle = fallbackHandle({ ...c, id: `${c.id}x` }, taken);
+    if (taken.has(handle)) handle = `${String(handle).slice(0, 12)}${c.id}`.slice(0, 16);
+    const saved = applyTiebaHandle(c, handle, { real: false, chosen: false });
+    if (!saved) continue;
+    taken.add(saved.handle);
+    ready.push({
+      id: c.id,
+      characterId: c.id,
+      name: realName,
+      handle: saved.handle,
+      real: false,
+      chosen: false,
+      avatar: saved.avatar,
+    });
   }
   return ready;
+}
+
+const HANDLE_SYSTEM = `你在替角色取贴吧网名。只输出一个 JSON 对象，不要 markdown，不要解释。
+每个网名都要像这个人自己会起的，从性格、经历、口头禅、爱好、说话方式里长出来。
+不要用真名。不要把两个无关的好看词硬拼在一起。2 到 8 个字，彼此不要像。`;
+
+const handlePickJobs = new Map();
+const handlePickCool = new Map();
+
+function shapeTiebaHandles(raw, ctx = {}) {
+  const data = extractJsonObject(raw);
+  if (!data || typeof data !== 'object') return [];
+  const reserved = ctx.reserved instanceof Set ? ctx.reserved : new Set(ctx.reserved || []);
+  const people = new Map((ctx.people || []).map((p) => [String(p.name || '').trim(), p]));
+  const out = [];
+  const seen = new Set();
+  for (const item of asList(data.handles || data.names || data.npcs)) {
+    const charName = String(Array.isArray(item) ? item[0] : (item?.name || item?.character || '')).trim();
+    const handle = cleanNpcName(Array.isArray(item) ? item[1] : (item?.handle || item?.id));
+    const person = people.get(charName);
+    if (!person || !handle || handle === charName || reserved.has(handle) || seen.has(handle)) continue;
+    seen.add(handle);
+    out.push({ id: person.id, name: charName, handle });
+  }
+  return out;
+}
+
+async function fillPersonaHandles(batch) {
+  const people = batch.map(hydrateCharacter).filter((c) => c?.id && c.name);
+  if (!people.length) return { added: 0 };
+  const reserved = reservedSpeakerNames(people.map((c) => c.name));
+  const replacing = new Set(people.map((c) => Number(c.id)));
+  for (const row of db.prepare('SELECT character_id, handle FROM tieba_handles').all()) {
+    if (!replacing.has(Number(row.character_id)) && row.handle) reserved.add(String(row.handle).trim());
+  }
+  const lines = [
+    '下面每个人自己取一个贴吧网名。要像他本人会起的，不要像抽签抽出来的。',
+    '不要用真名，不要解释。只输出 {"handles":[["角色名","网名"]]}',
+  ];
+  for (const c of people) {
+    const bits = [
+      clipText(c.personality, 60),
+      clipText(c.intro, 80),
+      clipText(c.description, 80),
+      clipText(c.language_style, 40),
+    ].filter(Boolean);
+    lines.push(`- ${c.name}${bits.length ? `：${bits.join('；')}` : ''}`);
+  }
+  const raw = await askTiebaJson(HANDLE_SYSTEM, lines.join('\n'), { maxTokens: 900, timeout: 25000 });
+  const picked = shapeTiebaHandles(raw, { reserved, people });
+  if (!picked.length) {
+    console.warn('[tieba] handle unparsed', String(raw).slice(0, 180));
+    return { added: 0 };
+  }
+  const byId = new Map(people.map((c) => [Number(c.id), c]));
+  let added = 0;
+  for (const item of picked) {
+    const character = byId.get(Number(item.id));
+    if (!character || reserved.has(item.handle)) continue;
+    applyTiebaHandle(character, item.handle, { real: false, chosen: true });
+    reserved.add(item.handle);
+    added += 1;
+  }
+  console.log('[tieba] handles', added);
+  return { added };
+}
+
+function pickPersonaHandles(cast) {
+  const pending = [];
+  for (const raw of cast || []) {
+    const c = hydrateCharacter(raw);
+    if (!c?.id || !c.name || postsUnderRealName(c)) continue;
+    const row = db.prepare('SELECT chosen, real_name FROM tieba_handles WHERE character_id=?').get(c.id);
+    if (row && (Number(row.real_name) === 1 || Number(row.chosen) === 1)) continue;
+    pending.push(c);
+  }
+  const batch = pending.slice(0, 12);
+  if (!batch.length) return Promise.resolve({ added: 0 });
+  const key = batch.map((c) => c.id).sort((a, b) => a - b).join(',');
+  if (Date.now() - (handlePickCool.get(key) || 0) < 10 * 60 * 1000) return Promise.resolve({ added: 0 });
+  const running = handlePickJobs.get(key);
+  if (running) return running;
+  const job = fillPersonaHandles(batch).then((result) => {
+    if (!(result?.added > 0)) handlePickCool.set(key, Date.now());
+    return result;
+  }).finally(() => {
+    if (handlePickJobs.get(key) === job) handlePickJobs.delete(key);
+  });
+  handlePickJobs.set(key, job);
+  return job;
+}
+
+async function settleBarPersonaHandles(barId) {
+  ensureTiebaTables();
+  const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(Number(barId));
+  if (!bar) return { added: 0 };
+  return pickPersonaHandles(barCast(bar));
+}
+
+async function settleTiebaContacts() {
+  ensureTiebaTables();
+  try {
+    const contacts = require('./contact-helper');
+    const friends = contacts.listFriendCharacters(db)
+      .filter((c) => c.contact_status === 'friend' && !contacts.isCircleNpcCharacter(c))
+      .slice(0, 12);
+    await pickPersonaHandles(friends);
+  } catch (e) {
+    console.warn('[tieba] handles', e.message);
+  }
+  return tiebaContactCards();
+}
+
+async function settleOnePendingBarHandles() {
+  ensureTiebaTables();
+  const mode = tiebaCityMode();
+  try { syncCityBars(mode); } catch (e) { console.warn('[tieba] handles', e.message); }
+  for (const bar of barsForNpcSchedule(mode)) {
+    const pending = barCast(bar).filter((c) => {
+      const row = c?.id ? db.prepare('SELECT chosen, real_name FROM tieba_handles WHERE character_id=?').get(c.id) : null;
+      return c?.id && !postsUnderRealName(c) && !(row && (Number(row.real_name) === 1 || Number(row.chosen) === 1));
+    });
+    if (!pending.length) continue;
+    return pickPersonaHandles(barCast(bar));
+  }
+  return { added: 0 };
 }
 
 function allowHandles(reserved, handles) {
@@ -1414,9 +1610,9 @@ function batchScore(items) {
 
 function threadsFullEnough(items) {
   const list = items || [];
-  if (list.length < 6) return false;
+  if (list.length < 3) return false;
   const replies = list.reduce((n, t) => n + (t.replies?.length || 0), 0);
-  return replies >= 18;
+  return replies >= 6;
 }
 
 function threadAsk(bar, cast, handles, npcs, briefs, want) {
@@ -1464,12 +1660,12 @@ function threadAsk(bar, cast, handles, npcs, briefs, want) {
   } else {
     lines.push('这个吧还没有帖。写出住在这里、或泡这个主题的人真的会发的帖。');
   }
-  if (roster.length) lines.push('连同角色贴吧号，写 8 个帖，每个帖 6 条别人的短回复。不要新造网名，不要输出 npcs。');
-  else lines.push('请新造一批彼此不像的网名。连同角色贴吧号，写 8 个帖，每个帖 6 条别人的短回复。不要输出 npcs。');
-  lines.push('楼主各不相同。回复的人不能是该帖楼主，每条回复的用词都不要重复。回复至少 2 个字。');
-  lines.push('8 个帖里正好 1 个带一张随手拍。那个帖的数组最后多一项英文画面，不超过 12 个词，画面里不要文字。想发短视频就在这项开头写 video: 。其他帖不要这项。');
+  if (roster.length) lines.push('连同角色贴吧号，写 6 个帖，每个帖 4 条别人的回复。不要新造网名，不要输出 npcs。');
+  else lines.push('请新造一批彼此不像的网名。连同角色贴吧号，写 6 个帖，每个帖 4 条别人的回复。不要输出 npcs。');
+  lines.push('楼主各不相同。回复的人不能是该帖楼主，每条回复都要接住这帖在说的事，用词不要重复。');
+  lines.push('标题 6 到 20 个字。正文 50 到 140 个字，把事情讲清楚，可以吐槽、提问或讲一件小事。回复 8 到 40 个字，不要只回一个词。');
+  lines.push('6 个帖里正好 1 个带一张随手拍。那个帖的数组最后多一项英文画面，不超过 12 个词，画面里不要文字。想发短视频就在这项开头写 video: 。其他帖不要这项。');
   lines.push('只输出 {"threads":[["楼主","标题","正文",[["回复人","内容"]],"english scene"]]}');
-  lines.push('标题不超过 8 个字，正文不超过 16 个字，回复不超过 8 个字。');
   return lines.join('\n');
 }
 
@@ -1496,6 +1692,7 @@ function replyAsk(bar, thread, posts, handles, need, staleNames) {
   } else {
     lines.push(`请新造 ${Math.max(need + 2, 8)} 个没出现过的网名，写 ${need} 条新回复。每条一个不同的人，不要复读，不要自我介绍。`);
   }
+  lines.push('每条回复写 8 到 40 个字，接住楼上的话，不要只回一个词。');
   lines.push('不要输出 npcs。只输出 {"replies":[["网名","内容",1]]}');
   lines.push('第三个数是在回第几楼，不针对某一层就写 0。');
   return lines.join('\n');
@@ -1651,7 +1848,9 @@ async function attachTiebaMedia(barId, item) {
 }
 
 async function ensureTiebaRoster(bar) {
-  const handles = ensureCharacterHandles(barCast(bar));
+  const cast = barCast(bar);
+  try { await pickPersonaHandles(cast); } catch (e) { console.warn('[tieba] handles', e.message); }
+  const handles = ensureCharacterHandles(cast);
   let roster = tiebaRoster(bar.id, handles);
   if (roster.length >= TIEBA_NPC_POOL_MIN) return { handles, roster: roster.slice(0, 16) };
   try {
@@ -1667,7 +1866,7 @@ async function generateBarNpcThreads(barId, opts = {}) {
   ensureTiebaTables();
   const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(barId);
   if (!bar) return { added: 0 };
-  const want = TIEBA_POST_WANT;
+  const want = 6;
   const cast = barCast(bar);
   const { handles, roster } = await ensureTiebaRoster(bar);
   const briefs = recentThreadBriefs(barId);
@@ -1684,7 +1883,7 @@ async function generateBarNpcThreads(barId, opts = {}) {
     roster,
     recentTitles: briefs.map((b) => b.title),
     want,
-    replyLimit: 12,
+    replyLimit: 5,
   };
   const base = threadAsk(bar, cast, handles, roster, briefs, want);
   let best = null;
@@ -1693,9 +1892,9 @@ async function generateBarNpcThreads(barId, opts = {}) {
   for (let i = 0; i < 2; i += 1) {
     if (i > 0 && (Date.now() - started > 20000 || threadsFullEnough(best))) break;
     const extra = i
-      ? `\n上次太短或不是 JSON。这次只输出紧凑 JSON。楼主用${roster.length ? '给定的吧友网名' : '新网名'}和角色贴吧号，每个帖 6 条不一样的短回复。`
+      ? `\n上次太短或不是 JSON。这次只输出紧凑 JSON。楼主用${roster.length ? '给定的吧友网名' : '新网名'}和角色贴吧号，每个帖 4 条回复。标题一句人话，正文几十个字，不要只写几个字。`
       : '';
-    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 1800 });
+    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 3600 });
     const parsed = shapeTiebaNpcThreads(raw, ctx);
     if (!parsed) continue;
     if (!best || batchScore(parsed) > batchScore(best)) best = parsed;
@@ -1760,7 +1959,7 @@ async function generateThreadNpcReplies(threadId) {
   for (let i = 0; i < 2; i += 1) {
     if (i > 0 && (Date.now() - started > 20000 || enough(best))) break;
     const extra = i ? `\n上次太短或不是 JSON。这次只输出紧凑 JSON，回帖人必须是${roster.length ? '给定的吧友' : '新网名'}或角色贴吧号。` : '';
-    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 1800 });
+    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 2400 });
     const parsed = shapeTiebaNpcReplies(raw, ctx);
     if (!parsed) continue;
     if (!best || parsed.length > best.length) best = parsed;
@@ -1806,7 +2005,7 @@ async function respondToTiebaUser(threadId, userPost) {
     parent && parent.author_name && parent.author_name !== userPost.author_name
       ? `请让 ${parent.author_name} 先接一句，再加两个旁人。`
       : '用三个不同的人接话。',
-    `不要用 ${userPost.author_name} 这个名字当回复人。要接住刚才那句话，每条不超过 16 个字。`,
+    `不要用 ${userPost.author_name} 这个名字当回复人。要接住刚才那句话，每条 8 到 40 个字，不要只回一个词。`,
     '只输出 {"replies":[["网名","内容"]]}',
   ].filter(Boolean);
   const raw = await askTiebaJson(NPC_SYSTEM, lines.join('\n'), { maxTokens: 500, timeout: 18000 });
@@ -1906,6 +2105,10 @@ function barHasNpcThreads(barId) {
     LIMIT 1
   `).get(Number(barId));
   return !!row;
+}
+
+function tiebaBarBusy(barId) {
+  return barNpcJobs.has(Number(barId));
 }
 
 async function refreshBarNpcPosts(barId) {
@@ -2126,10 +2329,14 @@ async function stockOneThinTiebaBar() {
 function startTiebaNpcSchedule() {
   if (tiebaSlotTimer) return;
   const tick = (limit) => {
-    stockOneThinTiebaBar()
-      .catch((e) => console.warn('[tieba] npc stock', e.message))
+    settleOnePendingBarHandles()
+      .catch((e) => console.warn('[tieba] handles', e.message))
       .finally(() => {
-        runDueTiebaNpcSlot(limit).catch((e) => console.warn('[tieba] npc slot', e.message));
+        stockOneThinTiebaBar()
+          .catch((e) => console.warn('[tieba] npc stock', e.message))
+          .finally(() => {
+            runDueTiebaNpcSlot(limit).catch((e) => console.warn('[tieba] npc slot', e.message));
+          });
       });
   };
   tiebaSlotTimer = setInterval(() => tick(1), 15 * 60 * 1000);
@@ -2160,6 +2367,7 @@ module.exports = {
   setThreadPinned,
   deleteThread,
   refreshBarNpcPosts,
+  tiebaBarBusy,
   barHasNpcThreads,
   refreshThreadNpcReplies,
   tiebaBarHandles,
@@ -2173,4 +2381,7 @@ module.exports = {
   shapeTiebaNpcThreads,
   shapeTiebaNpcReplies,
   shapeTiebaNpcRoster,
+  shapeTiebaHandles,
+  settleBarPersonaHandles,
+  settleTiebaContacts,
 };
