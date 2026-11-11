@@ -564,6 +564,7 @@ async function callChatAPI(settings, systemPrompt, userContent, type = 'chat', h
     messages.push({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content });
   }
   if (userContent) messages.push({ role: 'user', content: userContent });
+  require('./preset-helper').pinPresetsOnMessages(messages);
 
   async function tryFetch(apiUrl) {
     const resp = await fetch(`${apiUrl}/chat/completions`, {
@@ -622,6 +623,7 @@ async function callChatAPIComplete(settings, systemPrompt, userContent, type = '
     messages.push({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content });
   }
   if (userContent) messages.push({ role: 'user', content: userContent });
+  require('./preset-helper').pinPresetsOnMessages(messages);
 
   const tools = Array.isArray(extra?.tools) && extra.tools.length ? extra.tools : null;
   if (tools) {
@@ -953,6 +955,7 @@ async function completeChatTurn(opts = {}) {
   const timeout = opts.timeout || 120000;
   const signal = opts.signal;
   const messages = Array.isArray(opts.messages) ? opts.messages.slice() : [];
+  require('./preset-helper').pinPresetsOnMessages(messages);
   let tools = Array.isArray(opts.tools) && opts.tools.length ? opts.tools : null;
 
   const makeBody = (msgs, withTools, choice) => {

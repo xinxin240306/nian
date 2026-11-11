@@ -846,6 +846,11 @@ function isPeriodOnlyText(text) {
   return /^[。．.\s]+$/.test(String(text || '').trim());
 }
 
+/** 整段只有一个感叹号（可带收尾引号），不当成一条聊天气泡 */
+function isLoneExclaimText(text) {
+  return /^[!！][」』"”’）)】]*$/.test(String(text || '').trim());
+}
+
 /** 模型从历史 [语音]/[文字] 学来的空标签，不是台词 */
 function isBareMediaLabel(text) {
   const t = String(text || '').trim().replace(/[。．.！!？?\s]+$/g, '');
@@ -860,7 +865,7 @@ function isDirectiveOnlyText(text) {
   try {
     if (require('./speech-text-helper').containsOnlyElevenAudio(raw)) return false;
   } catch { /* ignore */ }
-  if (isPeriodOnlyText(raw) || isBareMediaLabel(raw)) return true;
+  if (isPeriodOnlyText(raw) || isLoneExclaimText(raw) || isBareMediaLabel(raw)) return true;
   if (isBeanOnlyText(raw)) return false;
   const cleaned = stripResidualDirectiveTags(raw);
   if (!cleaned || isBareMediaLabel(cleaned)) return true;
@@ -2371,10 +2376,20 @@ function dropBareDotBeforeClosers(full, closers, offset, str) {
   return offset > 0 && str[offset - 1] === '.' ? full : closers;
 }
 
-/** 拆完后去掉句末「。」，文字气泡不显示句号（问号/感叹号/省略号保留） */
+/** 句末单独一个「！」只用来断句；「！！」「！！！」留在气泡上 */
+function stripSingleTrailingExclaim(text) {
+  const s = String(text || '');
+  const m = s.match(/^(.*?)([!！])([」』"”’）)】]*)$/u);
+  if (!m) return s;
+  if (/[!！]$/u.test(m[1])) return s;
+  if (!String(m[1]).trim()) return '';
+  return `${m[1]}${m[3] || ''}`;
+}
+
+/** 拆完后去掉句末「。」和单独一个「！」；问号、省略号、连续感叹号保留 */
 function stripDisplayPeriod(text) {
   if (!text) return '';
-  return String(text)
+  return stripSingleTrailingExclaim(String(text).trim())
     .replace(/[。．]([」』"”’）)】]+)$/u, '$1')
     .replace(/\.([」』"”’）)】]+)$/u, dropBareDotBeforeClosers)
     .replace(/[；;，,]+$/u, '')

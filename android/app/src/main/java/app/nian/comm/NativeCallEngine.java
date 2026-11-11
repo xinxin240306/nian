@@ -2,6 +2,7 @@ package app.nian.comm;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -55,6 +56,8 @@ final class NativeCallEngine {
   private static int bedGen;
   private static String bedUrl = "";
   private static float bedGain = 0.35f;
+  /** 挂断或新一通开始时递增，丢掉上一通还在排队的垫音。 */
+  private static int callEpoch;
   private static volatile boolean running;
   private static volatile boolean listen;
   private static volatile boolean capturing;
@@ -108,9 +111,8 @@ final class NativeCallEngine {
   private static float playGain = 1f;
   private static int resumeGen;
   private static final long RESUME_SCO_HOLD_MS = 900;
-  private static int boostedVolume = -1; // 仅本句期间被推高的媒体音量；-1 = 未推高
-  private static int boostedVoiceVolume = -1; // 文字视频台词：临时抬高的通话音量
-  private static final Object boostLock = new Object();
+  private static AudioDeviceCallback inputRouteCallback;
+  private static int routeRefreshTries;
 
   private NativeCallEngine() {}
 
@@ -132,6 +134,15 @@ final class NativeCallEngine {
       MainActivity.setKeepWebAlive(true);
       return null;
     }
+    boolean fresh = !running;
+    if (fresh) {
+      callEpoch++;
+      final int epoch = callEpoch;
+      // 新一通开始时丢掉上一通还没停干净的循环垫音
+      MAIN.post(() -> {
+        if (epoch == callEpoch) stopBedLocked();
+      });
+    }
     stopRecordLocked();
     String err = openRecord();
     if (err != null) return err;
@@ -140,7 +151,7 @@ final class NativeCallEngine {
     capturing = false;
     paused = false;
     lastRms = 0;
-    inCallMode = true; // start() = 进入通话模式，角色声音走通话流
+    inCallMode = true;
     resetRing();
     recThread = new Thread(NativeCallEngine::loop, "nian-call-mic");
     recThread.start();
@@ -149,12 +160,15 @@ final class NativeCallEngine {
     } catch (Exception ignored) {}
     MainActivity.setKeepWebAlive(true);
     CallLockTurn.attach(appCtx);
+    watchInputRoute();
     Log.i(TAG, "started rate=" + sampleRate);
     return null;
   }
 
   static void stop() {
+    callEpoch++;
     CallLockTurn.cancel();
+    unwatchInputRoute();
     running = false;
     listen = false;
     bgGen++;
@@ -392,6 +406,69 @@ final class NativeCallEngine {
       + " keptPcm=" + (keptPcm != null ? keptPcm.length : 0));
   }
 
+  /** 通话中途戴上或摘下耳机时改收音设备。角色正在说话时先等媒体通路让开。 */
+  private static void watchInputRoute() {
+    if (Build.VERSION.SDK_INT < 23 || appCtx == null || inputRouteCallback != null) return;
+    AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+    if (am == null) return;
+    inputRouteCallback = new AudioDeviceCallback() {
+      @Override
+      public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+        scheduleRouteRefresh();
+      }
+
+      @Override
+      public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+        scheduleRouteRefresh();
+      }
+    };
+    try {
+      am.registerAudioDeviceCallback(inputRouteCallback, MAIN);
+    } catch (Exception e) {
+      inputRouteCallback = null;
+      Log.w(TAG, "watch input route", e);
+    }
+  }
+
+  private static void unwatchInputRoute() {
+    MAIN.removeCallbacks(routeRefresh);
+    if (Build.VERSION.SDK_INT < 23 || appCtx == null || inputRouteCallback == null) {
+      inputRouteCallback = null;
+      return;
+    }
+    try {
+      AudioManager am = (AudioManager) appCtx.getSystemService(Context.AUDIO_SERVICE);
+      if (am != null) am.unregisterAudioDeviceCallback(inputRouteCallback);
+    } catch (Exception ignored) {}
+    inputRouteCallback = null;
+  }
+
+  private static void scheduleRouteRefresh() {
+    routeRefreshTries = 0;
+    MAIN.removeCallbacks(routeRefresh);
+    MAIN.postDelayed(routeRefresh, 350);
+  }
+
+  private static final Runnable routeRefresh = new Runnable() {
+    @Override
+    public void run() {
+      if (!running) return;
+      // 角色还在说时不要抢回 SCO。次数只在真正空闲时累加，避免长句把重试次数耗尽。
+      if (CallAudioRoute.isMediaSuspended() || player != null) {
+        if (routeRefreshTries++ < 40) MAIN.postDelayed(this, 500);
+        return;
+      }
+      final String before = CallAudioRoute.currentRoute();
+      final boolean scoBefore = CallAudioRoute.isScoOn(appCtx);
+      CallAudioRoute.preferCall(appCtx, () -> {
+        if (!running) return;
+        String after = CallAudioRoute.currentRoute();
+        boolean scoAfter = CallAudioRoute.isScoOn(appCtx);
+        if (!before.equals(after) || scoBefore != scoAfter) rebindMic();
+      });
+    }
+  };
+
   static void setPaused(boolean on) {
     paused = on;
     if (on) {
@@ -459,7 +536,8 @@ final class NativeCallEngine {
 
   private static float clampGain(float g) {
     if (!(g > 0f)) return 1f;
-    return Math.max(0.05f, Math.min(2f, g));
+    // 只在播放器内部变轻，不超过 1。超过 1 以前会去抬系统媒体音量。
+    return Math.max(0.05f, Math.min(1f, g));
   }
 
   static void stopPlay() {
@@ -472,17 +550,21 @@ final class NativeCallEngine {
 
   /** 通话现场循环垫音：与角色说话同时出声，不因 TTS 启停而掐断 */
   static void playBed(String url, float gain) {
-    MAIN.post(() -> playBedOnMain(url, gain));
+    final int epoch = callEpoch;
+    MAIN.post(() -> {
+      if (epoch != callEpoch || !running) return;
+      playBedOnMain(url, gain, epoch);
+    });
   }
 
   static void stopBed() {
     MAIN.post(NativeCallEngine::stopBedLocked);
   }
 
-  private static void playBedOnMain(String url, float gain) {
+  private static void playBedOnMain(String url, float gain, int epoch) {
     String src = url != null ? url.trim() : "";
-    if (src.isEmpty()) {
-      stopBedLocked();
+    if (epoch != callEpoch || !running || src.isEmpty()) {
+      if (src.isEmpty()) stopBedLocked();
       return;
     }
     bedGain = gain > 0f ? Math.max(0.02f, Math.min(1f, gain)) : 0.35f;
@@ -514,8 +596,13 @@ final class NativeCallEngine {
       }
       mp.setDataSource(src);
       mp.setLooping(true);
+      pinBuiltinSpeaker(mp);
       mp.setOnPreparedListener(p -> {
-        if (gen != bedGen || bedPlayer != p) return;
+        if (epoch != callEpoch || !running || gen != bedGen || bedPlayer != p) {
+          try { p.release(); } catch (Exception ignored) {}
+          if (bedPlayer == p) bedPlayer = null;
+          return;
+        }
         try {
           p.setVolume(bedGain, bedGain);
           p.start();
@@ -595,22 +682,16 @@ final class NativeCallEngine {
     MediaPlayer mp = new MediaPlayer();
     player = mp;
     try {
-      ensurePlayVolume(false);
       if (Build.VERSION.SDK_INT >= 21) {
-        // 已卸 SCO 走 A2DP 时必须用媒体流；仍标 VOICE_COMMUNICATION 会在耳机上断断续续/截半句。
-        // 听筒/SCO/外放通话通路才用通话流。
-        String route = CallAudioRoute.currentRoute();
-        boolean mediaRoute = CallAudioRoute.isMediaSuspended()
-          || "a2dp".equals(route);
-        boolean useVoiceComm = inCallMode && !mediaRoute;
-        AudioAttributes attrs = buildPlayAttrs(useVoiceComm);
+        // 角色声一律走媒体流，音量跟系统「媒体」键。
+        // 外放若标 USAGE_VOICE_COMMUNICATION，会锁在通话音量上，面板怎么调都不变，而且扬声器特别响。
         try {
-          mp.setAudioAttributes(attrs);
-        } catch (Exception e) {
-          Log.w(TAG, "voice-comm attr refused, fallback to media", e);
           mp.setAudioAttributes(buildPlayAttrs(false));
+        } catch (Exception e) {
+          Log.w(TAG, "media attr refused", e);
         }
       }
+      pinBuiltinSpeaker(mp);
       if (hasData) {
         File f = writePlayFile(data, mime, gen);
         mp.setDataSource(f.getAbsolutePath());
@@ -626,31 +707,14 @@ final class NativeCallEngine {
         paused = true;
         try {
           float target = playGain > 0f ? playGain : 1f;
-          // 外放场景：扬声器功率大、桌面/手心反射会让 1.0 听起来过响，
-          // 把内部增益压到 0.7，既能保证清晰也不至于「震」；
-          // 耳机/SCO/A2DP 走原值，以免小声听不清
-          String route = CallAudioRoute.currentRoute();
-          boolean isBuiltin = "builtin".equals(route);
-          // 普通通话外放乘 0.7，避免贴脸太响。显式增益 >1.15（文字视频台词）不再压，否则听筒里只剩很小一声
-          boolean loudLine = target > 1.15f;
-          if (isBuiltin && !loudLine) {
-            target = target * 0.7f;
-          }
-          // MediaPlayer.setVolume 上限 1.0；超过 1 的部分用 AudioManager
-          // 把媒体音量推到合适的档位（不持久化，仅本句期间）
-          final float speakTarget = target;
-          float mediaVol = Math.min(1f, speakTarget);
-          long preroll = isBuiltin ? CallAudioRoute.speakerPrerollDelayMs() : 0;
+          // 音量只跟系统媒体键。不改 STREAM_MUSIC，也不在耳机上再抬一档。
+          final float speakTarget = Math.min(1f, target);
+          // 外放/有线刚钉过输出设备时，这里把开播推迟到路由落稳。耳机的等待在开播前已经做完。
+          long preroll = CallAudioRoute.speakerPrerollDelayMs();
           Runnable start = () -> {
             if (gen != playGen || player != p) return;
             try {
-              p.setVolume(mediaVol, mediaVol);
-              if (isBuiltin && loudLine) {
-                // 外放走通话流，系统「通话音量」经常比媒体音量低很多，台词会小得听不清
-                boostVoiceCallStream();
-              } else if (!isBuiltin) {
-                applyMediaBoost(speakTarget);
-              }
+              p.setVolume(speakTarget, speakTarget);
               p.start();
               reviveBedLocked();
             } catch (Exception e) {
@@ -667,13 +731,11 @@ final class NativeCallEngine {
       });
       mp.setOnCompletionListener(p -> {
         if (gen != playGen || player != p) return;
-        restoreMediaBoost();
         stopPlayLocked(true, true, true);
       });
       mp.setOnErrorListener((p, what, extra) -> {
         if (gen != playGen || player != p) return true;
         Log.w(TAG, "play error " + what + "/" + extra);
-        restoreMediaBoost();
         stopPlayLocked(true, false, true);
         return true;
       });
@@ -705,6 +767,15 @@ final class NativeCallEngine {
     } catch (Exception ignored) {}
   }
 
+  private static void pinBuiltinSpeaker(MediaPlayer mp) {
+    if (mp == null || !"builtin".equals(CallAudioRoute.currentRoute())) return;
+    if (Build.VERSION.SDK_INT < 28) return;
+    try {
+      AudioDeviceInfo spk = CallAudioRoute.builtinSpeaker(appCtx);
+      if (spk != null) mp.setPreferredDevice(spk);
+    } catch (Exception ignored) {}
+  }
+
   private static AudioAttributes buildPlayAttrs(boolean voiceComm) {
     AudioAttributes.Builder ab = new AudioAttributes.Builder()
       .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -733,102 +804,6 @@ final class NativeCallEngine {
     return f;
   }
 
-  @SuppressWarnings("deprecation")
-  private static void ensurePlayVolume(boolean callStream) {
-    Context ctx = appCtx;
-    if (ctx == null) return;
-    AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-    if (am == null) return;
-    int stream = callStream ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC;
-    try {
-      int max = am.getStreamMaxVolume(stream);
-      int cur = am.getStreamVolume(stream);
-      if (max > 0 && cur <= 0) {
-        am.setStreamVolume(stream, Math.max(1, max * 2 / 3), 0);
-      }
-    } catch (Exception ignored) {}
-  }
-
-  /**
-   * 通话里角色声音增益 > 1 时：临时把媒体音量往上推一档，让本句响起来；
-   * 同时记录原值，结束后恢复，避免每次通话都把系统媒体音量永久改大。
-   */
-  private static void applyMediaBoost(float target) {
-    if (target <= 1f) return;
-    Context ctx = appCtx;
-    if (ctx == null) return;
-    AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-    if (am == null) return;
-    int stream = AudioManager.STREAM_MUSIC;
-    synchronized (boostLock) {
-      if (boostedVolume >= 0) return; // 已经有一次推高在进行，不重复
-      try {
-        int max = am.getStreamMaxVolume(stream);
-        int cur = am.getStreamVolume(stream);
-        if (max <= 0) return;
-        // target=1.3 -> 推 +20%；target=1.6 -> +45%；上限到 max
-        int want = (int) Math.min(max, Math.round(cur + (max - cur) * Math.min(0.7f, (target - 1f) * 0.9f)));
-        if (want > cur) {
-          boostedVolume = cur;
-          am.setStreamVolume(stream, want, 0);
-          Log.i(TAG, "media boost " + cur + " -> " + want + " (target=" + target + ")");
-        }
-      } catch (Exception ignored) {}
-    }
-  }
-
-  /** 文字视频外放：通话音量若低于约七成，本句临时抬到七成，播完还原 */
-  private static void boostVoiceCallStream() {
-    Context ctx = appCtx;
-    if (ctx == null) return;
-    AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-    if (am == null) return;
-    int stream = AudioManager.STREAM_VOICE_CALL;
-    synchronized (boostLock) {
-      if (boostedVoiceVolume >= 0) return;
-      try {
-        int max = am.getStreamMaxVolume(stream);
-        int cur = am.getStreamVolume(stream);
-        if (max <= 0) return;
-        int floor = Math.max(1, (int) Math.round(max * 0.7f));
-        if (cur < floor) {
-          boostedVoiceVolume = cur;
-          am.setStreamVolume(stream, floor, 0);
-          Log.i(TAG, "voice-call boost " + cur + " -> " + floor);
-        }
-      } catch (Exception ignored) {}
-    }
-  }
-
-  private static void restoreVoiceCallBoost() {
-    synchronized (boostLock) {
-      if (boostedVoiceVolume < 0) return;
-      Context ctx = appCtx;
-      int back = boostedVoiceVolume;
-      boostedVoiceVolume = -1;
-      if (ctx == null) return;
-      try {
-        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-        if (am != null) am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, back, 0);
-      } catch (Exception ignored) {}
-      Log.i(TAG, "voice-call boost restored -> " + back);
-    }
-  }
-
-  private static void restoreMediaBoost() {
-    synchronized (boostLock) {
-      if (boostedVolume < 0) return;
-      Context ctx = appCtx;
-      if (ctx == null) { boostedVolume = -1; return; }
-      try {
-        AudioManager am = (AudioManager) ctx.getSystemService(Context.AUDIO_SERVICE);
-        if (am != null) am.setStreamVolume(AudioManager.STREAM_MUSIC, boostedVolume, 0);
-      } catch (Exception ignored) {}
-      Log.i(TAG, "media boost restored -> " + boostedVolume);
-      boostedVolume = -1;
-    }
-  }
-
   private static void deletePlayFile() {
     File f = playFile;
     playFile = null;
@@ -848,9 +823,6 @@ final class NativeCallEngine {
     resetRing();
     PlayCallback cb = playDone;
     playDone = null;
-    // 任何结束路径都要把媒体音量 / 临时通话音量恢复回去
-    restoreMediaBoost();
-    restoreVoiceCallBoost();
     reviveBedLocked();
     // 先回调前端，别把同轮下一句卡在 SCO 恢复上
     if (fireDone && cb != null) cb.onDone(ok);

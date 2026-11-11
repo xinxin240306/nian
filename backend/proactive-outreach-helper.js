@@ -295,6 +295,10 @@ function resolveIncomingCall(db, { logId, characterId, outcome } = {}) {
   if (meta.status && meta.status !== 'ringing') {
     return { ok: true, already: true, outcome: meta.status, logId: row.id, characterId: row.character_id };
   }
+  if (status === 'answered') {
+    try { require('./sound-fx-helper').clearCallScene(row.character_id, { resetMove: true }); } catch {}
+    try { require('./vocal-clips-helper').clearCallBreathBed(row.character_id); } catch {}
+  }
   meta.status = status;
   meta.resolvedAt = new Date().toISOString();
   clearRingTimer(row.id);
@@ -349,6 +353,8 @@ function ensureLiveCallLog(db, characterId, { video = false, from = 'user' } = {
     const meta = parseCallTranscript(existing.transcript);
     const st = String(meta.status || '');
     if (st === 'ringing') {
+      try { require('./sound-fx-helper').clearCallScene(cid, { resetMove: true }); } catch {}
+      try { require('./vocal-clips-helper').clearCallBreathBed(cid); } catch {}
       meta.status = 'live';
       meta.video = !!video || !!meta.video;
       meta.from = meta.from || from;
@@ -361,6 +367,8 @@ function ensureLiveCallLog(db, characterId, { video = false, from = 'user' } = {
     }
     return existing.id;
   }
+  try { require('./sound-fx-helper').clearCallScene(cid, { resetMove: true }); } catch {}
+  try { require('./vocal-clips-helper').clearCallBreathBed(cid); } catch {}
   const meta = {
     type: from === 'incoming' ? 'incoming' : 'outgoing',
     status: 'live',
@@ -384,6 +392,8 @@ function ensureLiveCallLog(db, characterId, { video = false, from = 'user' } = {
 function resolvePeerEndCall(db, { characterId, logId, reason, video } = {}) {
   const cid = Number(characterId);
   if (!cid) return { ok: false, error: 'no_character' };
+  try { require('./sound-fx-helper').clearCallScene(cid, { resetMove: true }); } catch {}
+  try { require('./vocal-clips-helper').clearCallBreathBed(cid); } catch {}
 
   // 1) 找到"正在 live"的通话记录：用户拨给角色接通中 / 角色拨给用户接通中
   let row = null;

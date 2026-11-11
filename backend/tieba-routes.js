@@ -23,6 +23,10 @@ function registerTiebaRoutes(app, { tieba }) {
     replyThread,
     setThreadPinned,
     deleteThread,
+    refreshBarNpcPosts,
+    refreshThreadNpcReplies,
+    barHasNpcThreads,
+    tiebaBarHandles,
   } = tieba;
 
   function ensure(res) {
@@ -161,20 +165,28 @@ function registerTiebaRoutes(app, { tieba }) {
     }
   });
 
-  app.get('/api/tieba/bars/:id/threads', (req, res) => {
+  app.get('/api/tieba/bars/:id/threads', async (req, res) => {
     try {
       if (!ensure(res)) return;
       const acc = getAccountFromReq(req);
-      const bar = getBar(req.params.id, acc);
+      let bar = getBar(req.params.id, acc);
       if (!bar) return res.status(404).json({ error: '吧不存在' });
       const sort = ['live', 'hot', 'new'].includes(req.query.sort) ? req.query.sort : 'live';
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const asked = String(req.query.refresh || '') === '1';
+      if (offset === 0 && (asked || !barHasNpcThreads(bar.id))) {
+        await refreshBarNpcPosts(bar.id);
+        bar = getBar(bar.id, acc);
+      }
+      bar.cast_handles = tiebaBarHandles(bar.id);
       const threads = listThreads(bar.id, {
         limit: req.query.limit,
-        offset: req.query.offset,
+        offset,
         sort,
       });
       res.json({ bar, threads });
     } catch (e) {
+      console.warn('[tieba] threads', e.message);
       res.status(500).json({ error: e.message });
     }
   });
@@ -191,18 +203,24 @@ function registerTiebaRoutes(app, { tieba }) {
     }
   });
 
-  app.get('/api/tieba/threads/:id', (req, res) => {
+  app.get('/api/tieba/threads/:id', async (req, res) => {
     try {
       if (!ensure(res)) return;
+      const offset = parseInt(req.query.offset, 10) || 0;
+      if (String(req.query.refresh || '') === '1' && offset === 0) {
+        await refreshThreadNpcReplies(req.params.id);
+      }
       const thread = getThread(req.params.id);
       if (!thread) return res.status(404).json({ error: '帖子不存在' });
+      const bar = getBar(thread.bar_id, getAccountFromReq(req));
+      if (bar) bar.cast_handles = tiebaBarHandles(bar.id);
       const posts = listPosts(thread.id, {
         limit: req.query.limit,
-        offset: req.query.offset,
+        offset,
       });
-      const bar = getBar(thread.bar_id, getAccountFromReq(req));
       res.json({ thread, posts, bar });
     } catch (e) {
+      console.warn('[tieba] thread', e.message);
       res.status(500).json({ error: e.message });
     }
   });

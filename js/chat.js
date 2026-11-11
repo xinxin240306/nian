@@ -3,7 +3,7 @@ import * as api from './api.js';
 import { playNotifySound, playTTS } from './tts.js';
 import { getChatSettings } from './storage.js';
 import { resolvePaperFont } from './diary-paper.js';
-import { shouldInsertTimeDivider, formatRelativeTime, formatAbsTime, formatDetailTime, resolveDisplayTimestamp, escapeHtml, stripImageDirective, stripVoiceLaneTags, stripElevenAudioTags, stripAiContextLabels, stripDisplayPeriod, keepVoicePeriod, parseCallSystemRecord, isBareMediaLabel, looksLikeWebCardPayload, looksLikeStandaloneHtml } from './memory.js';
+import { shouldInsertTimeDivider, formatRelativeTime, formatAbsTime, formatDetailTime, resolveDisplayTimestamp, escapeHtml, stripImageDirective, stripVoiceLaneTags, stripElevenAudioTags, stripAiContextLabels, stripDisplayPeriod, keepVoicePeriod, parseCallSystemRecord, isBareMediaLabel, isLoneExclaimText, isPeriodOnlyText, looksLikeWebCardPayload, looksLikeStandaloneHtml } from './memory.js';
 import { ensureInlineEmojis, renderInlineEmojiHtml, stripInlineBeanTokens } from './inline-emoji.js';
 ensureInlineEmojis().catch(() => {});
 
@@ -189,7 +189,7 @@ function formatBubbleText(text, isUser, { beans = true, keepPeriod = false } = {
     normalized = stripAiContextLabels(String(normalized));
     if (isBareMediaLabel(normalized)) return '';
     normalized = stripEmojiMarksForDisplay(normalized);
-    // 文字气泡不显示句末「。」（拆泡已按句号切开）；语音条保留
+    // 文字气泡不显示句末「。」和单独一个「！」；语音条保留
     if (!keepPeriod) normalized = stripDisplayPeriod(normalized);
     // 清掉漏网的定位开闭标签，避免出现单独的「[/位置]」
     normalized = String(normalized || '')
@@ -836,7 +836,8 @@ export function buildBubble(msg, char, settings, opts = {}) {
     } else {
       const displayContent = stripImageDirective(msg.content);
       let formatted = formatBubbleText(displayContent, isUser);
-      if (!formatted.trim() && String(displayContent || '').trim()) {
+      if (!formatted.trim() && String(displayContent || '').trim()
+        && !isPeriodOnlyText(displayContent) && !isLoneExclaimText(displayContent)) {
         formatted = escapeHtml(String(displayContent).trim());
       }
       if (!formatted.trim()) return '';
@@ -845,7 +846,8 @@ export function buildBubble(msg, char, settings, opts = {}) {
   } else {
     const displayContent = isUser ? msg.content : stripImageDirective(msg.content);
     let formatted = formatBubbleText(displayContent, isUser);
-    if (!isUser && !formatted.trim() && String(displayContent || '').trim()) {
+    if (!isUser && !formatted.trim() && String(displayContent || '').trim()
+      && !isPeriodOnlyText(displayContent) && !isLoneExclaimText(displayContent)) {
       formatted = escapeHtml(String(displayContent).trim());
     }
     if (!isUser && !formatted.trim()) return '';

@@ -73,7 +73,7 @@ function buildSelfAddressNote(char) {
   return '第一人称用「我」。不要把职业/身份编成招牌自称（大艺术家、本画家、本xx 这类）；身份可以提到，但不能当口头禅自称。';
 }
 
-function buildCharacterProfile(char) {
+function buildCharacterProfile(char, opts = {}) {
   const parts = [];
   // 有心智时：心智主导；背景只作短摘要，不再把长篇经历当指令栏
   const mindset = String(char?.mindset || '').trim();
@@ -103,7 +103,9 @@ function buildCharacterProfile(char) {
     const emotionNote = hasExamples
     ? `\n**只学怎么接话，不要复读下面任何一句原句**：`
     : `\n**这是这个人真实的说话方式，情绪来了也要保持这个人的语言习惯**：`;
-    const selfAddr = buildSelfAddressNote(char);
+    const selfAddr = opts.videoCallNarration
+      ? `旁白（引号外）写角色时用「他」或「${char.name}」，写用户时用「你」。不要用「我」或「她」做旁白主语，也不要把用户写成「他/她」。引号里的台词才用「我」自称，并称呼用户为「你」。不要把职业/身份编成招牌自称（大艺术家、本画家、本xx 这类）。`
+      : buildSelfAddressNote(char);
     parts.push(`${baseInstruction}${emotionNote}${selfAddr ? `\n${selfAddr}` : ''}\n${char.language_style}`);
   }
   if (parts.length) {
@@ -137,6 +139,26 @@ function getTimeInZone(date, tz) {
       week: weekdays[local.getUTCDay()],
     };
   }
+}
+
+/** 现在几点的口语，供角色报时照说。两点整不要被说成两点十分。 */
+function formatSpokenClock(date, tz) {
+  const total = getLocalMinutesSinceMidnight(date instanceof Date ? date : new Date(), tz);
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
+  const period = h < 5 ? '凌晨' : h < 11 ? '上午' : h < 13 ? '中午' : h < 18 ? '下午' : h < 23 ? '晚上' : '夜里';
+  const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'];
+  const hourWord = h === 0 ? '零' : (h === 12 ? '十二' : cn[h % 12]);
+  const d = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+  let minWord = '整';
+  if (m === 30) minWord = '半';
+  else if (m > 0 && m < 10) minWord = `零${d[m]}`;
+  else if (m >= 10) {
+    const tens = ['', '十', '二十', '三十', '四十', '五十'][Math.floor(m / 10)];
+    const ones = m % 10;
+    minWord = ones ? `${tens}${d[ones]}` : `${tens}分`;
+  }
+  return `${period}${hourWord}点${minWord}`;
 }
 
 function parseMsgTimestamp(ts) {
@@ -828,7 +850,7 @@ function buildCharActivityContinuityNote(history, char = null) {
       notes.push(`${spec.label}已过约${gapMin}分钟，视为结束，禁止再说要去/正要去`);
     } else {
       // 旧文案「只许往结束推进」会诱使模型下一句就做完
-      notes.push(`${spec.label}进行中（约${gapMin}分钟）：像已经在做一样接着聊，禁止再说「要去/正要去」，也禁止本轮宣称已完成`);
+      notes.push(`${spec.label}进行中（约${gapMin}分钟）：接着聊，不要再说要去。已经成立的状态照说（做完了、到了、醒了），不要改成还在做`);
     }
     if (notes.length >= 2) break;
   }
@@ -1209,10 +1231,11 @@ function recentLifeShareAvoidBlock(recentMsgs) {
 }
 
 function buildProactiveLifeShareExtra({
-  char, settings, timeSlot, userName, lastUserSummary, lastAiSummary,
+  char, settings, timeSlot, spokenClock, userName, lastUserSummary, lastAiSummary,
   offlineNote, caretakerBan, lengthGuide, recentMsgs,
 }) {
-  const situational = [`现在是${timeSlot}。`];
+  const clockLine = spokenClock || timeSlot;
+  const situational = [`现在是${clockLine}。要说现在几点就用这一句，不要改分钟，也不要为了报时而报时。`];
   if (lastUserSummary) {
     situational.push(`${userName}较早前说过：「${lastUserSummary}」（不代表此刻在线）。`);
   } else if (lastAiSummary) {
@@ -1835,6 +1858,7 @@ const SCHEDULE_CONTEXT_GUIDE = `【背景·不说出口】下面「此刻」只�
 · 对方明确问起时：可答一句，点到为止。
 · 今天的时段已定死：不要把正在做的事改成另一件；只有聊天里明确改了计划，这一档才变。做完即空闲。
 · 已经说过在做/做完的，不要再报「要去/正要去/刚做完」。还没到点的「下一项」只是将要去做，禁止当成已经到场/已经在做。
+· 状态词保持状态：醒了不要说成还在睡，到了不要说成还在路上，做完了不要说成还在做。还在进行才用「还在…」。
 · 聊天里刚说过自己在哪，改地方必须有过渡，禁止瞬移，禁止改口说「一直」在新地方。勿催用户。`;
 
 /** 近期聊天里角色自称的所在/状态（比钟点日程更贴近对方刚听过的事实） */
@@ -2467,7 +2491,8 @@ function getHereAndNowContext(char, settings) {
   const away = placeMode === 'away' || !!(presentLoc && homeSpoken && placesDiffer(presentLoc, homeSpoken));
 
   const lines = [];
-  lines.push(`【此刻时间】现在是 ${clock.str} ${clock.week}。只写已经发生或正在发生的事。禁止把今天下午/晚上还没到点的安排写成正在做或已经做完。`);
+  const spokenClock = formatSpokenClock(new Date(), tz);
+  lines.push(`【此刻时间】现在是 ${clock.str} ${clock.week}，说出来是「${spokenClock}」。要写现在几点只能用这一句，禁止改成分钟不同的邻近时间。行程上的钟点是那一档几点开始，不是现在。只写已经发生或正在发生的事。禁止把今天下午/晚上还没到点的安排写成正在做或已经做完。`);
   if (nextAct && picked.next?.time) {
     lines.push(`下一项尚未开始（最多一句「待会要…」，禁止当正在经历）：${picked.next.time} ${nextAct}`);
   }
@@ -4275,7 +4300,7 @@ function buildCallExtraSystemPrompt(isVideo, history, characterId, opts = {}) {
   const inputMode = String(opts?.inputMode || '').trim().toLowerCase();
   const see = isVideo
     ? (opts.callVideoTextMode
-      ? '文字视频电话：对方看到的是你镜头里的文字画面。整段输出就是画面——旁白只写镜头里看得见的：环境、动作、表情、光影；禁止心理描写（心想、暗想、犹豫的内心、觉得、意识到等）。你开口说的话必须放在引号「」或“”里（系统只朗读引号；漏了引号就等于没出声）。不要写 [镜头] 标记，不要用*星号动作*。'
+      ? '文字视频电话：对方看到的是镜头文字画面。整段输出就是画面。旁白里角色用「他」或角色名，用户用「你」（他看向屏幕、他看了你一眼）；禁止旁白用「我」或「她」，禁止把用户写成「他/她」。禁止心理描写。开口的话必须放在「」里（系统只朗读引号；漏了引号就等于没出声）。不要写 [镜头] 标记，不要用*星号动作*。'
       : '视频里你也能看见对方：本轮若附了画面，就像真人视频——清楚就有感再提；黑了/糊了就眯着眼辨认或随口问一句，别装已看清。')
     : '';
   // 用户当前是「免提说话」还是「打字聊天」：
@@ -4352,7 +4377,7 @@ function buildCallExtraSystemPrompt(isVideo, history, characterId, opts = {}) {
   const textVideo = !!opts.callVideoTextMode;
   // 文字视频：禁止套「只输出开口的话／不要旁白」——那会和镜头旁白硬性冲突，模型会只吐台词
   const formatBlock = textVideo
-    ? `【格式·文字视频】整段输出=对方看到的镜头画面。旁白用第二人称「你」写看得见的环境、动作、表情、光影（你看向屏幕、你放下笔）；禁止用「她」「他」当旁白主语，禁止心理独白。你开口的话必须放在「」里。禁止*星号动作*、禁止 [镜头] 标记、禁止只打字不写画面。系统只朗读引号里的话。`
+    ? `【格式·文字视频】整段输出=镜头画面。旁白里角色用「他」或角色名，用户用「你」（他看向屏幕、他看了你一眼）；禁止「我看向…」「她放下…」，禁止把用户写成「他/她」。开口的话放进「」里，引号里才可以自称「我」，并称呼用户为「你」。禁止心理独白、*星号动作*、[镜头] 标记。系统只朗读引号里的话。`
     : `只输出开口的话。不要*动作*、不要（旁白）、不要（笑）（叹气）括注。`;
     const lengthBlock = textVideo
     ? `旁白可短可稍长；台词默认 1～2 句。没有开口时也可只写旁白。`
@@ -4476,6 +4501,7 @@ function buildSystemPrompt(char, settings, extra = '', opts = {}) {
   const tz = settings.timezone || 'Asia/Shanghai';
   const { str: timeStr, week } = getTimeInZone(now, tz);
   const timeSlot = getTimeOfDaySlot(getLocalHour(settings));
+  const spokenClock = formatSpokenClock(now, tz);
 
   const uname = settings.username || '旅人';
   const nsfwChar = Number(char?.nsfw_enabled) !== 0;
@@ -4512,9 +4538,9 @@ function buildSystemPrompt(char, settings, extra = '', opts = {}) {
 【当前通道·硬性】现在是${forVideoCall ? '视频电话' : '语音电话'}，已经接通。${forVideoCallText ? '' : '你说的每一句都是对着听筒说的，对方实时听见。这不是微信打字。'}
 ${forVideoCallText ? `【文字视频·格式硬性】对方看到的是镜头文字画面（不是循环短片）。
 · 整段输出=画面：旁白只写镜头里看得见的——环境、动作、表情、光线；可短可稍长。
-· 【旁白人称·硬性】旁白主语是「你」（镜头里的本人）：你看向屏幕、你放下笔、你皱眉。禁止写成「她/他放下笔」。引号里才是你对对方说的话，引号里的「你」是对方。
+· 【人称·硬性】引号外：角色用「他」或「${char.name}」，用户用「你」。例：他放下手里的笔看向屏幕，眉心微蹙，看了你一眼。禁止「我放下笔」「你放下笔」「她看向屏幕」，禁止把用户写成「他/她」。
 · 禁止心理描写：不要写心想、暗想、犹豫、觉得、意识到、内心独白、情绪名词堆砌；疑惑/紧张只能通过表情、眼神、动作露出来。
-· 开口说的话必须放进「」里，引号要成对。例：你放下手里的笔看向屏幕，眉心微蹙，迟疑地问道：「你跟他……告白了？」
+· 开口说的话必须放进「」里，引号要成对。引号里自称「我」，称呼用户用「你」。例：他看向屏幕，迟疑地问道：「你怎么现在才来？」
 · 可以一句旁白夹一句台词，也可以多句台词中间夹旁白；系统只朗读引号里的话，旁白不念。
 · 禁止写 [镜头]…[/镜头]，禁止*星号动作*，禁止只打字不写画面。没有开口时也可只写旁白。
 ` : ''}上文标 [通话] 的才是这通电话；标 [文字] 的是接通之前的微信，不要按打字来回。
@@ -4534,7 +4560,12 @@ ${emotionHelper.USER_TURN_KEYWORD_EMOTION
 【语言风格】只提供短对话语感，禁止原文照搬、禁止把示例当口头禅反复甩。情绪只换温度，不换这张嘴。
 有【时间感知】时，墙钟只用来过**你自己**的日子（你困不困、还在不在忙），不是对方的作息顾问。除非对方本轮自己在说困、要睡或下班，否则不要当闹钟，不要句末催睡、催收拾、催下班。人设爱唠叨也不能拿钟点当理由。`;
 
-  const personLock = (forDiary || (!isDream && !forDiaryPeek))
+  const personLock = forVideoCallText
+    ? `【人称·硬性】文字视频的旁白：角色是「他」或「${char.name}」，用户是「你」。
+引号外面写「他看向屏幕」「${char.name}皱了皱眉」「他看了你一眼」。
+禁止旁白用「我」做主语，禁止「你看向屏幕」（那会把角色写成用户），禁止用「她」，禁止把用户写成「他」或「她」。
+引号里面才是${char.name}说出口的话：自称用「我」，称呼用户用「你」。旁白不要写进引号。`
+    : (forDiary || (!isDream && !forDiaryPeek))
     ? `【人称·硬性】你是${char.name}。你说的「我」只能是你。用户「${uname}」消息里的「我像／我是／我总是…」是对方在说自己，禁止收成你的自称。
 【动作主语·硬性】谁在做事、谁的身体/东西、谁对谁——跟上文与本轮用户话对齐，禁止中途对调或吞并。
 · 用户说「我咬你／我摸你／我把…」=对方在做，你接的是被咬/被摸，禁止下一句改成「我咬你」「我只会咬…」把施事收成自己。
@@ -4599,7 +4630,7 @@ ${theaterSceneState ? `【当前扮演状态】（必须遵守，直到用户改
     : forVoiceCall
     ? `【句读】电话里少用连续感叹号。按平时说话写，不要故意加「嗯——」「那个」装自然。
 ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
-    : `【句读与气泡】多句时每句用「。」「？」「！」「……」分开，系统按句拆成气泡；拆完界面不再显示句号。不要只用逗号把两句粘在一条里。只回一句短话或「嗯」「……」时可不打句号。人设偏温柔时可用轻一点的语气（呢/呀/……）和适度「！」；人设偏淡/冲则日常少用「！」——真震惊、急了、破防时可以用「！！！」「？？？」。`;
+    : `【句读与气泡】多句时每句用「。」「？」「！」「……」分开，系统按句拆成气泡；拆完界面不再显示句号，句末单独一个「！」也不显示。问号、省略号和连续感叹号会留在气泡上。不要只用逗号把两句粘在一条里。只回一句短话或「嗯」「……」时可不打句号。人设偏温柔时用轻一点的语气（呢/呀/……）；真要让对方看见感叹，用「！！」或「！！！」。真震惊、急了、破防时可以用「！！！」「？？？」。`;
 
   // 普通聊天默认微信节奏：够短、仍有人设；梦境/日记/日记偷看/小剧场/游戏/桌宠不套这套
   const chatBrevity = (isDream || forDiaryPeek || forDiary || forGame || forTheater || forRobot || forOperating) ? '' : forVoiceCall
@@ -4648,7 +4679,8 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
 
   const timeAware = (!forDiaryPeek && settings.time_aware_enabled === '1')
     ? `【背景·时间感知·不说出口】
-· 现在是 ${timeStr} ${week}（${timeSlot}）。只标你这边几点，不表示对方该睡或该下班。
+· 现在是 ${timeStr} ${week}（${timeSlot}）。你要是说出「现在几点」，只能说「${spokenClock}」，时和分都要一致，禁止说成两点十分这种邻近时间。没人问、你也不是在报时，不要提钟点。
+· 行程上的钟点是那一档几点开始，不是现在。这行钟只标你这边，不表示对方该睡或该下班。
 · 日子是一条往前走的线：有刚才、有现在、有还没到的。对照【此刻】和已经过的时段，不要把一天当成只有眼前这个钟点。
 · 今天和对方处过的点看【今天和对方】（闲聊/深度/吵架等），那是今天的线；近窗只是眼前这一截。
 · 对照【此刻】过你自己的日子：你可能在忙、在路上、刚做完、要睡或空着，不是默认盯着手机等回——体现在回得慢/短/心不在焉。行踪不必每条报；你想讲的一件小事可以当话题。
@@ -4766,7 +4798,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
     }
   }
 
-  const charProfile = buildCharacterProfile(char);
+  const charProfile = buildCharacterProfile(char, { videoCallNarration: forVideoCallText });
   const relationshipGuide = (!isDream && !forGame) ? buildRelationshipEngagementGuide(char) : '';
   let affectionBlock = '';
   if (!isDream && !forGame && !forDiaryPeek) {
@@ -4816,7 +4848,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
     }
     const needIntimate = !!(need.intimate || need.sexAct || forTheater);
     const nsfwChannel = forVideoCallText
-      ? '这是文字视频电话：旁白写你镜头里看得见的画面（环境、动作、表情、光影、身体），台词进引号；亲密场面也落到画面上，不是纯打字。'
+      ? '这是文字视频电话：旁白里角色用「他」或角色名，用户用「你」，写镜头里看得见的画面（环境、动作、表情、光影、身体）；不要写成「我」或「她」，不要把用户写成「他/她」。台词进引号。亲密场面也落到画面上，不是纯打字。'
       : forVoiceCall
         ? `这是${forVideoCall ? '视频电话' : '语音电话'}对白不是写小说。`
         : '这是发消息不是写小说。';
@@ -4850,7 +4882,7 @@ ${buildPresenceReassureBan(opts.recentHistory || [], { forCall: true })}`
 ${require('./intimate-writing-helper').intimateLeanLine(char)}
 还想要就按你这个人说。
 你还是这个人。急、害羞、坏、懒都跟平时一样。
-${canAct ? '有接触就用括号给一个镜头，特写或远一点，一句具体的就够。' : '用这个人的话说，不要写成小说动作。'}
+${canAct ? (forVideoCallText ? '有接触就写进旁白：角色用「他」或名字，用户用「你」，一句具体的就够，不要用括号镜头。' : '有接触就用括号给一个镜头，特写或远一点，一句具体的就够。') : '用这个人的话说，不要写成小说动作。'}
 上文没有的东西别变出来。${canAct ? '节奏是你的：对方点到的部位或反应只是上一拍。对方回得很短或接不上时，你把这一拍演完。对方没写的高潮、疼、喜欢，不要写成已经发生的事实。' : '对方没说的身体反应别替对方定成事实。'}${intimateStopLine}`;
     } else {
       nsfwBlock = `【亲密】${nsfwChannel}
@@ -4907,7 +4939,9 @@ ${canAct ? '有接触就用括号给一个镜头，特写或远一点，一句�
   const hasExamples = char.language_style && char.language_style.length > 50;
   const styleLooksLiterary = hasExamples && /比喻|诗意|意象|修辞|文雅|优雅|文艺|雅|散文|暗喻/.test(String(char.language_style));
 
-  const selfAddrLock = buildSelfAddressNote(char);
+  const selfAddrLock = forVideoCallText
+    ? `引号外的旁白：角色用「他」或「${char.name}」，用户用「你」。不要写成「我」或「她」，不要把用户写成「他/她」。引号里的台词才用「我」自称，并称呼用户为「你」。不要把职业/身份编成招牌自称。`
+    : buildSelfAddressNote(char);
   const toneProfile = (() => {
     try { return emotionHelper.characterToneProfile(char) || {}; } catch { return {}; }
   })();
@@ -5223,8 +5257,10 @@ ${lectureVoiceLine}
     thinkAtEnd ? thinkAsSelf : '',
     // 口吻钉在开口前
     voiceLock,
-    // 用户预设压轴：硬性覆盖上文一切冲突
+    // 用户预设钉在开口前：只挡禁词，不压口吻
     presetsBlock,
+    // 文字视频最后再钉一次，避免人设/预设把旁白拉回「我」，或把用户写成「她」
+    forVideoCallText ? personLock : '',
     (!isDream && !forGame && !forTheater && !forRobot && modelPressesInterview(
       String(char?.chat_model || '').trim() || String(settings?.chat_model || '').trim()
     ))
@@ -7149,13 +7185,13 @@ async function checkProactiveCall() {
         let openingHint;
         if (avail.vibe === 'tipsy') {
           openingHint = textVideo
-            ? `你喝多了，特别想对方，忍不住打视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/酒意/对着屏幕的样子），旁白主语必须用「你」，禁止「她/他」。再跟一句开口，台词必须放在「」里。短、口语、带点酒意。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
+            ? `你喝多了，特别想对方，忍不住打视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/酒意/对着屏幕的样子），旁白里角色用「他」或角色名，用户用「你」，禁止旁白用「我」或「她」，禁止把用户写成「他/她」。再跟一句开口，台词必须放在「」里。短、口语、带点酒意。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
             : (isVideo
               ? `你喝多了，特别想对方，忍不住打视频。下面这一句会在对方接通后直接念出来：短、口语、带点酒意，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`
               : `你喝多了，特别想对方，忍不住打电话。下面这一句会在对方接通后直接念出来：短、口语、带点酒意，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`);
         } else {
           openingHint = textVideo
-            ? `你想打个视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/光线/看向屏幕的动作表情），旁白主语必须用「你」，禁止「她/他」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
+            ? `你想打个视频。下面是对方接通后看到的「刚接通」镜头画面：先一两句旁白（环境/光线/看向屏幕的动作表情），旁白里角色用「他」或角色名，用户用「你」，禁止旁白用「我」或「她」，禁止把用户写成「他/她」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。`
             : (isVideo
               ? `你想打个视频。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声，像真开了摄像头。不要播音腔、不要自我介绍。只输出这一句正文。`
               : `你想打个电话。下面这一句会在对方接通后直接念出来：短、口语，可先喂一声。不要播音腔、不要自我介绍。只输出这一句正文。`);
@@ -8084,6 +8120,7 @@ async function buildProactiveContext(char, settings, idleMinutes, scenario, last
     10
   );
   const timeSlot = getTimeOfDaySlot(hour);
+  const spokenClock = formatSpokenClock(new Date(), tz);
   const idleStr = formatIdleDuration(idleMinutes);
   const userName = settings.username || '旅人';
 
@@ -8135,7 +8172,7 @@ async function buildProactiveContext(char, settings, idleMinutes, scenario, last
     const parts = pending.map(m => summarizeMsgContent(m)).filter(Boolean);
     const quoted = parts.join('」「');
     const situational = [
-      `现在是${timeSlot}。${idleStr}前${userName}给你发了消息，你当时在做别的事，现在有空回一下。`,
+      `现在是${spokenClock}。要说现在几点就用这一句，不要改分钟，也不要为了报时而报时。${idleStr}前${userName}给你发了消息，你当时在做别的事，现在有空回一下。`,
       pending.length > 1
         ? `${userName}连发了${pending.length}条：「${quoted}」`
         : `${userName}说的是：「${quoted || summarizeMsgContent(lastMsg)}」`,
@@ -8173,6 +8210,7 @@ ${lengthGuide || '口语短句即可，只输出要发的正文。'}`;
       char,
       settings,
       timeSlot,
+      spokenClock,
       userName,
       lastUserSummary: (lastUserMsg && !isStaleLastTalk(lastUserMsg)) ? summarizeMsgContent(lastUserMsg) : '',
       lastAiSummary: lastAiMsg ? summarizeMsgContent(lastAiMsg) : '',
@@ -8210,7 +8248,7 @@ ${caretakerBan}`;
   } else {
     const lastUserMsg = [...recentMsgs].reverse().find(m => m.role === 'user');
     const lastAiMsg = [...recentMsgs].reverse().find(m => m.role === 'assistant');
-    const situational = [`现在是${timeSlot}。`];
+    const situational = [`现在是${spokenClock}。要说现在几点就用这一句，不要改分钟，也不要为了报时而报时。`];
     if (lastUserMsg && !isStaleLastTalk(lastUserMsg)) {
       situational.push(`${userName}较早前说的是：「${summarizeMsgContent(lastUserMsg)}」（不代表此刻在线）。`);
     } else if (lastUserMsg) {

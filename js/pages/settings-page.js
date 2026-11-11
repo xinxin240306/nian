@@ -34,7 +34,7 @@ function readSfxMixFromForm() {
     sfx_vol_oneshot: String(sfxPct(document.getElementById('s-sfx-vol-oneshot')?.value, 70)),
     sfx_vol_close: String(sfxPct(document.getElementById('s-sfx-vol-close')?.value, 32)),
     sfx_vol_duck: String(sfxPct(document.getElementById('s-sfx-vol-duck')?.value, 88)),
-    sfx_vol_call_voice: String(sfxPct(document.getElementById('s-sfx-vol-call-voice')?.value, 115)),
+    sfx_vol_call_voice: String(sfxPct(document.getElementById('s-sfx-vol-call-voice')?.value, 100)),
   };
 }
 
@@ -335,7 +335,7 @@ window.initSettingsPage = async function() {
           ${sfxVolSlider('s-sfx-vol-oneshot', '一次性音效', sfxPct(settings.sfx_vol_oneshot, 70))}
           ${sfxVolSlider('s-sfx-vol-close', '贴身声', sfxPct(settings.sfx_vol_close, 32))}
           ${sfxVolSlider('s-sfx-vol-duck', '说话时还留多少', sfxPct(settings.sfx_vol_duck, 88))}
-          ${sfxVolSlider('s-sfx-vol-call-voice', '通话角色声音（100=系统音量；觉得小就拉大，最大 200）', sfxPct(settings.sfx_vol_call_voice, 115), { min: 50, max: 200 })}
+          ${sfxVolSlider('s-sfx-vol-call-voice', '通话角色声音（100 就是当前系统媒体音量，调低只让角色更轻，不会把系统音量抬高）', sfxPct(settings.sfx_vol_call_voice, 100), { min: 50, max: 100 })}
         </div>
       </div>
       <div class="settings-section">

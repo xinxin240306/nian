@@ -68,8 +68,11 @@ final class CallAudioRoute {
       return;
     }
     if (routed && isHeadsetRoute()) {
-      finish(done);
-      return;
+      if (headsetRouteAlive(am)) {
+        finish(done);
+        return;
+      }
+      routed = false;
     }
     if (routed && "builtin".equals(routeName) && !hasBtOutput(am) && findWired(am) == null) {
       finish(done);
@@ -164,8 +167,18 @@ final class CallAudioRoute {
   private static void routeBuiltinSpeaker(AudioManager am) {
     beginRoute("builtin");
     stopScoQuiet(am);
-    setModeComm(am);
-    setSpeakerOn(am);
+    // 外放不要进通话模式、也不要开 speakerphone。那条通路的音量锁在通话流上，
+    // 系统音量面板调的是媒体，听起来就是很大而且怎么拧都不变。
+    // 媒体流在普通模式下默认就从扬声器出来。
+    try {
+      am.setMode(AudioManager.MODE_NORMAL);
+    } catch (Exception ignored) {}
+    setSpeakerOff(am);
+    if (Build.VERSION.SDK_INT >= 31) {
+      try {
+        am.clearCommunicationDevice();
+      } catch (Exception ignored) {}
+    }
     routed = true;
     requestFocus(am, true);
   }
@@ -266,64 +279,87 @@ final class CallAudioRoute {
   static void suspendScoForMedia(Context ctx, Runnable done) {
     Context app = ctx != null ? ctx.getApplicationContext() : null;
     AudioManager am = manager(app);
-    boolean waitA2dp = false;
+    if (am == null) {
+      finish(done);
+      return;
+    }
+    // 这一轮已经在媒体路上、SCO 也没再连上：不要每次开口都 stopSco/setMode。
+    // 重复切一次，首句前半截就会噎住，说到一半还会空一段。
+    boolean scoOn = am.isBluetoothScoOn();
+    boolean bt = hasBtOutput(am);
+    AudioDeviceInfo wiredNow = findWired(am);
+    if (mediaSuspended && !scoOn && !waitingSco) {
+      if (bt && "a2dp".equals(routeName)) {
+        finish(done);
+        return;
+      }
+      if (!bt && wiredNow != null && "wired".equals(routeName)) {
+        finish(done);
+        return;
+      }
+      if (!bt && wiredNow == null && "builtin".equals(routeName)) {
+        finish(done);
+        return;
+      }
+    }
+
     routeGen++;
     waitingSco = false;
     cleanupScoWait(app);
-    if (am != null) {
-      boolean wasSco = am.isBluetoothScoOn() || "sco".equals(routeName) || "ble".equals(routeName);
-      if (wasSco) {
-        scoHeldForMedia = true;
-        mediaSuspended = true;
-      }
-      stopScoQuiet(am);
-      AudioDeviceInfo wired = findWired(am);
-      routed = false;
-      if (hasBtOutput(am)) {
-        // 耳机走媒体声道，必须离开通话模式，否则会卡在 SCO 上断断续续
-        try {
-          am.setMode(AudioManager.MODE_NORMAL);
-        } catch (Exception ignored) {}
-        setSpeakerOff(am);
-        routeName = "a2dp";
-        waitA2dp = wasSco;
-        requestFocus(am, true);
-      } else if (wired != null) {
-        try {
-          am.setMode(AudioManager.MODE_NORMAL);
-        } catch (Exception ignored) {}
-        setSpeakerOff(am);
-        routeName = "wired";
-        routed = true;
-        mediaSuspended = true;
-        requestFocus(am, true);
-      } else {
-        // 外放仍走通话流。若先改成普通模式再开播，前半句会进听筒或被丢掉，
-        // 听起来就是每一句的开头没有声音。保持通话模式并打开扬声器。
-        boolean already =
-          am.getMode() == AudioManager.MODE_IN_COMMUNICATION && am.isSpeakerphoneOn();
-        setModeComm(am);
-        setSpeakerOn(am);
-        routeName = "builtin";
-        routed = true;
-        mediaSuspended = false;
-        requestFocus(am, false);
-        speakerPrerollUntil = already
-          ? 0
-          : android.os.SystemClock.uptimeMillis() + 220;
-      }
+    boolean wasSco = scoOn || "sco".equals(routeName) || "ble".equals(routeName);
+    // 先占住，避免设备回调在 SCO 卸掉的空档里又把通话路由抢回来
+    mediaSuspended = true;
+    if (wasSco) scoHeldForMedia = true;
+    if (wasSco || scoOn) stopScoQuiet(am);
+    routed = false;
+    if (bt) {
+      // 耳机走媒体声道，必须离开通话模式，否则会卡在 SCO 上断断续续
+      try {
+        am.setMode(AudioManager.MODE_NORMAL);
+      } catch (Exception ignored) {}
+      setSpeakerOff(am);
+      routeName = "a2dp";
+      speakerPrerollUntil = 0;
+      requestFocus(am, true);
+      // 等 SCO 真正灭掉并稳住，再放行开播。旗标一掉就开播，后半段路由提交会把正在读的话掐掉。
+      waitA2dpReady(app, done, 1800);
+      return;
     }
-    if (waitA2dp) {
-      // SCO→A2DP 太急会让首句前半截发闷/发小；等 SCO 真正卸掉再播
-      waitA2dpReady(app, done, 1100);
-    } else {
+    if (wiredNow != null) {
+      try {
+        am.setMode(AudioManager.MODE_NORMAL);
+      } catch (Exception ignored) {}
+      setSpeakerOff(am);
+      routeName = "wired";
+      routed = true;
+      requestFocus(am, true);
+      speakerPrerollUntil = android.os.SystemClock.uptimeMillis() + 420;
       finish(done);
+      return;
     }
+    // 外放跟耳机一样走媒体流，音量跟系统媒体键。
+    // 通话模式 + 扬声器会把声音锁在通话音量上，面板里的媒体滑条完全没用。
+    try {
+      am.setMode(AudioManager.MODE_NORMAL);
+    } catch (Exception ignored) {}
+    setSpeakerOff(am);
+    if (Build.VERSION.SDK_INT >= 31) {
+      try {
+        am.clearCommunicationDevice();
+      } catch (Exception ignored) {}
+    }
+    routeName = "builtin";
+    routed = true;
+    requestFocus(am, true);
+    // 模式本来就是普通模式时也要等。setPreferredDevice 落到扬声器之前开播，前半句会进听筒。
+    speakerPrerollUntil = android.os.SystemClock.uptimeMillis() + 420;
+    finish(done);
   }
 
   private static void waitA2dpReady(Context app, Runnable done, long maxMs) {
     final long start = android.os.SystemClock.uptimeMillis();
     final int gen = routeGen;
+    final long[] scoQuietSince = { -1 };
     Runnable poll = new Runnable() {
       @Override
       public void run() {
@@ -331,16 +367,23 @@ final class CallAudioRoute {
         AudioManager am = manager(app);
         boolean scoOff = am == null || !am.isBluetoothScoOn();
         boolean hasOut = am != null && hasBtOutput(am);
-        long elapsed = android.os.SystemClock.uptimeMillis() - start;
-        // SCO 掉了不代表 A2DP 已经出声。太早开播，第一句前半截会进一条还没通的通路。
-        if ((elapsed >= 480 && scoOff && hasOut) || elapsed >= maxMs) {
+        long now = android.os.SystemClock.uptimeMillis();
+        long elapsed = now - start;
+        if (scoOff && hasOut) {
+          if (scoQuietSince[0] < 0) scoQuietSince[0] = now;
+        } else {
+          scoQuietSince[0] = -1;
+        }
+        boolean stable = scoQuietSince[0] > 0 && now - scoQuietSince[0] >= 700;
+        if (stable || elapsed >= maxMs) {
+          Log.i(TAG, "a2dp ready elapsed=" + elapsed + " stable=" + stable);
           finish(done);
           return;
         }
-        MAIN.postDelayed(this, 70);
+        MAIN.postDelayed(this, 80);
       }
     };
-    MAIN.postDelayed(poll, 200);
+    MAIN.post(poll);
   }
 
   static void resumeAfterMedia(Context ctx, Runnable done) {
@@ -354,14 +397,41 @@ final class CallAudioRoute {
     preferCall(ctx, done);
   }
 
-  /** AudioRecord 应绑到的输入设备（SCO / BLE / 有线）。 */
+  /** 外放播放钉在手机扬声器上，避免普通模式仍把开头送进听筒。 */
+  static AudioDeviceInfo builtinSpeaker(Context ctx) {
+    return findType(manager(ctx), AudioDeviceInfo.TYPE_BUILTIN_SPEAKER);
+  }
+
+  /** AudioRecord 应绑到的输入设备。耳机路由或已经连上的耳机麦优先，否则用手机麦。 */
   static AudioDeviceInfo preferredInputDevice(AudioManager am) {
     if (am == null || Build.VERSION.SDK_INT < 23) return null;
+    AudioDeviceInfo wired = findWired(am);
     AudioDeviceInfo ble = findBle(am);
-    if (ble != null) return ble;
     AudioDeviceInfo sco = findType(am, AudioDeviceInfo.TYPE_BLUETOOTH_SCO);
-    if (sco != null) return sco;
-    return findWired(am);
+    if ("wired".equals(routeName) && wired != null) return wired;
+    if ("ble".equals(routeName)) {
+      if (ble != null) return ble;
+      if (sco != null) return sco;
+    }
+    if ("sco".equals(routeName) || am.isBluetoothScoOn()) {
+      if (sco != null) return sco;
+      if (ble != null) return ble;
+    }
+    // 有线耳机自带麦，不依赖 SCO。蓝牙只有 HFP/SCO 或 LE 耳机才有麦，纯 A2DP 仍用手机麦。
+    if (wired != null) return wired;
+    if (ble != null) return ble;
+    return null;
+  }
+
+  /** 当前耳机路由对应的设备还在不在。拔掉后要重新选路，不能一直停在 sco。 */
+  private static boolean headsetRouteAlive(AudioManager am) {
+    if (am == null) return false;
+    if ("wired".equals(routeName)) return findWired(am) != null;
+    if ("ble".equals(routeName)) return findBle(am) != null;
+    if ("sco".equals(routeName)) {
+      return findType(am, AudioDeviceInfo.TYPE_BLUETOOTH_SCO) != null || hasBtOutput(am);
+    }
+    return false;
   }
 
   private static boolean isHeadsetRoute() {
@@ -487,6 +557,8 @@ final class CallAudioRoute {
         speaker ? AudioManager.STREAM_MUSIC : AudioManager.STREAM_VOICE_CALL,
         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
       );
+      // 播放走媒体流。音量键也钉在媒体上，避免面板在调通话音量。
+      MainActivity.useMediaVolumeKeys(true);
     } catch (Exception ignored) {}
   }
 
@@ -496,6 +568,7 @@ final class CallAudioRoute {
     try {
       am.abandonAudioFocus(null);
     } catch (Exception ignored) {}
+    MainActivity.useMediaVolumeKeys(false);
   }
 
   private static void stopScoQuiet(AudioManager am) {

@@ -56,7 +56,7 @@ const PROCESS_KINDS = [
     soften: [
       [/我(?:已经)?到了[啦咯啊]?/g, '我还在路上'],
       [/已经到了/g, '还在路上'],
-      [/((?:^|[。！？!?\n])\s*)到了[啦咯啊]?(?=[。！？!?\n]|$)/gm, '$1在路上了'],
+      [/((?:^|[。！？!?\n，,])\s*)(?:已经)?到了[啦咯啊]?(?=[。！？!?\n，,]|$)/gm, '$1'],
       [/到地方了|到目的地了?/g, '还在路上'],
       [/抵达了?/g, '出发了'],
     ],
@@ -140,7 +140,7 @@ const PROCESS_KINDS = [
     kind: 'sleep',
     label: '睡觉/小睡',
     startRe: /(?:去|要|准备|正要|先)?(?:睡了|睡觉|午觉|午睡|小睡|打个盹|眯一会|我先睡|困了去睡)/,
-    doneRe: /醒了|睡醒了|起来了|午睡完|眯完了|睡好了/,
+    doneRe: /睡醒了|(?<!想)(?<!睡)醒了|(?<!想)起来了|午睡完|眯完了|睡好了/,
     skipRe: /不睡了|先不睡|还不困/,
     userAskRe: /(?:睡|眯)完.{0,8}(?:告诉|回我|说一声)|醒了.{0,4}(?:告诉|叫)/,
     delayMin: [40, 90],
@@ -148,7 +148,7 @@ const PROCESS_KINDS = [
       // 长词在前；问对方「终于醒了？」等由 DEFERRED_DONE_SPAN_RE 掩住，不会进这里
       [/睡醒了/g, '还没醒'],
       [/(?<!睡)醒了/g, '还在睡'],
-      [/起来了/g, '还在躺着'],
+      [/(?<!想)起来了/g, '还在躺着'],
       [/午睡完了?/g, '还在午睡'],
       [/眯完了/g, '还在眯'],
       [/睡好了/g, '还在睡'],
@@ -402,9 +402,29 @@ function charClaimsArrived(text) {
   const t = String(text || '').replace(/^【自动回复】/, '');
   if (!t) return false;
   if (looksLikeDreamOrFiction(t)) return false;
-  if (/还没到|没到呢|快到了|马上到|快到|在路上/.test(t)) return false;
+  // 「还在路上」不能把同句里的「到了」一起否掉
+  const masked = maskDeferredCompletionSpans(t).replace(/还在路上|在路上/g, '');
+  if (/还没到|没到呢|快到了|马上到|快到/.test(masked)) return false;
   // 「等你到了」「你到了吗」不是角色自己宣称已到
-  return CHAR_ARRIVE_RE.test(maskDeferredCompletionSpans(t));
+  return CHAR_ARRIVE_RE.test(masked);
+}
+
+/** 角色自己在这条里开始做事。劝对方、否定、梦里都不算。 */
+function charSelfStarted(kind, text) {
+  const t = String(text || '').replace(/^【自动回复】/, '');
+  if (!t || !kind) return false;
+  if (looksLikeDreamOrFiction(t)) return false;
+  if (kind.skipRe && kind.skipRe.test(t)) return false;
+  if (kind.kind === 'travel_arrive') {
+    if (!CHAR_DEPART_RE.test(t)) return false;
+    if (/你(?:先)?(?:去)?出(?:门|去)|别出门|不出门/.test(t) && !/(?:我|这就|先)(?:出|去)/.test(t)) return false;
+    return true;
+  }
+  if (!kind.startRe || !kind.startRe.test(t)) return false;
+  if (kind.kind === 'sleep') {
+    if (/你(?:先|去)?睡|早点睡|别睡|不睡|没睡|还不睡/.test(t) && !/我(?:就|去|要|先|这就)?睡/.test(t)) return false;
+  }
+  return true;
 }
 
 function getPending(charId) {
@@ -725,7 +745,9 @@ const DEFERRED_DONE_SPAN_RE = new RegExp(
   // 谈对方完工：「你下班了吗」≠ 角色自己下班
   + `|(?:你|您|对方)(?:还)?[^。！？\\n]{0,8}(?:${DONE_CLAIM_WORDS})`
   // 问句/调侃对方：句内不含「我」且以吗/？收尾 → 不是自称此刻做完（睡觉/做饭/加班等同理）
-  + `|(?:^|[。！？\\n，,])[^。！？\\n我]{0,16}(?:${DONE_CLAIM_WORDS})\\s*[吗嘛呀啊吧呢？?]`,
+  + `|(?:^|[。！？\\n，,])[^。！？\\n我]{0,16}(?:${DONE_CLAIM_WORDS})\\s*[吗嘛呀啊吧呢？?]`
+  // 「到了就发 / 到了再说」是约定，不是此刻已经到了
+  + `|到了(?:就|再|的话|之后|以后|时|的时候)`,
   'g'
 );
 
@@ -783,15 +805,15 @@ function progressTone(leftMin) {
 
 function ongoingProcessNote({ label, travel, dest, needLocation, userAsks, leftMin, mediaLock }) {
   const ask = userAsks
-    ? `对方在问进度：口语说「${progressTone(leftMin)}」即可，不要报精确分钟或倒计时。`
-    : '聊天照常接话。禁止主动提还要多久、倒计时、还差几分钟、快做完了；对方没问进度就当没这回事。';
+    ? `对方在问进度：说「${progressTone(leftMin)}」即可，不要报精确分钟。`
+    : '对方没问进度就别报时。';
   const media = mediaLock ? String(mediaLock) : '';
   if (needLocation || travel) {
-    const d = dest ? `（往${dest}）` : '';
-    const loc = needLocation ? '禁止说已到，禁止发到达定位。' : '禁止说已到。';
-    return `【过程时间·硬性】你还在路上${d}。${loc}${media}${ask}`;
+    const d = dest ? `往${dest}这趟，` : '';
+    const loc = needLocation ? '还没到点不要发到达定位。' : '';
+    return `【过程时间】${d}刚出发的同一条不要写已经到了。人已经到了就说「到了」，不要说成还在路上。${loc}${media}${ask}`;
   }
-  return `【过程时间·硬性】你还在「${label}」中，禁止宣称已经做完/好了/完了。${media}${ask}`;
+  return `【过程时间】刚开始「${label}」的同一条不要写已经做完。醒了、到了、做完了照实说，不要说成还在睡、还在路上、还在做。${media}${ask}`;
 }
 
 /**
@@ -866,7 +888,7 @@ function buildProcessTimeNoteForChar(charId, history, userMessage) {
         startTs = NaN;
         continue;
       }
-      if (kind.startRe.test(t)) {
+      if (charSelfStarted(kind, t)) {
         done = false;
         const ts = m.timestamp ? new Date(m.timestamp).getTime() : NaN;
         startTs = Number.isFinite(ts) ? ts : Date.now();
@@ -904,6 +926,17 @@ async function maybeScheduleProcess(charId, userMessage, aiContent, history = []
   const ai = String(aiContent || '');
   if (isMetaOrTechTalk(userMessage, ai)) return null;
   if (looksLikeDreamOrFiction(ai) || looksLikeDreamOrFiction(userMessage)) return null;
+  // 后来说出的状态（醒了、到了、做完了）结束过程锁，不要再逼着说还在进行
+  const prior = getPending(charId);
+  if (prior) {
+    const pk = resolveKindForPending(prior.kind)
+      || (prior.kind === 'custom' ? makeCustomKind(prior.label, 20) : null);
+    if (pk && !charSelfStarted(pk, ai) && (
+      claimsDoneTooSoon(pk, ai, prior) || (pk.skipRe && pk.skipRe.test(ai))
+    )) {
+      clearPending(charId);
+    }
+  }
   const tag = parseProcessTag(ai);
   let kind = detectKindFromTexts(userMessage, ai);
   let minutesOverride = tag ? tag.minutes : null;
@@ -1029,8 +1062,42 @@ async function maybeScheduleTravelArrive(charId, userMessage, aiContent, history
   return maybeScheduleProcess(charId, userMessage, aiContent, history, opts);
 }
 
+function tidyCutLeftovers(text) {
+  let out = String(text || '');
+  out = out.replace(/[ \t]{2,}/g, ' ');
+  out = out.replace(/([。！？!?])\s*(?:我|已经|都)?\s*(?=[。！？!?\n]|$)/g, '$1');
+  out = out.replace(/^(?:我|已经|都)+(?=[。！？!?\n，,]|$)/, '');
+  out = out.replace(/[，,、]\s*(?=[。！？!?\n]|$)/g, '');
+  out = out.replace(/^[，,、\s]+/, '');
+  out = out.replace(/([。！？!?]){2,}/g, '$1');
+  out = out.replace(/\n{3,}/g, '\n\n');
+  return out.trim();
+}
+
+/** 同一条里刚开始又写做完：删掉完成句，不要改写成「还在睡 / 还在路上」。 */
+function cutPrematureDonePhrases(text, kind) {
+  const pairs = (kind.soften || GENERIC_SOFTEN).map(([re, to]) => {
+    const repl = String(to || '');
+    return [re, repl.includes('$1') ? '$1' : ''];
+  });
+  const cut = tidyCutLeftovers(applySoftenProtected(text, pairs));
+  return cut || String(text || '').trim();
+}
+
+function stripLocationCards(text) {
+  return String(text || '')
+    .replace(/\[\s*位置\s*\][\s\S]*?\[\s*\/\s*位置\s*\]/gi, '')
+    .replace(/【\s*位置\s*】[\s\S]*?【\s*\/\s*位置\s*】/gi, '')
+    .replace(/\[\s*(?:发送\s*)?位置\s*[:：][^\]]*\]/gi, '')
+    .replace(/【\s*(?:发送\s*)?位置\s*[:：][^】]*】/gi, '')
+    .replace(/\[\s*\/\s*(?:发送\s*)?位置\s*\]/gi, '')
+    .replace(/【\s*\/\s*(?:发送\s*)?位置\s*】/gi, '');
+}
+
 /**
- * 过早完成：淡化「做完了」表述；旅行额外剥定位卡；延后发图/视频剥媒体指令行
+ * 过早完成：同一条里刚开始又写做完时，去掉完成句。
+ * 单独的状态词（醒了、到了）保持原样，不改成还在睡、还在路上。
+ * 旅行额外剥过早的定位卡；延后发图/视频剥媒体指令行。
  */
 function stripPrematureProcess(content, { charId, userMessage, history } = {}) {
   let text = String(content || '');
@@ -1054,8 +1121,9 @@ function stripPrematureProcess(content, { charId, userMessage, history } = {}) {
         : null);
   }
   if (!kind) kind = detectKindFromTexts(userMessage, text);
-  if (!kind && recentUserAskedArriveLocation(history, userMessage)) {
-    kind = PROCESS_KINDS.find((k) => k.kind === 'travel_arrive');
+  if (!kind) {
+    const travel = PROCESS_KINDS.find((k) => k.kind === 'travel_arrive');
+    if (travel && charSelfStarted(travel, text)) kind = travel;
   }
   if (!kind && !tooEarly) {
     const u = String(userMessage || '');
@@ -1075,33 +1143,20 @@ function stripPrematureProcess(content, { charId, userMessage, history } = {}) {
   // 无 kind 也剥掉自报标签，避免露馅
   if (!kind) return stripProcessTags(text);
 
-  const startedThisTurn = kind.startRe.test(text) || !!parseProcessTag(text);
-  const forceEarly = tooEarly
-    || startedThisTurn
-    || (kind.userAskRe && kind.userAskRe.test(String(userMessage || '')))
-    || (kind.kind === 'travel_arrive' && recentUserAskedArriveLocation(history, userMessage));
-  if (!forceEarly) return stripProcessTags(text);
-
+  const selfStarted = charSelfStarted(kind, text) || !!parseProcessTag(text);
   const hasDone = claimsDoneTooSoon(kind, text, pending);
   const hasLoc = kind.needLocation && (LOC_MARK_RE.test(text) || /\[\s*\/\s*(?:发送\s*)?位置\s*\]/.test(text));
-  const hasMediaLine = /^\s*(?:配图|自拍|配视频)\s*[:：]/im.test(text);
-  // 仅淡化「此刻已完成」的宣称；「等…醒了再说」等预约句原样保留
-  if (!hasDone && !hasLoc && !hasMediaLine) return stripProcessTags(text);
+  const blockLoc = hasLoc && (
+    selfStarted
+    || userWantsArriveLocation(userMessage)
+    || (tooEarly && pending?.needLocation && !charClaimsArrived(text))
+  );
 
-  if (hasLoc) {
-    text = text
-      .replace(/\[\s*位置\s*\][\s\S]*?\[\s*\/\s*位置\s*\]/gi, '')
-      .replace(/【\s*位置\s*】[\s\S]*?【\s*\/\s*位置\s*】/gi, '')
-      .replace(/\[\s*(?:发送\s*)?位置\s*[:：][^\]]*\]/gi, '')
-      .replace(/【\s*(?:发送\s*)?位置\s*[:：][^】]*】/gi, '')
-      .replace(/\[\s*\/\s*(?:发送\s*)?位置\s*\]/gi, '')
-      .replace(/【\s*\/\s*(?:发送\s*)?位置\s*】/gi, '');
+  // 只有「同一条里刚开始又做完」才删完成句。之后单独说的醒了/到了留下。
+  if (selfStarted && hasDone) {
+    text = cutPrematureDonePhrases(text, kind);
   }
-  if (hasMediaLine || deferMediaNow) {
-    text = stripMediaDirectiveLines(text);
-  }
-  const soften = kind.soften || GENERIC_SOFTEN;
-  text = applySoftenProtected(text, soften);
+  if (blockLoc) text = stripLocationCards(text);
   return stripProcessTags(text).replace(/\n{3,}/g, '\n\n').trim();
 }
 

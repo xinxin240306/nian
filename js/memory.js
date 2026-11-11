@@ -427,10 +427,25 @@ function looksLikeMediaDirectiveOnly(text) {
   return false;
 }
 
-/** 拆完后去掉句末「。」，文字气泡不显示句号（问号/感叹号/省略号保留） */
+/** 句末单独一个「！」只用来断句；「！！」「！！！」留在气泡上 */
+function stripSingleTrailingExclaim(text) {
+  const s = String(text || '');
+  const m = s.match(/^(.*?)([!！])([」』"”’）)】]*)$/u);
+  if (!m) return s;
+  if (/[!！]$/u.test(m[1])) return s;
+  if (!String(m[1]).trim()) return '';
+  return `${m[1]}${m[3] || ''}`;
+}
+
+/** 整段只有一个感叹号（可带收尾引号），不当成一条聊天气泡 */
+export function isLoneExclaimText(text) {
+  return /^[!！][」』"”’）)】]*$/.test(String(text || '').trim());
+}
+
+/** 拆完后去掉句末「。」和单独一个「！」；问号、省略号、连续感叹号保留 */
 export function stripDisplayPeriod(text) {
   if (!text) return '';
-  return String(text)
+  return stripSingleTrailingExclaim(String(text).trim())
     .replace(/[。．]([」』"”’）)】]+)$/u, '$1')
     .replace(/\.([」』"”’）)】]+)$/u, dropBareDotBeforeClosers)
     .replace(/[；;，,]+$/u, '')
@@ -571,13 +586,13 @@ function splitAiSegmentsUnsafe(text, opts = {}) {
   }
   const merged = mergeLoneBeanSegments(result).filter((p) => {
     const s = String(p || '').trim();
-    // 排除孤立的句号 / 标点串：避免「。」「……」自己占一个气泡
-    if (!s || isBareMediaLabel(s) || isPeriodOnlyText(s) || looksTruncatedUtterance(s)) return false;
+    // 排除孤立的句号 / 单个感叹号：避免「。」「……」「！」自己占一个气泡
+    if (!s || isBareMediaLabel(s) || isPeriodOnlyText(s) || isLoneExclaimText(s) || looksTruncatedUtterance(s)) return false;
     return true;
   });
   if (merged.length) return merged;
   if (isBareMediaLabel(cleaned)) return [];
-  if (isPeriodOnlyText(cleaned)) return [];
+  if (isPeriodOnlyText(cleaned) || isLoneExclaimText(cleaned)) return [];
   if (keepPeriod) return [cleaned];
   return [stripDisplayPeriod(cleaned) || cleaned];
 }
@@ -697,7 +712,8 @@ export function formatMessagePreview(msg, opts = {}) {
     return prefix + (sys.slice(0, maxLen) + (sys.length > maxLen ? '…' : ''));
   }
 
-  const content = String(msg.content || '').replace(/\s+/g, ' ').trim();
-  if (!content) return prefix + '[消息]';
+  let content = String(msg.content || '').replace(/\s+/g, ' ').trim();
+  if (msg.role !== 'user') content = stripDisplayPeriod(content);
+  if (!content) return opts.empty ?? '';
   return prefix + content.slice(0, maxLen) + (content.length > maxLen ? '…' : '');
 }

@@ -2,11 +2,13 @@ package app.nian.comm;
 
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
@@ -64,6 +66,55 @@ public class MainActivity extends BridgeActivity {
     keepWebAlive = on;
     MainActivity a = current;
     if (a != null) a.applyWebViewRendererPriority();
+  }
+
+  private static volatile boolean mediaVolumeKeys;
+
+  /** 通话和语音条都走媒体流，音量键跟系统「媒体」而不是通话音量。 */
+  public static void useMediaVolumeKeys(boolean on) {
+    mediaVolumeKeys = on;
+    MainActivity a = current;
+    if (a == null) return;
+    a.runOnUiThread(() -> {
+      try {
+        a.setVolumeControlStream(on
+          ? AudioManager.STREAM_MUSIC
+          : AudioManager.USE_DEFAULT_STREAM_TYPE);
+      } catch (Exception ignored) {}
+    });
+  }
+
+  /**
+   * 通话模式里很多机型会无视 setVolumeControlStream，音量键去改通话音量。
+   * 角色声和现场声都在媒体流上，这里把音量键钉回媒体，避免人声突然变响。
+   */
+  @Override
+  public boolean dispatchKeyEvent(KeyEvent event) {
+    if (mediaVolumeKeys && event != null && isMediaVolumeKey(event.getKeyCode())) {
+      if (event.getAction() == KeyEvent.ACTION_DOWN) {
+        adjustMediaVolume(event.getKeyCode());
+      }
+      return true;
+    }
+    return super.dispatchKeyEvent(event);
+  }
+
+  private static boolean isMediaVolumeKey(int keyCode) {
+    return keyCode == KeyEvent.KEYCODE_VOLUME_UP
+      || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+      || keyCode == KeyEvent.KEYCODE_VOLUME_MUTE;
+  }
+
+  private void adjustMediaVolume(int keyCode) {
+    try {
+      AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+      if (am == null) return;
+      int dir = AudioManager.ADJUST_SAME;
+      if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) dir = AudioManager.ADJUST_RAISE;
+      else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) dir = AudioManager.ADJUST_LOWER;
+      else if (keyCode == KeyEvent.KEYCODE_VOLUME_MUTE) dir = AudioManager.ADJUST_TOGGLE_MUTE;
+      am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI);
+    } catch (Exception ignored) {}
   }
 
   public static void openAnswerIncoming(Context ctx, int characterId) {

@@ -1487,10 +1487,8 @@ public class AppPermissionsPlugin extends Plugin {
     if (v == null) return 1f;
     float g = v.floatValue();
     if (!(g > 0f)) return 1f;
-    // 通话里角色声音容易觉得小：允许 0.05～2.0 的内部增益。
-    // MediaPlayer.setVolume 接受 0~1（>1 在某些机型无效），超过 1 时
-    // 走 adjustStreamVolume 临时把媒体音量推到合适的档位。
-    return Math.max(0.05f, Math.min(2f, g));
+    // 通话角色声跟系统媒体音量走，不再把超过 1 的增益写成系统音量。
+    return Math.max(0.05f, Math.min(1f, g));
   }
 
   @PluginMethod

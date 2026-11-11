@@ -55,7 +55,7 @@ export async function mountPresetTo(container) {
           </div>
           <div class="form-group">
             <label class="input-label">内容</label>
-            <textarea class="input" id="preset-content" style="min-height:120px" placeholder="注入到 System Prompt 末尾（用户预设·必须遵守·硬性，覆盖上文冲突）…"></textarea>
+            <textarea class="input" id="preset-content" style="min-height:120px" placeholder="这轮不要出现的说法。口吻仍按性格和语言风格，撞上禁词就换成这个人自己的话。"></textarea>
             <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="translatePresetEditorContent()">译成英文（更省 token）</button>
           </div>
         </div>

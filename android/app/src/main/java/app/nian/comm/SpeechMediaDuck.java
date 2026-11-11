@@ -101,9 +101,11 @@ final class SpeechMediaDuck {
     try {
       if (Build.VERSION.SDK_INT >= 21) {
         // 与通话侧一致：走媒体声道，音量跟手机媒体键一致
+        // CONTENT_TYPE_SPEECH 在部分机型上会走更轻的语音曲线，气泡会比系统媒体声小一截。
+        // 用 MUSIC，音量跟媒体键走满。
         mp.setAudioAttributes(new AudioAttributes.Builder()
           .setUsage(AudioAttributes.USAGE_MEDIA)
-          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
           .build());
       }
       if (hasData) {
@@ -183,19 +185,20 @@ final class SpeechMediaDuck {
         }
         AudioAttributes attrs = new AudioAttributes.Builder()
           .setUsage(AudioAttributes.USAGE_MEDIA)
-          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+          .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
           .build();
-        focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        // MAY_DUCK 在部分国产 ROM 上会把本应用自己的媒体流一起压低，气泡就莫名变小。
+        // 短暂独占焦点，其它 App 让路，自己按系统媒体音量出声。
+        focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
           .setAudioAttributes(attrs)
           .setOnAudioFocusChangeListener(focusListener, MAIN)
-          .setWillPauseWhenDucked(false)
           .build();
         am.requestAudioFocus(focusRequest);
       } else {
         am.requestAudioFocus(
           null,
           AudioManager.STREAM_MUSIC,
-          AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+          AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
         );
       }
     } catch (Exception e) {

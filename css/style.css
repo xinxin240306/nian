@@ -20088,8 +20088,88 @@ html[data-color-scheme="dark"] #tieba-page {
 .tb-thread-page {
   display: flex;
   flex-direction: column;
+  gap: 0;
+  padding: 0 0 16px;
+}
+.tb-thread-page .tb-opener,
+.tb-thread-page .tb-floor {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+.tb-thread-page .tb-opener { padding: 8px 16px 14px; }
+.tb-thread-page .tb-floors { gap: 0; }
+.tb-thread-page .tb-floor {
+  padding: 14px 16px 12px;
+  border-top: 1px solid var(--tb-line);
+}
+.tb-thread-page .tb-floor-act {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+.tb-thread-page .tb-floor.is-op,
+.tb-thread-page .tb-floor.is-host:not(.is-op) {
+  background: transparent;
+  box-shadow: none;
+}
+.tb-opener-content {
+  margin-top: 12px;
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.tb-opener-content .inline-bean-emoji,
+.tb-sub .tb-floor-content .inline-bean-emoji {
+  height: 1.35em;
+  max-width: 1.6em;
+}
+.tb-opener-by .tb-floor-time { margin-top: 0; margin-left: auto; }
+.tb-floor-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--tb-line);
+}
+.tb-subs {
+  margin-top: 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--tb-line);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding: 12px 14px 16px;
+}
+.tb-sub {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tb-sub-main { flex: 1; min-width: 0; }
+.tb-sub-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.tb-sub-to {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.tb-sub .tb-floor-content {
+  margin-top: 2px;
+  font-size: 14px;
+}
+.tb-sub-reply { margin-left: auto; padding: 0; }
+.tb-thread-page .tb-opener-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .tb-opener { padding: 16px; }
 .tb-bar-pill {
@@ -20151,7 +20231,8 @@ html[data-color-scheme="dark"] #tieba-page {
 .tb-floor.is-host:not(.is-op) {
   box-shadow: inset 3px 0 0 var(--bar-color, var(--theme)), var(--tb-shadow);
 }
-.tb-floor.is-flash {
+.tb-floor.is-flash,
+.tb-sub.is-flash {
   animation: tb-floor-flash 0.9s ease;
 }
 @keyframes tb-floor-flash {
@@ -20401,6 +20482,36 @@ html[data-color-scheme="dark"] .tb-result-count small {
   font-size: 12px;
   letter-spacing: 0.04em;
   opacity: 0.85;
+}
+.tb-cast { margin-top: 12px; }
+.tb-cast-label {
+  font-size: 12px;
+  opacity: 0.62;
+  margin-bottom: 8px;
+}
+.tb-cast-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tb-cast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 10px 3px 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #fff 82%, transparent);
+  color: #2b2118;
+  font-size: 12px;
+}
+.tb-cast-real { font-size: 10px; opacity: 0.62; }
+.tb-role {
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  opacity: 0.62;
 }
 .tb-pin {
   display: inline-block;

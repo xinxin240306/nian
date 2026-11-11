@@ -729,7 +729,7 @@ async function generateChatIncomingOpening(char, settings, { video = false, chat
   const textVideo = video && isCharCallVideoTextMode(char);
   let hint;
   if (textVideo) {
-    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时镜头里的一小段画面：先一两句旁白（环境/光线/对着屏幕的动作表情），旁白主语必须用「你」，禁止写成「她/他」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。禁止写「环境：」「音效：」或任何音效指令行。`;
+    hint = `你刚在微信跟用户说完话，现在文字视频电话已经打通了。写「刚接通」时镜头里的一小段画面：先一两句旁白（环境/光线/对着屏幕的动作表情），旁白里角色用「他」或角色名，用户用「你」，禁止旁白写成「我」或「她」，禁止把用户写成「他/她」。再跟一句开口，台词必须放在「」里。短、口语，可先喂一声。不要重复微信铺垫（尤其不要再说「我打给你」「方便吗」）。不要播音腔、不要自我介绍、不要心理独白。只输出这段画面正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else if (video) {
     hint = `你刚在微信跟用户说完话，现在视频电话已经打通了。写一句刚接通时对着摄像头说的开场：短、口语，可先喂一声，自然想看看对方。不要重复微信里的铺垫（尤其不要再说「我打给你」「方便吗」「打个电话吧」这类）。不要播音腔、不要自我介绍。只输出正文。禁止写「环境：」「音效：」或任何音效指令行。`;
   } else {
@@ -4259,7 +4259,8 @@ app.post('/api/messages/send', async (req, res) => {
       callVideoTextMode: isVideoMode && isCharCallVideoTextMode(char),
     });
     if (type === 'system' && /通话开始/.test(String(content || ''))) {
-      extraSystemPrompt += '\n刚接通，先开口；可先喂一声再接话，别播音腔。';
+      try { clearCallScene(characterId, { resetMove: true }); } catch {}
+      extraSystemPrompt += '\n刚接通，先开口；可先喂一声再接话，别播音腔。这一通是新的，上一通的风铃、雨声、海浪都已经停了，听筒里现在没有背景声。不要延续上一通的环境音，除非你这轮重新写「环境：」。';
     }
     // 通话中每轮都确保有 live 记录，角色写 [挂断] 才能关通话页
     try {
@@ -4474,6 +4475,7 @@ app.post('/api/messages/send', async (req, res) => {
     }
 
     const apiMessages = [{ role: 'system', content: systemPrompt }, ...apiHistory];
+    require('./preset-helper').pinPresetsOnMessages(apiMessages);
     const baseUrl = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
 
     // 梦境长文：提高上限，避免句中被硬截断
@@ -4618,6 +4620,7 @@ app.post('/api/messages/send', async (req, res) => {
             { role: 'assistant', content: aiContent },
             { role: 'user', content: '…' },
           ];
+          require('./preset-helper').pinPresetsOnMessages(continueMessages);
           const contMaxTokens = 600;
           const continueBody = JSON.stringify({
             model: apiModel,
@@ -4952,6 +4955,7 @@ app.post('/api/messages/send', async (req, res) => {
         characterId,
         rawText: rawAiContent,
         cleanText: aiContent,
+        userText: userContent,
         settings,
         uploadsPath: UPLOADS_PATH,
         isDreamMode,
@@ -5242,7 +5246,8 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
     });
     const lastHist = history?.[history.length - 1];
     if (lastHist?.type === 'system' && /通话开始/.test(String(lastHist.content || ''))) {
-      extraSystemPrompt += '\n刚接通，先开口；可先喂一声再接话，别播音腔。';
+      try { clearCallScene(characterId, { resetMove: true }); } catch {}
+      extraSystemPrompt += '\n刚接通，先开口；可先喂一声再接话，别播音腔。这一通是新的，上一通的风铃、雨声、海浪都已经停了，听筒里现在没有背景声。不要延续上一通的环境音，除非你这轮重新写「环境：」。';
     }
     try {
       require('./proactive-outreach-helper').ensureLiveCallLog(db, characterId, {
@@ -5539,6 +5544,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
   }
 
   const baseUrl = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+  require('./preset-helper').pinPresetsOnMessages(apiMessages);
 
   // 梦境模式提高上限，配合截断自动接写
   const trigMaxTokens = isDreamMode
@@ -5681,14 +5687,16 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
         || (data.choices?.[0]?.finish_reason !== 'stop' && !trigSentenceEnds.test(aiContent) && aiContent.length > 60);
       if (trigNeedsCont) {
         try {
+          const continueMessages = [
+            { role: 'system', content: `${systemPrompt}\n你上一条被截断了，从断句处接着说完，不要重复已写内容。` },
+            ...apiMessages.slice(1),
+            { role: 'assistant', content: aiContent },
+            { role: 'user', content: '…' },
+          ];
+          require('./preset-helper').pinPresetsOnMessages(continueMessages);
           const contBody = JSON.stringify({
             model: apiModel,
-            messages: [
-              { role: 'system', content: `${systemPrompt}\n你上一条被截断了，从断句处接着说完，不要重复已写内容。` },
-              ...apiMessages.slice(1),
-              { role: 'assistant', content: aiContent },
-              { role: 'user', content: '…' },
-            ],
+            messages: continueMessages,
             temperature: parseFloat(settings.chat_temperature || '0.8'),
             max_tokens: 600, stream: false,
           });
@@ -6003,6 +6011,7 @@ app.post('/api/messages/trigger-ai', async (req, res) => {
         characterId,
         rawText: rawAiContent,
         cleanText: aiContent,
+        userText: lastUserContent,
         settings,
         uploadsPath: UPLOADS_PATH,
         isDreamMode,
@@ -11308,6 +11317,23 @@ app.post('/api/call-logs', (req, res) => {
   if (!characterId) return res.status(400).json({ error: 'characterId required' });
   try { clearCallScene(characterId, { resetMove: true }); } catch {}
   try { require('./vocal-clips-helper').clearCallBreathBed(characterId); } catch {}
+  // 用户挂断只是另插一行文字记录，原来的 live 行还在。不收口的话下一通会接着上一通的现场声。
+  try {
+    const openRows = db.prepare(
+      `SELECT id, transcript FROM call_logs WHERE character_id=? ORDER BY id DESC LIMIT 8`
+    ).all(characterId);
+    for (const row of openRows) {
+      let meta = null;
+      try { meta = JSON.parse(row.transcript || ''); } catch { meta = null; }
+      if (!meta || typeof meta !== 'object' || !meta.status) continue;
+      if (!['live', 'ringing', 'answered'].includes(String(meta.status))) continue;
+      meta.status = 'ended';
+      meta.endedAt = new Date().toISOString();
+      db.prepare('UPDATE call_logs SET transcript=? WHERE id=?').run(JSON.stringify(meta), row.id);
+    }
+  } catch (e) {
+    console.warn('[call] close live log', e.message);
+  }
   db.prepare(`INSERT INTO call_logs (character_id, duration, transcript) VALUES (?,?,?)`)
     .run(characterId, duration || 0, transcript || '');
   res.json({ ok: true });

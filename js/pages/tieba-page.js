@@ -116,6 +116,28 @@ function userAvatarHtml(name, avatar, color, extraClass = '') {
   return `<div class="${cls}" style="background:${bg}">${avatarLetter(name)}</div>`;
 }
 
+function isCastHandle(name) {
+  return (_bar?.cast_handles || []).some((h) => h.handle === name);
+}
+
+function castBadge(name) {
+  if (!isCastHandle(name)) return '';
+  return '<span class="tb-role">角色</span>';
+}
+
+function castHandlesHtml(bar) {
+  const list = bar?.cast_handles || [];
+  if (!list.length) return '';
+  const chips = list.slice(0, 8).map((h) => `
+    <span class="tb-cast-chip">
+      ${userAvatarHtml(h.handle, h.avatar, nameColor(h.handle), 'tb-user-av-xs')}
+      <span>${escapeHtml(h.handle)}</span>
+      ${h.real ? '<span class="tb-cast-real">实名</span>' : ''}
+    </span>
+  `).join('');
+  return `<div class="tb-cast"><div class="tb-cast-label">角色的贴吧号</div><div class="tb-cast-row">${chips}</div></div>`;
+}
+
 function accountButtonHtml() {
   const name = escapeHtml(_account?.username || '账号');
   const face = _account?.avatar
@@ -897,6 +919,35 @@ function applyBar(bar, threads) {
   armPull(() => openBar(bar.id, { refresh: true }));
 }
 
+function handlesKey(bar) {
+  return (bar?.cast_handles || []).map((h) => `${h.handle}:${h.avatar || ''}:${h.real ? 1 : 0}`).join('\n');
+}
+
+function threadFeedChanged(prev, next) {
+  const sig = (t) => `${t.id}:${t.reply_count}:${t.pinned ? 1 : 0}:${t.last_reply_at || ''}`;
+  return rowSig(prev, sig) !== rowSig(next, sig);
+}
+
+function threadFaceChanged(prev, next) {
+  const sig = (t) => `${t.id}:${t.author_avatar || ''}:${t.author_name || ''}`;
+  return rowSig(prev, sig) !== rowSig(next, sig);
+}
+
+async function revalidateBar(id, seq, sort, key) {
+  try {
+    const data = await api.tiebaListThreads(id, { sort, limit: 50 });
+    if (seq !== _barSeq || _view !== 'bar' || Number(_bar?.id) !== Number(id)) return;
+    const next = data.threads || [];
+    snapSave(key, { bar: data.bar, threads: next });
+    const feed = threadFeedChanged(_threads, next);
+    const face = threadFaceChanged(_threads, next) || handlesKey(_bar) !== handlesKey(data.bar);
+    if (!feed && !face) return;
+    const prev = _threads.slice();
+    applyBar(data.bar, next);
+    if (feed) notePulledThreads(prev, _threads);
+  } catch { /* 后台对一下就行，失败仍留着刚才的列表 */ }
+}
+
 async function openBar(id, opts = {}) {
   if (!id) return loadHome();
   const seq = ++_barSeq;
@@ -908,6 +959,7 @@ async function openBar(id, opts = {}) {
     const snap = snapLoad(key);
     if (snap?.bar && Number(snap.bar.id) === Number(id)) {
       applyBar(snap.bar, snap.threads || []);
+      revalidateBar(id, seq, sort, key);
       return;
     }
   }
@@ -917,9 +969,9 @@ async function openBar(id, opts = {}) {
   _composeBarId = id;
   setComposerVisible(false);
   if (!keep) showLoading();
-  else setPullTip('正在刷新');
+  else setPullTip(refresh ? '吧友正在发帖' : '正在刷新');
   try {
-    const data = await api.tiebaListThreads(id, { sort, limit: 50 });
+    const data = await api.tiebaListThreads(id, { sort, limit: 50, refresh });
     if (seq !== _barSeq) return;
     snapSave(key, { bar: data.bar, threads: data.threads || [] });
     applyBar(data.bar, data.threads || []);
@@ -946,6 +998,7 @@ function threadCardHtml(t, i) {
         <div class="tb-thread-kicker">
           ${userAvatarHtml(t.author_name, t.author_avatar, nameColor(t.author_name), 'tb-user-av-xs')}
           <span class="tb-thread-author">${escapeHtml(t.author_name)}</span>
+          ${castBadge(t.author_name)}
           <span class="tb-dot">·</span>
           <span class="tb-thread-when">${formatWhen(t.last_reply_at || t.created_at)}</span>
         </div>
@@ -987,6 +1040,7 @@ function renderBar() {
           <div class="tb-cover-stat"><b>${_bar.thread_count || 0}</b><span>主题</span></div>
           <div class="tb-cover-stat"><b>${_bar.member_count || 0}</b><span>${_bar.kind === 'city' ? '在此地' : '吧友'}</span></div>
         </div>
+        ${castHandlesHtml(_bar)}
       </div>
       <div class="tb-sorts">
         ${sorts.map(([id, label]) => `
@@ -1001,7 +1055,7 @@ function renderBar() {
         <div class="tb-empty">
           <div class="tb-empty-mark">帖</div>
           <div class="tb-empty-title">还没有帖子</div>
-          <div class="tb-empty-hint">来发第一帖吧</div>
+          <div class="tb-empty-hint">下拉刷新，会有吧友来发帖</div>
           <button type="button" class="btn btn-primary" onclick="tbOpenCompose(${_bar.id})">发帖</button>
         </div>
       `}
@@ -1081,10 +1135,28 @@ function applyThread(data) {
   setComposerVisible(true);
   setFab('');
   setTitle(_thread?.title || '帖子');
-  setActions(`<span class="tb-floor-hint">${_posts.length} 楼</span>`);
+  setActions(`<span class="tb-floor-hint">${threadShape().floors.length} 楼</span>`);
   if (switching) clearComposerDraft();
   renderThread();
   armPull(() => openThread(_thread.id, { refresh: true }));
+}
+
+async function revalidateThread(id, seq, key) {
+  try {
+    const data = await api.tiebaGetThread(id, { limit: 100 });
+    if (seq !== _threadSeq || _view !== 'thread' || Number(_thread?.id) !== Number(id)) return;
+    const next = data.posts || [];
+    const prev = _posts.slice();
+    const prevIds = new Set(prev.map((p) => p.id));
+    const added = next.some((p) => !prevIds.has(p.id));
+    const face = rowSig(prev, (p) => `${p.id}:${p.author_avatar || ''}`)
+      !== rowSig(next, (p) => `${p.id}:${p.author_avatar || ''}`);
+    const handles = handlesKey(_bar) !== handlesKey(data.bar);
+    snapSave(key, { thread: data.thread, posts: next, bar: data.bar || null });
+    if (!added && !face && !handles && prev.length === next.length) return;
+    applyThread(data);
+    if (added) notePulledPosts(prev, _posts);
+  } catch { /* 后台对一下就行 */ }
 }
 
 async function openThread(id, opts = {}) {
@@ -1097,6 +1169,7 @@ async function openThread(id, opts = {}) {
     const snap = snapLoad(key);
     if (snap?.thread && Number(snap.thread.id) === Number(id)) {
       applyThread(snap);
+      revalidateThread(id, seq, key);
       return;
     }
   }
@@ -1105,13 +1178,16 @@ async function openThread(id, opts = {}) {
   _view = 'thread';
   setComposerVisible(true);
   if (!keep) showLoading();
-  else setPullTip('正在刷新');
+  else setPullTip(refresh ? '吧友正在盖楼' : '正在刷新');
   try {
-    const data = await api.tiebaGetThread(id, { limit: 100 });
+    const data = await api.tiebaGetThread(id, { limit: 100, refresh });
     if (seq !== _threadSeq) return;
     snapSave(key, { thread: data.thread, posts: data.posts || [], bar: data.bar || null });
     applyThread(data);
-    if (prevPosts) notePulledPosts(prevPosts, _posts);
+    if (prevPosts) {
+      notePulledPosts(prevPosts, _posts);
+      if (_posts.length > prevPosts.length) snapDropPrefix(`bar:${data.bar?.id || _bar?.id}:`);
+    }
   } catch (e) {
     if (seq !== _threadSeq) return;
     if (keep && _thread) {
@@ -1131,43 +1207,94 @@ function hostPost() {
   return _posts.find((p) => Number(p.floor) === 1) || null;
 }
 
+function threadShape() {
+  const byFloor = new Map();
+  for (const p of _posts) byFloor.set(Number(p.floor), p);
+  const rootOf = (post) => {
+    let cur = post;
+    const seen = new Set();
+    while (cur && !seen.has(Number(cur.floor))) {
+      seen.add(Number(cur.floor));
+      const to = Number(cur.reply_to_floor) || 0;
+      if (to <= 1 || !byFloor.has(to)) return 0;
+      const target = byFloor.get(to);
+      const targetTo = Number(target.reply_to_floor) || 0;
+      if (targetTo <= 1) return Number(target.floor);
+      cur = target;
+    }
+    return 0;
+  };
+  const floors = [];
+  const kids = new Map();
+  for (const p of _posts) {
+    const root = rootOf(p);
+    if (!root) floors.push(p);
+    else {
+      if (!kids.has(root)) kids.set(root, []);
+      kids.get(root).push(p);
+    }
+  }
+  const displayNo = new Map();
+  floors.forEach((p, i) => displayNo.set(Number(p.floor), i + 1));
+  return { byFloor, floors, kids, displayNo };
+}
+
 function sameAuthor(a, b) {
   if (!a || !b) return false;
   if (Number(a.author_id) > 0 && Number(b.author_id) > 0) return Number(a.author_id) === Number(b.author_id);
   return String(a.author_name || '') === String(b.author_name || '') && !!a.author_name;
 }
 
-function quoteHtml(p) {
-  const n = Number(p.reply_to_floor) || 0;
-  if (!n) return '';
-  const target = _posts.find((x) => Number(x.floor) === n);
-  const who = target?.author_name ? ` ${escapeHtml(target.author_name)}` : '';
-  return `<button type="button" class="tb-floor-quote" onclick="tbJumpFloor(${n})">回复 ${n}楼${who}</button>`;
+function subReplyHtml(p, shape) {
+  const host = hostPost();
+  const isHost = sameAuthor(p, host);
+  const target = shape.byFloor.get(Number(p.reply_to_floor));
+  const targetNo = target ? shape.displayNo.get(Number(target.floor)) : 0;
+  const who = target?.author_name ? escapeHtml(target.author_name) : '';
+  const to = who
+    ? `<button type="button" class="tb-sub-to" onclick="tbJumpFloor(${Number(target.floor)})">回复 ${targetNo ? `${targetNo}楼 ` : ''}${who}</button>`
+    : '';
+  return `
+    <div class="tb-sub" data-post-id="${p.id}" data-floor="${p.floor}">
+      ${userAvatarHtml(p.author_name, p.author_avatar, isHost ? cssColor(_bar?.color) : nameColor(p.author_name), 'tb-user-av-xs')}
+      <div class="tb-sub-main">
+        <div class="tb-floor-name-row">
+          <span class="tb-sub-name">${escapeHtml(p.author_name)}</span>
+          ${castBadge(p.author_name)}
+          ${isHost ? '<span class="tb-lz">楼主</span>' : ''}
+          ${to}
+          <button type="button" class="tb-floor-act tb-sub-reply" onclick="tbReplyFloor(${p.floor})">回复</button>
+        </div>
+        <div class="tb-floor-content">${formatTextWithInlineEmojis(p.content || '')}</div>
+      </div>
+    </div>
+  `;
 }
 
-function floorHtml(p, i) {
+function floorHtml(p, i, shape) {
   const host = hostPost();
-  const isOp = Number(p.floor) === 1;
-  const isHost = isOp || sameAuthor(p, host);
+  const isHost = sameAuthor(p, host);
   const color = cssColor(_bar?.color);
-  const cls = `tb-floor${isOp ? ' is-op' : ''}${isHost ? ' is-host' : ''} tb-anim`;
+  const no = shape.displayNo.get(Number(p.floor)) || i + 1;
+  const subs = shape.kids.get(Number(p.floor)) || [];
   return `
-    <article class="${cls}" data-floor="${p.floor}" style="--delay:${Math.min(i, 8) * 30}ms;--bar-color:${color}">
+    <article class="tb-floor${isHost ? ' is-host' : ''}" data-post-id="${p.id}" data-floor="${p.floor}" style="--bar-color:${color}">
       <div class="tb-floor-top">
-        ${userAvatarHtml(p.author_name, p.author_avatar, isHost ? color : nameColor(p.author_name), isOp ? 'tb-user-av-lg' : '')}
+        ${userAvatarHtml(p.author_name, p.author_avatar, isHost ? color : nameColor(p.author_name))}
         <div class="tb-floor-who">
           <div class="tb-floor-name-row">
             <span class="tb-floor-name">${escapeHtml(p.author_name)}</span>
+            ${castBadge(p.author_name)}
             ${isHost ? '<span class="tb-lz">楼主</span>' : ''}
           </div>
           <div class="tb-floor-time">${formatWhen(p.created_at)}</div>
         </div>
-        <div class="tb-floor-num${isOp ? ' is-op' : ''}">${p.floor}<small>${isOp ? '主楼' : '楼'}</small></div>
+        <div class="tb-floor-num">${no}<small>楼</small></div>
       </div>
-      ${quoteHtml(p)}
       <div class="tb-floor-content">${formatTextWithInlineEmojis(p.content || '')}</div>
+      ${subs.length ? `<div class="tb-subs">${subs.map((s) => subReplyHtml(s, shape)).join('')}</div>` : ''}
       <div class="tb-floor-actions">
-        <button type="button" class="tb-floor-act" onclick="tbReplyFloor(${p.floor})">回复这层</button>
+        <button type="button" class="tb-floor-act" onclick="tbReplyFloor(${p.floor})">回复</button>
       </div>
     </article>
   `;
@@ -1178,12 +1305,16 @@ function renderThread() {
   if (!body || !_thread) return;
   const color = cssColor(_bar?.color);
   const barId = _bar?.id || _thread.bar_id;
+  const shape = threadShape();
   const host = hostPost();
   const hostName = host?.author_name || _thread.author_name || '';
+  const hostBody = host?.content || _thread.content || '';
+  const replyFloors = shape.floors.filter((p) => Number(p.floor) !== 1);
+  const replyCount = Math.max(0, _posts.length - (host ? 1 : 0));
   body.innerHTML = `
     <div class="tb-thread-page">
       <div class="tb-pull-tip" id="tb-pull-tip">下拉刷新</div>
-      <header class="tb-opener tb-anim" style="--bar-color:${color}">
+      <header class="tb-opener" style="--bar-color:${color}">
         ${barId ? `
           <button type="button" class="tb-bar-pill" onclick="tbOpenBar(${barId})">
             ${barAvatarHtml(_bar || { name: _thread.bar_name || '吧', color }, 'tb-avatar-sm')}
@@ -1195,10 +1326,14 @@ function renderThread() {
           <div class="tb-opener-by">
             ${userAvatarHtml(hostName, host?.author_avatar, color, 'tb-user-av-sm')}
             <span class="tb-opener-name">${escapeHtml(hostName)}</span>
+            ${castBadge(hostName)}
             <span class="tb-lz">楼主</span>
+            <span class="tb-floor-time">${formatWhen(host?.created_at || _thread.created_at)}</span>
           </div>
         ` : ''}
-        <div class="tb-opener-meta">${_posts.length} 楼 · ${_thread.reply_count || 0} 条回复</div>
+        ${hostBody ? `<div class="tb-opener-content">${formatTextWithInlineEmojis(hostBody)}</div>` : ''}
+        <div class="tb-opener-meta"><span>${shape.floors.length} 楼 · ${replyCount} 条回复</span><button type="button" class="tb-floor-act" onclick="tbReplyPost()">盖楼</button></div>
+        ${castHandlesHtml(_bar)}
         ${_bar?.is_owner ? `
           <div class="tb-owner-row">
             <button type="button" class="tb-owner-btn" onclick="tbTogglePin()">${_thread.pinned ? '取消置顶' : '置顶'}</button>
@@ -1207,7 +1342,9 @@ function renderThread() {
         ` : ''}
       </header>
       <div class="tb-floors">
-        ${_posts.map((p, i) => floorHtml(p, i)).join('')}
+        ${replyFloors.length
+          ? replyFloors.map((p, i) => floorHtml(p, i, shape)).join('')
+          : '<div class="tb-floor-empty">还没有人盖楼</div>'}
       </div>
     </div>
   `;
@@ -1225,7 +1362,7 @@ function paintReplyTarget() {
   const el = document.getElementById('tb-reply-target');
   const input = document.getElementById('tb-reply-input');
   const body = document.getElementById('tb-body');
-  if (input) input.placeholder = _replyTo ? `回复 ${_replyTo.floor}楼 ${_replyTo.author_name || ''}…` : '写下这一楼…';
+  if (input) input.placeholder = _replyTo ? `回复 ${_replyTo.hint || _replyTo.author_name || ''}…` : '写下这一楼…';
   body?.classList.toggle('has-reply-target', !!_replyTo);
   if (!el) return;
   if (!_replyTo) {
@@ -1235,7 +1372,7 @@ function paintReplyTarget() {
   }
   el.hidden = false;
   el.innerHTML = `
-    <span>回复 <b>${_replyTo.floor}楼</b> ${escapeHtml(_replyTo.author_name || '')}</span>
+    <span>回复 ${escapeHtml(_replyTo.hint || _replyTo.author_name || '')}</span>
     <button type="button" id="tb-reply-cancel">取消</button>
   `;
   document.getElementById('tb-reply-cancel')?.addEventListener('click', () => {
@@ -1244,10 +1381,35 @@ function paintReplyTarget() {
   });
 }
 
+window.tbReplyPost = function() {
+  _replyTo = null;
+  paintReplyTarget();
+  document.getElementById('tb-reply-input')?.focus();
+};
+
 window.tbReplyFloor = function(floor) {
   const post = _posts.find((p) => Number(p.floor) === Number(floor));
   if (!post) return;
-  _replyTo = { floor: post.floor, author_name: post.author_name || '' };
+  const shape = threadShape();
+  const root = (() => {
+    const kids = shape.kids;
+    for (const [id, list] of kids) {
+      if (list.some((p) => Number(p.floor) === Number(post.floor))) return id;
+    }
+    return 0;
+  })();
+  if (!root && Number(post.floor) === 1) {
+    window.tbReplyPost();
+    return;
+  }
+  const anchor = root || Number(post.floor);
+  const no = shape.displayNo.get(anchor);
+  const name = post.author_name || '';
+  _replyTo = {
+    floor: post.floor,
+    author_name: name,
+    hint: root ? name : `${no || ''}楼 ${name}`.trim(),
+  };
   paintReplyTarget();
   document.getElementById('tb-reply-input')?.focus();
 };
@@ -1292,10 +1454,10 @@ window.tbSendReply = async function() {
     snapDropPrefix(`bar:${_bar?.id || _thread.bar_id}:`);
     clearComposerDraft();
     renderThread();
-    setActions(`<span class="tb-floor-hint">${_posts.length} 楼</span>`);
+    setActions(`<span class="tb-floor-hint">${threadShape().floors.length} 楼</span>`);
     requestAnimationFrame(() => {
-      const last = document.querySelector('.tb-floor:last-child');
-      last?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      const last = document.querySelector(`[data-post-id="${post.id}"]`);
+      last?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   } catch (e) {
     if (needsAuthError(e)) {

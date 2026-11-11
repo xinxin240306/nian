@@ -50,7 +50,7 @@ function isCallLineMessage(msg) {
   } catch {}
   return false;
 }
-import { playNotifySound, playTTS, playReadyTTS, prefetchTTS, playVoiceAudio, playVoiceClipUrl, getLastTtsError, stopTTS, unlockAudioPlayback, playCallAmbient, stopCallAmbient, playCallBreathBed, playCallTextureBed, stopCallBodyBeds, playHangoutBed, playHangoutBedProcedural, stopHangoutBed, playCallOneShot, stopCallOneShot, duckCallAmbient, ensureCallAmbientPlaying, setHangoutBedListenQuiet } from '../tts.js';
+import { playNotifySound, playTTS, playReadyTTS, prefetchTTS, playVoiceAudio, playVoiceClipUrl, getLastTtsError, stopTTS, unlockAudioPlayback, playCallAmbient, stopCallAmbient, playCallBreathBed, playCallTextureBed, stopCallBodyBeds, playHangoutBed, playHangoutBedProcedural, stopHangoutBed, playCallOneShot, stopCallOneShot, duckCallAmbient, ensureCallAmbientPlaying, setHangoutBedListenQuiet, splitTextVideoSpeakLines, textVideoLineGapMs, splitCallSpeakSentences, VOICE_CALL_LINE_GAP_MS } from '../tts.js';
 import { pickCropAndUpload } from '../media-crop.js';
 import { getGameTopics, gameTopicGameName } from '../game-topics.js';
 import {
@@ -5080,77 +5080,8 @@ function extractCallLensClient(text) {
   return lens;
 }
 
-/**
- * 通话 TTS 分句：
- *   - 只按硬停顿（句号 / 问号 / 感叹号 / …）切，保留 [语气:xx]、[语速:xx]、
- *     [软声]…[/沉声] 等后端 TTS 需要看的标签；
- *   - 引号、分饰标签内不分；
- *   - 段内拿不到任何切点时整段返回，避免对长文本沉默地"只读第一句"。
- * 用于「一段话被一口气念出来」的问题：每段独立合成，段间加 ~500ms 静音，
- * 比让 MiniMax 自己排版节奏更稳。
- */
-function splitForCallTTS(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return [];
-  // 一段话没切点就直接整段返回，避免「本来只 1 句」被空隔断成两段
-  const HARD_BREAK_RE = /[。．.！!？?]+|[…]{2,}/g;
-  // 保护：这些开闭符内不算句号
-  const OPENS = ['「', '『', '“', '（', '(', '[', '【', '［'];
-  const CLOSES = ['」', '』', '”', '）', ')', ']', '】', '］'];
-  // 「[软声]…[/软声]」一类的多字符标签也要保护
-  const TAG_OPEN = ['[软声]', '[沉声]'];
-  const TAG_CLOSE = ['[/软声]', '[/沉声]'];
-  // 配对优先级：先扫多字符标签，再扫单字符括弧
-  const matchesAny = (s, i, list) => {
-    for (const t of list) if (s.startsWith(t, i)) return t;
-    return null;
-  };
-  // 给定位置之前的「未闭合」深度：>0 表示在引号 / 标签内
-  const depthAt = (idx) => {
-    const stack = [];
-    for (let i = 0; i <= idx; i++) {
-      let tok = matchesAny(raw, i, TAG_OPEN);
-      if (tok) { stack.push({ close: TAG_CLOSE[TAG_OPEN.indexOf(tok)] }); i += tok.length - 1; continue; }
-      tok = matchesAny(raw, i, TAG_CLOSE);
-      if (tok) {
-        if (stack.length && stack[stack.length - 1].close === tok) stack.pop();
-        i += tok.length - 1; continue;
-      }
-      tok = matchesAny(raw, i, OPENS);
-      if (tok) { stack.push({ close: CLOSES[OPENS.indexOf(tok)] }); i += tok.length - 1; continue; }
-      tok = matchesAny(raw, i, CLOSES);
-      if (tok) {
-        if (stack.length && stack[stack.length - 1].close === tok) stack.pop();
-        i += tok.length - 1;
-      }
-    }
-    return stack.length;
-  };
-
-  const cuts = [];
-  let m;
-  HARD_BREAK_RE.lastIndex = 0;
-  while ((m = HARD_BREAK_RE.exec(raw))) {
-    if (depthAt(m.index) > 0) continue;
-    cuts.push(m.index + m[0].length);
-  }
-  const parts = [];
-  let last = 0;
-  for (const at of cuts) {
-    const seg = raw.slice(last, at).trim();
-    if (seg) parts.push(seg);
-    last = at;
-  }
-  const tail = raw.slice(last).trim();
-  if (tail) parts.push(tail);
-  // 通话朗读不要丢「看起来像没说完」的段，否则耳机里会像半句被截断
-  return parts.filter((p) => !!p);
-}
-
 /** 通话段间停顿（毫秒）：够听清上一句尾音，又别让人等不耐烦 */
 const CALL_SEGMENT_GAP_MS = 220;
-/** 文字视频：两句台词中间夹了旁白时，停顿略长一点 */
-const CALL_TEXT_VIDEO_QUOTE_GAP_MS = 900;
 
 function parseCallAudioPayload(raw) {
   const s = String(raw || '').trim();
@@ -5318,21 +5249,23 @@ async function playCallTtsSegmentLocked(text, forCharId, {
   const useSoft = soft || _callSoftTtsNext;
   if (_callSoftTtsNext) _callSoftTtsNext = false;
 
-  // 文字视频：按引号台词分段（中间旁白=画面停顿）；漏引号时用 callSpeakText 的兜底句
+  // 文字视频按引号里的句子分段；语音电话按句号/逗号/换行分段。
+  // 上一句真正播完再停一下，再读下一句，不要整段连着念。
   let ttsSegments;
-  let textVideoQuoteGap = false;
+  let textVideoBeats = null;
   if (clipUrl || !t) {
     ttsSegments = [t].filter(Boolean);
   } else if (textVideoMode) {
-    const quotes = extractQuotedSpeechParts(String(text || ''));
-    if (quotes.length) {
-      ttsSegments = quotes;
-      textVideoQuoteGap = quotes.length > 1;
+    const beats = splitTextVideoSpeakLines(String(text || ''));
+    if (beats.length) {
+      ttsSegments = beats.map((b) => b.text);
+      textVideoBeats = beats;
     } else {
       ttsSegments = splitForCallTTS(t);
     }
   } else {
-    ttsSegments = splitForCallTTS(t);
+    const lines = splitCallSpeakSentences(t);
+    ttsSegments = lines.length ? lines : [t];
   }
   if (!ttsSegments.length && t) ttsSegments = [t];
   // 整段只一段时下面走老的「单段」路径，不做无谓的二次网络请求与停顿
@@ -5400,9 +5333,7 @@ async function playCallTtsSegmentLocked(text, forCharId, {
   }
   if (urls.length) {
     const playGen = ++_callTtsPlayGen;
-    const segGapMs = textVideoQuoteGap
-      ? CALL_TEXT_VIDEO_QUOTE_GAP_MS
-      : (isCallRealtimeTalk() ? CALL_REALTIME_SEGMENT_GAP_MS : CALL_SEGMENT_GAP_MS);
+    const segGapMs = isCallRealtimeTalk() ? CALL_REALTIME_SEGMENT_GAP_MS : CALL_SEGMENT_GAP_MS;
     if (isCallRealtimeTalk() && useNativeCallAudio()) {
       try {
         await setNativeCallListen(true, { ambient: false, bargeIn: true });
@@ -5417,7 +5348,10 @@ async function playCallTtsSegmentLocked(text, forCharId, {
     for (let i = 0; i < urls.length; i++) {
       // 段间停顿：被取消 / 通话结束 / 别人插话 时立刻停
       if (i > 0) {
-        await sleepMs(segGapMs);
+        const gap = textVideoBeats
+          ? textVideoLineGapMs(textVideoBeats[i]?.narrationBefore || 0)
+          : (useSplitPlay ? VOICE_CALL_LINE_GAP_MS : segGapMs);
+        await sleepMs(gap);
         if (playGen !== _callTtsPlayGen || !isInVoiceCallWith(forCharId)) { allOk = false; break; }
       }
       const lastSeg = i === urls.length - 1;
@@ -10932,7 +10866,7 @@ window.acceptProactiveCall = async function(call) {
       let ok = false;
       // 文字视频只念台词；普通视频/语音按硬停顿切
       const openerSpeak = speakOpening || opening;
-      const openerParts = splitForCallTTS(openerSpeak).filter(Boolean);
+      const openerParts = splitCallSpeakSentences(openerSpeak).filter(Boolean);
       const openerUrls = [];
       if (readyUrl) {
         // 预生成路径：开场白一般短，多数情况下就是 1 段；多段时整段拼好的 readyUrl
@@ -10953,7 +10887,7 @@ window.acceptProactiveCall = async function(call) {
         let firstErr = '';
         for (let i = 0; i < openerUrls.length; i++) {
           if (i > 0) {
-            await sleepMs(CALL_SEGMENT_GAP_MS);
+            await sleepMs(VOICE_CALL_LINE_GAP_MS);
             if (!inCall) { allOk = false; break; }
           }
           const o = await playReadyTTS(openerUrls[i], () => {

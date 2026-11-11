@@ -1298,9 +1298,19 @@ export const tiebaCreateBar = (data) =>
     body: JSON.stringify(data || {}),
   });
 
-export const tiebaListThreads = (barId, { limit = 30, offset = 0, sort = 'live' } = {}) => {
+export const tiebaListThreads = (barId, { limit = 30, offset = 0, sort = 'live', refresh = false } = {}) => {
   const mode = ['live', 'hot', 'new'].includes(sort) ? sort : 'live';
-  return apiFetch(`/api/tieba/bars/${barId}/threads?limit=${limit}&offset=${offset}&sort=${mode}`, { headers: tiebaHeaders(), cache: 'no-store' });
+  const q = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    sort: mode,
+  });
+  if (refresh) q.set('refresh', '1');
+  return apiFetch(`/api/tieba/bars/${barId}/threads?${q}`, {
+    headers: tiebaHeaders(),
+    cache: 'no-store',
+    timeoutMs: refresh ? 80000 : undefined,
+  });
 };
 
 export const tiebaCreateThread = (barId, data) =>
@@ -1310,8 +1320,15 @@ export const tiebaCreateThread = (barId, data) =>
     body: JSON.stringify(data || {}),
   });
 
-export const tiebaGetThread = (id, { limit = 50, offset = 0 } = {}) =>
-  apiFetch(`/api/tieba/threads/${id}?limit=${limit}&offset=${offset}`, { headers: tiebaHeaders(), cache: 'no-store' });
+export const tiebaGetThread = (id, { limit = 50, offset = 0, refresh = false } = {}) => {
+  const q = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (refresh) q.set('refresh', '1');
+  return apiFetch(`/api/tieba/threads/${id}?${q}`, {
+    headers: tiebaHeaders(),
+    cache: 'no-store',
+    timeoutMs: refresh ? 80000 : undefined,
+  });
+};
 
 export const tiebaReply = (threadId, content, replyToFloor = 0) =>
   apiFetch(`/api/tieba/threads/${threadId}/replies`, {

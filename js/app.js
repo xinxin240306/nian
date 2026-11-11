@@ -18,7 +18,7 @@ import { startPhoneNotificationSync } from './phone-bridge.js';
 import { installMediaCacheResolver } from './chat-media-cache.js';
 import { startChatArchiveSync } from './chat-archive.js';
 import { startXhsBrowseSync, syncXhsBrowse } from './xhs-browse-store.js';
-import { playCallRingtone, stopCallRingtone, prefetchTTS, unlockAudioPlayback, useSystemCallRingtone } from './tts.js';
+import { playCallRingtone, stopCallRingtone, prefetchTTS, unlockAudioPlayback, useSystemCallRingtone, splitTextVideoSpeakLines, splitCallSpeakSentences } from './tts.js';
 import { initHomeDesktop, refreshHomeDesktop, tickWidgetClocks } from './home-desktop.js';
 import {
   syncMomentsUnread,
@@ -95,7 +95,7 @@ const PAGE_LOADERS = {
   ta: () => import('./pages/ta-page.js'),
   mailbox: () => import('./pages/mailbox-page.js'),
   postoffice: () => import('./pages/postoffice-page.js'),
-  tieba: () => import('./pages/tieba-page.js?v=ui6'),
+  tieba: () => import('./pages/tieba-page.js?v=ui7'),
 };
 
 // 将 kebab-case 转为 PascalCase，例如 emoji-manager → EmojiManager
@@ -2849,25 +2849,61 @@ async function showIncomingCallUI(data) {
   const hasVoice = !!(String(peer?.voice_id || '').trim() || String(peer?.voice_id_nsfw || '').trim());
   const alreadyReady = String(data.readyTtsUrl || '').trim();
 
-  // 文字视频：只预生成引号里的台词；整段旁白不要拿去念
+  // 文字视频：按句预生成台词，接通后一句读完再停一下；不要合成成一整段连着念
+  const textVideoLines = textVideoOpen ? splitTextVideoSpeakLines(opening).map((b) => b.text) : [];
+  const voiceLines = textVideoOpen ? [] : splitCallSpeakSentences(opening);
   const speakForTts = (() => {
     if (!textVideoOpen) return opening;
-    const quotes = [];
-    const re = /「([^」]*)」|『([^』]*)』|“([^”]*)”|"([^"]*)"/g;
-    let m;
-    while ((m = re.exec(opening)) !== null) {
-      const q = String(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '').trim();
-      if (q) quotes.push(q);
-    }
-    if (quotes.length) return quotes.join('\n');
-    // 漏引号：尽量捞短口语，否则不预生成（接通后再兜底）
+    if (textVideoLines.length) return textVideoLines.join('\n');
     const compact = opening.replace(/\s+/g, '');
     if (compact.length <= 36 && /[吗呢吧啊呀哦喂嘿嗨]/.test(compact)) return opening.slice(0, 80);
     return '';
   })();
 
   // 有开场白且角色配了声线：必须先生成好语音再响铃（超时仍响铃，后台补齐）
-  if (speakForTts && hasVoice && !alreadyReady) {
+  if (textVideoOpen && textVideoLines.length > 1 && hasVoice && !alreadyReady) {
+    let urls = null;
+    try {
+      const prefetch = Promise.all(textVideoLines.map((line) => prefetchTTS(line, data.characterId, { inCall: true })));
+      urls = await Promise.race([
+        prefetch,
+        new Promise((resolve) => setTimeout(() => resolve('__timeout__'), INCOMING_TTS_WAIT_MS)),
+      ]);
+      if (urls === '__timeout__') {
+        try { urls = await prefetch; } catch { urls = null; }
+      }
+    } catch {
+      urls = null;
+    }
+    if (token !== _incomingShowToken) return;
+    if (_incomingSettled) return;
+    if (!_pendingIncomingCall) return;
+    if (data.logId && Number(_pendingIncomingCall.logId) !== Number(data.logId)) return;
+    if (Array.isArray(urls) && urls.length === textVideoLines.length && urls.every(Boolean)) {
+      _pendingIncomingCall.readyTtsUrls = urls;
+    }
+  } else if (!textVideoOpen && voiceLines.length > 1 && hasVoice && !alreadyReady) {
+    let urls = null;
+    try {
+      const prefetch = Promise.all(voiceLines.map((line) => prefetchTTS(line, data.characterId, { inCall: true })));
+      urls = await Promise.race([
+        prefetch,
+        new Promise((resolve) => setTimeout(() => resolve('__timeout__'), INCOMING_TTS_WAIT_MS)),
+      ]);
+      if (urls === '__timeout__') {
+        try { urls = await prefetch; } catch { urls = null; }
+      }
+    } catch {
+      urls = null;
+    }
+    if (token !== _incomingShowToken) return;
+    if (_incomingSettled) return;
+    if (!_pendingIncomingCall) return;
+    if (data.logId && Number(_pendingIncomingCall.logId) !== Number(data.logId)) return;
+    if (Array.isArray(urls) && urls.length === voiceLines.length && urls.every(Boolean)) {
+      _pendingIncomingCall.readyTtsUrls = urls;
+    }
+  } else if (speakForTts && hasVoice && !alreadyReady) {
     let url = null;
     try {
       const prefetch = prefetchTTS(speakForTts, data.characterId, { inCall: true });
@@ -2972,6 +3008,7 @@ window.answerIncomingCallFromNative = function(data) {
     charAvatar: data.charAvatar || prev?.charAvatar || '',
     content: data.content || prev?.content || '',
     readyTtsUrl: prev?.readyTtsUrl || '',
+    readyTtsUrls: prev?.readyTtsUrls || null,
     video: !!(data.video ?? prev?.video),
   };
   window.answerIncomingCall();

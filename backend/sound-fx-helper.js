@@ -210,6 +210,7 @@ const LOUD_AMBIENCE_RULES = [
 
 /** 刻意给对方听的现场/氛围声（不一定吵）：海浪、雨、风、白噪等 */
 const SCENIC_AMBIENCE_RULES = [
+  { re: /风铃/, prompt: 'gentle metal wind chimes ringing continuously in a soft sea breeze by an open window, loop, no voices' },
   { re: /海浪|浪声|海水|海边|沙滩|听海/, prompt: 'ocean waves on a rocky beach, gentle sea wash, distant gulls, loop, no voices' },
   { re: /海风|海边风/, prompt: 'ocean wind on a shore at night, soft waves, loop, no voices' },
   { re: /雨声|下雨|听雨|小雨|中雨/, prompt: 'gentle rain on window and leaves, soft indoor room tone, loop, no voices' },
@@ -222,14 +223,13 @@ const SCENIC_AMBIENCE_RULES = [
 ];
 
 const LOUD_AMBIENCE_HINT_RE = /夜市|地摊|烧烤|大排档|暴雨|倾盆|雷雨|大风|狂风|地铁|公交|巴士|堵车|餐厅|食堂|饭店|街上|马路|逛街|健身房|商场|超市|机场|高铁|车站|busy|crowd|loud|night market|subway|mall|gym|station|thunder|heavy rain|traffic|restaurant|motorbike|sizzling/i;
-const SCENIC_AMBIENCE_HINT_RE = /海浪|浪声|海水|海边|沙滩|海风|雨声|下雨|听雨|风声|听风|白噪|助眠|虫鸣|蝉鸣|夜虫|篝火|火堆|壁炉|流水|溪流|ocean|wave|beach|sea|rain|wind|white\s*noise|cricket|campfire|stream|shore|gull/i;
+const SCENIC_AMBIENCE_HINT_RE = /海浪|浪声|海水|海边|沙滩|海风|风铃|雨声|下雨|听雨|风声|听风|白噪|助眠|虫鸣|蝉鸣|夜虫|篝火|火堆|壁炉|流水|溪流|ocean|wave|beach|sea|rain|wind|wind\s*chimes?|white\s*noise|cricket|campfire|stream|shore|gull/i;
 /** 角色主动让对方听现场声 */
 const SCENIC_OFFER_RE = /听(?:听|一下|下)?.{0,16}(海浪|浪声|海水|海风|雨声|雨|风声|白噪|虫鸣|篝火|流水)|听(?:我|这边|电话).{0,14}(海浪|浪|雨|风|海)|给你听.{0,10}(海浪|浪|雨|风)|把.{0,6}(海浪|浪声|雨声|风声).{0,8}(递|给|放)|(?:靠近|贴).{0,6}听筒.{0,10}(浪|雨|风|海)/;
 
 /** 一次性物件声：铃铛、敲门等——走「音效：」短响，不垫循环 */
 const ONESHOT_OFFER_RULES = [
   { re: /铃铛|小铃|摇铃|手铃/, prompt: 'small metal hand bell jingling clearly near the phone mic, bright ring, short, no voices', duration: 3 },
-  { re: /风铃/, prompt: 'gentle metal wind chimes ringing softly near mic, short, no voices', duration: 4 },
   { re: /门铃/, prompt: 'doorbell chime ringing once or twice, short, no voices', duration: 2 },
   { re: /钟声|敲钟|座钟/, prompt: 'single clear bell toll nearby, short, no voices', duration: 3 },
   { re: /八音盒|音乐盒/, prompt: 'tiny music box tinkling a short melody near mic, no voices', duration: 6 },
@@ -240,13 +240,20 @@ const ONESHOT_OFFER_RULES = [
   { re: /打火机|点燃/, prompt: 'metal lighter flick and soft flame catch, short, no voices', duration: 2 },
 ];
 const ONESHOT_OFFER_RE = /听(?:听|一下|下)?|给你听|摇(?:一下|给你)|递过来听|贴着听筒|听筒凑近|听这个|摇给你听|响给你听|放给你听/;
-const ONESHOT_OBJECT_HINT_RE = /铃铛|小铃|风铃|门铃|钟声|八音盒|音乐盒|钥匙|碰杯|敲门|bell|chime|doorbell|music box|keys jingl|knock|clink|lighter/i;
+const ONESHOT_OBJECT_HINT_RE = /铃铛|小铃|门铃|钟声|八音盒|音乐盒|钥匙|碰杯|敲门|hand\s*bell|doorbell|music box|keys jingl|knock|clink|lighter/i;
 
 function isLoudAmbiencePrompt(prompt) {
   return LOUD_AMBIENCE_HINT_RE.test(String(prompt || ''));
 }
 
+function isWindChimePrompt(prompt) {
+  return /wind\s*chimes?|风铃/i.test(String(prompt || ''));
+}
+
 function isScenicAmbiencePrompt(prompt) {
+  // 窗边被海风吹着的风铃是持续的现场声，不是摇一下就停的铃铛
+  if (isWindChimePrompt(prompt)) return true;
+  if (isOneshotObjectPrompt(prompt)) return false;
   return SCENIC_AMBIENCE_HINT_RE.test(String(prompt || ''));
 }
 
@@ -288,6 +295,116 @@ function speechEntersLoudPlace(text) {
   return ENTER_LOUD_RE.test(String(text || ''));
 }
 
+/** 角色口头把正在响的现场声关掉。开着的窗配海风，风铃可以一直循环；说关窗了就必须停。 */
+const STOP_ANY_BED_RE = /别放了|不要放了|把(?:声音|背景音|环境音|那个声音)关|关掉(?:声音|背景|环境)|停(?:掉|下)(?:那个)?(?:声音|背景|风铃)|不(?:要)?再响|别响了/;
+
+function plainSpoken(raw) {
+  let t = String(raw || '').trim();
+  if (t.startsWith('{')) {
+    try {
+      const j = JSON.parse(t);
+      if (j && typeof j === 'object') {
+        const inner = String(j.transcript || j.text || '').trim();
+        if (inner) t = inner;
+      }
+    } catch { /* 语音 JSON 没有转写就留原文 */ }
+  }
+  return t;
+}
+
+/** 对方明确嫌听筒里的环境/背景太吵，或要求关掉。通话语音多数没有转写，这条是文字兜底。 */
+function userWantsBedOff(raw) {
+  const t = plainSpoken(raw).replace(/\s+/g, '');
+  if (!t) return false;
+  if (STOP_ANY_BED_RE.test(t)) return true;
+  if (/(?:环境音|背景音|背景声|现场声|那个声音|这声音).{0,12}(?:太吵|太响|太大|好吵|好响|小声|关|停|小|别放|不要)/.test(t)) return true;
+  if (/(?:太吵|太响|好吵|吵死).{0,12}(?:环境音|背景音|背景声|现场声|那个声音|这声音)/.test(t)) return true;
+  if (/(?:把|将).{0,8}(?:环境音|背景音|背景声|背景|声音).{0,8}(?:关|停|小|轻)/.test(t)) return true;
+  return false;
+}
+
+/** 角色这句是在把循环背景收掉：关窗、嫌吵了去关、把声音停掉。 */
+function speechQuietsBed(text) {
+  const t = String(text || '').replace(/\s+/g, '');
+  if (!t) return false;
+  if (STOP_ANY_BED_RE.test(t)) return true;
+  if (speechClosedWindow(t)) return true;
+  if (/(?:太吵|太响|好吵).{0,18}(?:关|停|小|安静|换个地方|走开)/.test(t) && !/(?:别|不要|先别)关/.test(t)) return true;
+  if (/我去关/.test(t) && /(?:窗|声音|环境|背景)/.test(t)) return true;
+  return false;
+}
+
+function speechClosedWindow(text) {
+  const t = String(text || '').replace(/\s+/g, '');
+  if (!t) return false;
+  const res = [
+    /关(?:上|好|掉|严|住|毕|着)?了?.{0,8}(?:窗户|窗子|窗)/g,
+    /(?:窗户|窗子|窗).{0,12}关(?:上|好|严|住|了|掉|毕|着)/g,
+    /把.{0,6}窗(?:户|子)?.{0,6}关/g,
+    /窗(?:户|子)?(?:已经|都)?关(?:上|好|严|了|掉|着)/g,
+    /拉上.{0,6}(?:窗帘|窗)/g,
+  ];
+  for (const re of res) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(t))) {
+      const before = t.slice(Math.max(0, m.index - 6), m.index);
+      // 「没关」「别关」「没有把窗关上」不算关上
+      if (/[别不没未](?:有|要|用|把)?$/.test(before)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+function bedFollowsOpenWindow(prompt) {
+  const p = String(prompt || '');
+  if (isWindChimePrompt(p)) return true;
+  if (/open window|on window|sea breeze|ocean wind|海风|(?:^|[^a-z])breeze(?:[^a-z]|$)/i.test(p)) return true;
+  return false;
+}
+
+/**
+ * 正在循环的每一种声，角色说这个声源没了，就该停。
+ * bed 对当前英文提示词，end 对这句中文。
+ */
+const BED_END_RULES = [
+  { bed: /wind\s*chimes?|风铃/i, end: /风铃.{0,8}(?:不响|停了|没了|安静)|(?:不响|停了|没了).{0,6}风铃/ },
+  { bed: /ocean wind|sea breeze|海风|(?:^|[^a-z])breeze(?:[^a-z]|$)/i, end: /海风.{0,6}(?:停了|没了|小了|不住)|没风了|风停了|风小了|不刮风了/ },
+  { bed: /rain|thunder|雨|雷/i, end: /雨停|不下雨|不下了|天晴了|雷停了|不打雷/ },
+  { bed: /ocean|wave|beach|gull|海浪|浪|海边/i, end: /离开海边|不在海边|浪停了|海浪停了|不听海了/ },
+  { bed: /white\s*noise|白噪/i, end: /白噪(?:音|声)?.{0,4}(?:关掉|关了|停了)|(?:关掉|关了|停了).{0,4}白噪|不放白噪/ },
+  { bed: /cricket|insect|蝉|虫/i, end: /虫(?:子|鸣)?不叫|蝉不叫|虫子停了|蝉停了/ },
+  { bed: /campfire|wood fire|篝火|火堆|壁炉/i, end: /(?:篝火|火堆|壁炉).{0,4}(?:灭了|熄了)|火(?:灭了|熄了)|(?:灭了|熄了).{0,4}(?:篝火|火堆|壁炉)/ },
+  { bed: /stream|流水|溪/i, end: /离开(?:溪边|河边)|水停了|不流了/ },
+  { bed: /strong wind|wind through trees|leaves rustle|大风|风声/i, end: /风停了|没风了|风小了|不刮风了/ },
+  { bed: /night market|夜市/i, end: /离开夜市|不在夜市|夜市散/ },
+  { bed: /subway|地铁/i, end: /下(?:了)?地铁|出(?:了)?地铁|地铁到了|下车了/ },
+  { bed: /bus interior|公交|巴士/i, end: /下(?:了)?(?:公交|巴士|车)|出(?:了)?(?:公交|巴士)/ },
+  { bed: /traffic jam|堵车/i, end: /不堵了|堵完了/ },
+  { bed: /restaurant|餐厅|食堂|饭店/i, end: /吃完了|结账了|离开餐厅|离开食堂|离开饭店|出了餐厅|出了食堂/ },
+  { bed: /city street|street traffic|街上|马路/i, end: /离开街上|离开马路|不在街上|不在马路/ },
+  { bed: /gym|健身/i, end: /离开健身房|出健身房|锻炼完/ },
+  { bed: /mall|shopping|商场|超市/i, end: /离开商场|离开超市|出了商场|出了超市/ },
+  { bed: /transit hall|station|车站|机场/i, end: /出站了|离开车站|离开机场|不在车站/ },
+];
+
+function currentSourceEnded(text, prompt) {
+  const p = String(prompt || '');
+  const t = String(text || '').replace(/\s+/g, '');
+  if (!p || !t) return false;
+  return BED_END_RULES.some((rule) => rule.bed.test(p) && rule.end.test(t));
+}
+
+/** 这句是在说「这段循环的声源已经没了」。说去关窗就停掉正在循环的现场声，不再只认窗边海风。 */
+function speechEndsBed(text, prompt) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (speechClosedWindow(t)) return true;
+  if (!String(prompt || '').trim()) return false;
+  return currentSourceEnded(t, prompt);
+}
+
 function speechOffersScenicListen(text) {
   return SCENIC_OFFER_RE.test(String(text || ''));
 }
@@ -326,15 +443,19 @@ function isLoudCallPlace(characterId) {
 
 function inferCallAmbienceSpec({ sceneHint = '', homeEnv = '', recentText = '' } = {}) {
   const t = `${sceneHint}\n${homeEnv}\n${recentText}`;
+  const take = (prompt) => {
+    if (speechEndsBed(t, prompt)) return null;
+    return { prompt, duration: 22, loop: true, ambience: true };
+  };
   for (const rule of SCENIC_AMBIENCE_RULES) {
-    if (rule.re.test(t)) {
-      return { prompt: rule.prompt, duration: 22, loop: true, ambience: true };
-    }
+    if (!rule.re.test(t)) continue;
+    const spec = take(rule.prompt);
+    if (spec) return spec;
   }
   for (const rule of LOUD_AMBIENCE_RULES) {
-    if (rule.re.test(t)) {
-      return { prompt: rule.prompt, duration: 22, loop: true, ambience: true };
-    }
+    if (!rule.re.test(t)) continue;
+    const spec = take(rule.prompt);
+    if (spec) return spec;
   }
   return null;
 }
@@ -513,12 +634,17 @@ function buildCallSceneAudioPromptSection(settings, charId) {
   const cur = charId != null ? getCallScene(charId) : null;
   const tex = charId != null ? getCallTexture(charId) : null;
   const bed = cur?.prompt
-    ? `听筒里正在垫现场声（「${String(cur.prompt).slice(0, 80)}」）。用户听得到，不要每轮再写「环境：」。
+    ? `听筒里正在循环播放这段现场声，用户听得见，你也听得见（「${String(cur.prompt).slice(0, 80)}」）。对方问这是什么声音时按这段回答，不要说不知道、不要假装安静。
+· 这段会一直循环，直到你说这个声源没了：关上窗、雨停了、火灭了、浪没了、离开这个吵的地方、把白噪音关掉。正文照常说，并且必须另起一行写「环境：无」。
+· 对方说环境音太吵、背景太响、把声音关掉，或你说去关窗、太吵了要去安静处：听筒里的循环声会立刻停。可以说去关窗，但必须写「环境：无」，这轮不要再写新的「环境：」。只嘴上说关窗、声音却留着，对方听得到。
+· 窗开着、有海风，风铃会一直响，这是正常的循环，不要说成只响一下。关上窗之后风铃必须停。
 · 若是吵闹现场：还在吵里才大声慢说；说去安静处、进门或不吵了，立刻恢复正常说话，并写「环境：无」。
-· 若是海浪/雨声等分享氛围：对方听得到就别反复提「你听」；要停就写「环境：无」。`
-    : `默认听筒里不要垫循环环境音。
+· 若是海浪、雨声这类分享氛围：对方听得到就别反复提「你听」；要停就写「环境：无」。`
+    : `默认听筒里没有循环背景音。不要假装已经放了雨声或海浪。
 · 真在很吵的地方（夜市、地铁、马路、食堂、暴雨、商场）才写「环境：」。卧室、客厅、办公室、厨房这些安静处不要无故垫。
-· 例外：你主动让对方听现场氛围（海浪、雨声、海风、白噪音、虫鸣等）时，必须另起一行写「环境：英文描述|22」，否则听筒里不会出声。例：环境：ocean waves on a rocky beach, gentle sea wash, loop, no voices|22`;
+· 会一直响的现场写「环境：英文描述|22」，不要写成短音效。窗开着、外面有海风、风铃被吹着一直响，就是这种循环。例：环境：gentle metal wind chimes in a soft sea breeze by an open window, loop, no voices|22
+· 声源结束就写「环境：无」：关窗、雨停、火灭、离开夜市或海边、关掉白噪音，都一样。
+· 其它主动让对方听的持续氛围（海浪、雨声、白噪音、虫鸣）同样写「环境：英文描述|22」。例：环境：ocean waves on a rocky beach, gentle sea wash, loop, no voices|22`;
   const texNote = tex?.prompt
     ? `系统已在听筒里垫着黏液摩擦（「${String(tex.prompt).slice(0, 60)}」），轮到用户说话也不会停。不要每轮再写。`
     : '黏液摩擦写「音效：」后，系统会垫在听筒里循环，轮到用户说话也不停；不要每轮重写。';
@@ -526,7 +652,8 @@ function buildCallSceneAudioPromptSection(settings, charId) {
 ${bed}
 · 换到很吵的地方、或突然特别吵时，末尾另起一行写「环境：英文现场描述|22」。
 · 主动分享海浪/雨声等持续氛围时，写「环境：…|22」（不要只嘴上说「你听」）。
-· 主动给对方听短物件声（铃铛、风铃、门铃、敲门、碰杯、钥匙串、八音盒等）写「音效：英文短事件|2～4」，不要写成「环境：」。例：音效：small metal hand bell jingling near mic, short, no voices|3
+· 主动给对方听短物件声（手铃、门铃、敲门、碰杯、钥匙串、八音盒）写「音效：英文短事件|2～4」，不要写成「环境：」。例：音效：small metal hand bell jingling near mic, short, no voices|3
+· 会一直响的声音写「环境：」循环，短一下的物件声才写「音效：」。声源结束就写「环境：无」。
 · 其它一次性声（东西掉了、关门、杯碰桌）同样「音效：…|2」。例：ceramic bowl dropping on wood floor, short impact
 · ${texNote}
   例：close-up thick sticky slime smearing and peeling on skin, gooey viscous stretch, no water splash, no voices|10
@@ -538,7 +665,7 @@ ${bed}
  * @returns {Promise<{ id, type, content }|null>}
  */
 async function saveGeneratedSfxMessage({
-  characterId, spec, settings, uploadsPath, isDreamMode, deliveryStatus = 'sent',
+  characterId, spec, settings, uploadsPath, isDreamMode, deliveryStatus = 'sent', forVoiceCall = false,
 }) {
   if (isDreamMode || !spec) return null;
   if (!isSoundFxConfigured(settings)) return null;
@@ -584,7 +711,7 @@ async function saveGeneratedSfxMessage({
       try { db.prepare(`UPDATE messages SET delivery_status=? WHERE id=?`).run(status, id); } catch {}
     }
     // 通话里音效只进听筒，不要再占聊天气泡（否则看起来像「一句一条」还夹着环境音提示）
-    const hideChat = !!(spec.ambience || spec.texture || opts.forVoiceCall);
+    const hideChat = !!(spec.ambience || spec.texture || forVoiceCall);
     if (hideChat) {
       try {
         db.prepare(`UPDATE messages SET media_meta=? WHERE id=?`)
@@ -627,30 +754,45 @@ async function attachSoundFxMessages(opts) {
   const shot = extractSoundFx(raw) || extractSoundFx(clean);
   const current = forVoiceCall ? getCallScene(opts.characterId) : null;
 
-  let ambSpec = amb;
-  const out = [];
-  const spoken = `${raw}\n${clean}`;
-  if (forVoiceCall) {
-    const leaving = speechLeavesLoudPlace(spoken) || !!(ambSpec && ambSpec.stop);
-    const entering = (!!ambSpec && !ambSpec.stop && isLoudAmbiencePrompt(ambSpec.prompt))
-      || speechEntersLoudPlace(spoken);
-    const scenicOffer = (!!ambSpec && !ambSpec.stop && isScenicAmbiencePrompt(ambSpec.prompt))
-      || speechOffersScenicListen(spoken);
-    let stopped = false;
-    const stopBed = (leftOnPurpose) => {
-      if (stopped) return;
-      clearCallScene(opts.characterId);
-      if (leftOnPurpose) markLeftLoudPlace(opts.characterId);
-      out.push(hiddenStopAmbienceMsg(opts.characterId));
-      ambSpec = null;
-      stopped = true;
-    };
+    let ambSpec = amb;
+    let bedLockedOff = false;
+    const out = [];
+    const spoken = `${raw}\n${clean}`;
+    if (forVoiceCall) {
+      const quieted = userWantsBedOff(opts.userText) || speechQuietsBed(spoken);
+      const hardStop = !!(ambSpec && ambSpec.stop) || STOP_ANY_BED_RE.test(spoken) || quieted;
+      const sourceOver = speechEndsBed(spoken, current?.prompt);
+      const explicitStop = hardStop || sourceOver;
+      const placeLeave = speechLeavesLoudPlace(spoken);
+      const leaving = placeLeave || explicitStop;
+      const entering = (!!ambSpec && !ambSpec.stop && isLoudAmbiencePrompt(ambSpec.prompt))
+        || speechEntersLoudPlace(spoken);
+      const scenicOffer = (!!ambSpec && !ambSpec.stop && isScenicAmbiencePrompt(ambSpec.prompt))
+        || speechOffersScenicListen(spoken);
+      let stopped = false;
+      const stopBed = (leftOnPurpose) => {
+        if (stopped) return;
+        clearCallScene(opts.characterId);
+        if (leftOnPurpose) markLeftLoudPlace(opts.characterId);
+        out.push(hiddenStopAmbienceMsg(opts.characterId));
+        ambSpec = null;
+        stopped = true;
+      };
 
-    if (leaving && !entering && !scenicOffer) stopBed(true);
-    else if (ambSpec && !ambSpec.stop && !isAllowedCallAmbience(ambSpec.prompt)) {
-      // 铃铛等短声误写成「环境：」→ 后面改走一次性音效
-      if (!isOneshotObjectPrompt(ambSpec.prompt)) ambSpec = null;
-    }
+      // 嘴里说这段声源没了就停。若同一句改去了另一个还在的现场，留下新的那段。
+      const replacement = (!hardStop && ambSpec && !ambSpec.stop
+        && isAllowedCallAmbience(ambSpec.prompt)
+        && !speechEndsBed(spoken, ambSpec.prompt)
+        && !(current && promptsSimilar(ambSpec.prompt, current.prompt)))
+        ? ambSpec
+        : null;
+      if (explicitStop || (placeLeave && !entering && !scenicOffer)) {
+        stopBed(true);
+        if (replacement) ambSpec = replacement;
+      } else if (ambSpec && !ambSpec.stop && !isAllowedCallAmbience(ambSpec.prompt)) {
+        // 铃铛等短声误写成「环境：」→ 后面改走一次性音效
+        if (!isOneshotObjectPrompt(ambSpec.prompt)) ambSpec = null;
+      }
 
     if (entering) markEnteredLoudPlace(opts.characterId);
 
@@ -664,17 +806,27 @@ async function attachSoundFxMessages(opts) {
     // 现场吵不吵只认角色这轮说的话（「又到街上了」「我出来了」）。
     // 行程表里写过夜市不算数：那会让整通电话都按吵闹处合成，正是提示词要避免的。
     const bedStillOn = !!current && !stopped;
-    if ((entering || scenicOffer) && !ambSpec && !bedStillOn) {
+    if (!ambSpec && !bedStillOn && !quieted && (entering || scenicOffer)) {
       ambSpec = inferCallAmbienceSpec({
         sceneHint: spoken,
         homeEnv: '',
         recentText: spoken,
       });
     }
+    if (quieted) {
+      stopBed(true);
+      ambSpec = null;
+      bedLockedOff = true;
+    }
   }
 
   let shotSpec = shot;
   if (shotSpec?.stop) shotSpec = null;
+  // 这句已经说这个声源没了：模型若还写着它的「环境：」或「音效：」，不要再播
+  if (forVoiceCall) {
+    if (ambSpec && !ambSpec.stop && speechEndsBed(`${raw}\n${clean}`, ambSpec.prompt)) ambSpec = null;
+    if (shotSpec && speechEndsBed(`${raw}\n${clean}`, shotSpec.prompt)) shotSpec = null;
+  }
   // 通话里：铃铛等误写成「环境：」时降成一次性音效
   if (forVoiceCall && ambSpec && !ambSpec.stop && !isAllowedCallAmbience(ambSpec.prompt)
     && isOneshotObjectPrompt(ambSpec.prompt)) {
@@ -717,6 +869,7 @@ async function attachSoundFxMessages(opts) {
     }
   }
 
+  if (bedLockedOff) ambSpec = null;
   if (ambSpec) specs.push(ambSpec);
   if (shotSpec) specs.push(shotSpec);
   if (!specs.length) return out;

@@ -16,6 +16,10 @@ import {
   stopCallBodyBeds,
   stopCallOneShot,
   getLastTtsError,
+  splitTextVideoSpeakLines,
+  textVideoLineGapMs,
+  splitCallSpeakSentences,
+  VOICE_CALL_LINE_GAP_MS,
 } from '../tts.js';
 import { buildCallRecordHtml } from '../chat.js?v=swipe1';
 import { stripAiContextLabels } from '../memory.js';
@@ -175,11 +179,14 @@ export async function onRoleSpeechFinished() {
   await armAfterSpeak();
 }
 
-export async function playOpenerAfterAnswer(opening, readyUrl, forCharId) {
+export async function playOpenerAfterAnswer(opening, readyUrl, forCharId, readyUrls) {
   const peer = _deps?.getCharMeta?.(forCharId) || {};
   const text = String(opening || '').trim();
   const url = String(readyUrl || '').trim();
-  const canSpeak = !!(url || (text && charHasVoiceId(peer)));
+  const textVideo = !!getState().inVideoCall
+    && String(peer?.call_video_mode || 'video').trim().toLowerCase() === 'text';
+  const beats = textVideo ? splitTextVideoSpeakLines(text) : [];
+  const canSpeak = !!(url || (Array.isArray(readyUrls) && readyUrls.length) || (text && charHasVoiceId(peer)));
   if (text) pushTranscript('assistant', text);
 
   const speakAfter = Date.now() + INCOMING_SPEAK_DELAY_MS;
@@ -199,16 +206,57 @@ export async function playOpenerAfterAnswer(opening, readyUrl, forCharId) {
   void setNativeCallMediaAudio(true);
   try {
     let ok = false;
-    if (url) {
-      ok = await playReadyTTS(url, () => {
-        setCallSpeaking(false);
-        _deps?.setIdleStatus?.();
-      });
+    const finishUi = () => {
+      setCallSpeaking(false);
+      _deps?.setIdleStatus?.();
+    };
+    if (textVideo && beats.length > 1) {
+      let urls = Array.isArray(readyUrls) && readyUrls.length === beats.length && readyUrls.every(Boolean)
+        ? readyUrls
+        : [];
+      if (!urls.length && charHasVoiceId(peer)) {
+        const fetched = await Promise.all(beats.map((b) => prefetchTTS(b.text, forCharId, { inCall: true })));
+        if (!getState().inCall) return;
+        if (fetched.every(Boolean)) urls = fetched;
+      }
+      if (!urls.length && url) urls = [url];
+      let allOk = urls.length > 0;
+      for (let i = 0; i < urls.length; i++) {
+        if (i > 0) {
+          await sleepMs(textVideoLineGapMs(beats[i]?.narrationBefore || 0));
+          if (!getState().inCall) { allOk = false; break; }
+        }
+        const lastLine = i === urls.length - 1;
+        const one = await playReadyTTS(urls[i], () => { if (lastLine) finishUi(); });
+        if (!one || !getState().inCall) { allOk = false; break; }
+      }
+      ok = allOk;
+    } else if (!textVideo && splitCallSpeakSentences(text).length > 1) {
+      const lines = splitCallSpeakSentences(text);
+      let urls = Array.isArray(readyUrls) && readyUrls.length === lines.length && readyUrls.every(Boolean)
+        ? readyUrls
+        : [];
+      if (!urls.length && charHasVoiceId(peer)) {
+        const fetched = await Promise.all(lines.map((line) => prefetchTTS(line, forCharId, { inCall: true })));
+        if (!getState().inCall) return;
+        if (fetched.every(Boolean)) urls = fetched;
+      }
+      if (!urls.length && url) urls = [url];
+      let allOk = urls.length > 0;
+      for (let i = 0; i < urls.length; i++) {
+        if (i > 0) {
+          await sleepMs(VOICE_CALL_LINE_GAP_MS);
+          if (!getState().inCall) { allOk = false; break; }
+        }
+        const lastLine = i === urls.length - 1;
+        const one = await playReadyTTS(urls[i], () => { if (lastLine) finishUi(); });
+        if (!one || !getState().inCall) { allOk = false; break; }
+      }
+      ok = allOk;
+    } else if (url) {
+      ok = await playReadyTTS(url, finishUi);
     } else {
-      ok = await playTTS(text, () => {
-        setCallSpeaking(false);
-        _deps?.setIdleStatus?.();
-      }, forCharId);
+      ok = await playTTS(text, finishUi, forCharId);
     }
     setCallSpeaking(false);
     if (!ok) {
@@ -248,6 +296,10 @@ export async function startCall(asVideo = false) {
     }
     return;
   }
+  // 新一通先把上一通的现场声掐掉。挂断请求若晚到，垫音会一直循环到下一通。
+  stopCallAmbient();
+  stopCallBodyBeds();
+  stopCallOneShot();
 
   unlockAudioPlayback();
   setNativeCallMediaAudio(true);
@@ -377,11 +429,18 @@ export async function acceptProactiveCall(call) {
     window.showToast?.('请先结束当前通话');
     return;
   }
+  stopCallAmbient();
+  stopCallBodyBeds();
+  stopCallOneShot();
   const peer = _deps?.getCharMeta?.(cid) || {};
   const peerName = call.charName || peer?.name || 'TA';
   const peerAvatar = call.charAvatar || peer?.avatar || '';
+  const textVideo = !!call.video && String(peer?.call_video_mode || 'video').trim().toLowerCase() === 'text';
   // 来电开场再剥一次心里话草稿，避免念出 [怎么看]/[什么感觉]
-  const opening = stripAiContextLabels(String(call?.content || '')).replace(/\s+/g, ' ').trim();
+  // 文字视频要留换行，否则画面被压成一行
+  const opening = textVideo
+    ? stripAiContextLabels(String(call?.content || '')).replace(/\n{3,}/g, '\n\n').trim()
+    : stripAiContextLabels(String(call?.content || '')).replace(/\s+/g, ' ').trim();
   call = { ...call, content: opening };
 
   unlockAudioPlayback();
@@ -452,7 +511,7 @@ export async function acceptProactiveCall(call) {
   }
 
   setVoiceMode(true);
-  await playOpenerAfterAnswer(call.content, call.readyTtsUrl, cid);
+  await playOpenerAfterAnswer(call.content, call.readyTtsUrl, cid, call.readyTtsUrls);
   if (!getState().inCall) return;
   if (getState().inVideoCall) {
     await _deps?.startCallCamera?.({ silent: true, camOff: answerCamOff });

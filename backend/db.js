@@ -1245,6 +1245,15 @@ async function initDB() {
     }
   } catch (e) { /* ignore */ }
 
+  // 通话角色声旧默认 115 会在开口时把系统音量抬高。115 只来自那次默认写入，改回 100。
+  try {
+    const callVoiceFlag = db.prepare(`SELECT value FROM settings WHERE key='sfx_vol_call_voice_100_v1'`).get();
+    if (!callVoiceFlag) {
+      db.run(`UPDATE settings SET value='100' WHERE key='sfx_vol_call_voice' AND value='115'`);
+      db.run(`INSERT OR REPLACE INTO settings (key, value) VALUES ('sfx_vol_call_voice_100_v1', '1')`);
+    }
+  } catch (e) { /* ignore */ }
+
   const defaults = [
     ['chat_api_url', ''], ['chat_api_key', ''], ['chat_model', 'gpt-4o'],
     ['chat_temperature', '0.8'], ['chat_max_tokens', '4000'],
@@ -1255,7 +1264,7 @@ async function initDB() {
     ['sfx_vol_oneshot', '55'],
     ['sfx_vol_close', '20'],
     ['sfx_vol_duck', '80'],
-    ['sfx_vol_call_voice', '115'],
+    ['sfx_vol_call_voice', '100'],
     ['image_api_url', ''], ['image_api_key', ''],
     ['username', '旅人'], ['user_desc', ''], ['user_location', ''], ['user_birthday', ''], ['user_avatar', ''],
     ['user_cycle_interval', ''], ['user_period_days', ''], ['user_cramps', '0'], ['user_cramp_days', ''],

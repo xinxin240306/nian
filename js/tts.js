@@ -6,6 +6,8 @@ const ttsCache = new Map();
 let currentAudio = null;
 let currentPlayKey = null;
 let lastTtsError = '';
+/** 网页音频要等播完才 resolve；被打断时用它立刻结束等待 */
+let htmlPlayAbort = null;
 let audioUnlockPromise = null;
 // 每次 stopTTS 时递增，用于检测 fetchTTS 期间是否已被取消
 let _ttsGeneration = 0;
@@ -212,6 +214,110 @@ async function playViaNativeSpeech(url, volume) {
   await p.playSpeechUrl({ url: abs || src, ...(vol != null ? { volume: vol } : {}) });
 }
 
+function abortHtmlPlayback() {
+  const abort = htmlPlayAbort;
+  htmlPlayAbort = null;
+  try { abort?.(); } catch {}
+}
+
+/** 文字视频只念引号台词，并按句切开，方便一句读完再停一下 */
+export function splitTextVideoSpeakLines(text) {
+  const raw = String(text || '');
+  const re = /「([^」]*)」|『([^』]*)』|“([^”]*)”|"([^"]*)"/g;
+  const beats = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    const q = String(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '').trim();
+    const between = raw.slice(last, m.index).replace(/\s+/g, '');
+    last = m.index + m[0].length;
+    if (!q) continue;
+    const bits = [];
+    let buf = '';
+    for (const ch of q) {
+      buf += ch;
+      if (/[。！？!?]/.test(ch)) {
+        const piece = buf.trim();
+        if (piece) bits.push(piece);
+        buf = '';
+      }
+    }
+    const tail = buf.trim();
+    if (tail) bits.push(tail);
+    const parts = bits.length ? bits : [q];
+    parts.forEach((line, i) => {
+      beats.push({ text: line, narrationBefore: i === 0 ? between.length : 0 });
+    });
+  }
+  return beats;
+}
+
+/** 上一句真正播完之后再停多久。中间有旁白就多停一点，像人看了一眼再开口。 */
+export function textVideoLineGapMs(narrationChars = 0) {
+  const n = Number(narrationChars) || 0;
+  if (n >= 20) return 1500;
+  if (n >= 6) return 1200;
+  return 900;
+}
+
+/** 语音电话：一句读完后的短停，不要连着往下冲 */
+export const VOICE_CALL_LINE_GAP_MS = 520;
+
+/**
+ * 语音电话按句切开再分别合成。
+ * 只在句号、问号、感叹号、省略号、逗号和换行处切；引号和语气标签里面不切。
+ */
+export function splitCallSpeakSentences(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return [];
+  const HARD_BREAK_RE = /[。．.！!？?]+|[…]{2,}|[，,、]+|\n+/g;
+  const OPENS = ['「', '『', '“', '（', '(', '[', '【', '［'];
+  const CLOSES = ['」', '』', '”', '）', ')', ']', '】', '］'];
+  const TAG_OPEN = ['[软声]', '[沉声]'];
+  const TAG_CLOSE = ['[/软声]', '[/沉声]'];
+  const matchesAny = (s, i, list) => {
+    for (const t of list) if (s.startsWith(t, i)) return t;
+    return null;
+  };
+  const depthAt = (idx) => {
+    const stack = [];
+    for (let i = 0; i <= idx; i++) {
+      let tok = matchesAny(raw, i, TAG_OPEN);
+      if (tok) { stack.push({ close: TAG_CLOSE[TAG_OPEN.indexOf(tok)] }); i += tok.length - 1; continue; }
+      tok = matchesAny(raw, i, TAG_CLOSE);
+      if (tok) {
+        if (stack.length && stack[stack.length - 1].close === tok) stack.pop();
+        i += tok.length - 1; continue;
+      }
+      tok = matchesAny(raw, i, OPENS);
+      if (tok) { stack.push({ close: CLOSES[OPENS.indexOf(tok)] }); i += tok.length - 1; continue; }
+      tok = matchesAny(raw, i, CLOSES);
+      if (tok) {
+        if (stack.length && stack[stack.length - 1].close === tok) stack.pop();
+        i += tok.length - 1;
+      }
+    }
+    return stack.length;
+  };
+  const cuts = [];
+  let m;
+  HARD_BREAK_RE.lastIndex = 0;
+  while ((m = HARD_BREAK_RE.exec(raw))) {
+    if (depthAt(m.index) > 0) continue;
+    cuts.push(m.index + m[0].length);
+  }
+  const parts = [];
+  let last = 0;
+  for (const at of cuts) {
+    const seg = raw.slice(last, at).trim();
+    if (seg && /[\u4e00-\u9fffA-Za-z0-9]/.test(seg)) parts.push(seg);
+    last = at;
+  }
+  const tail = raw.slice(last).trim();
+  if (tail && /[\u4e00-\u9fffA-Za-z0-9]/.test(tail)) parts.push(tail);
+  return parts.length ? parts : [raw];
+}
+
 async function playAudioUrl(url, onEnd, { volume } = {}) {
   const src = resolveMediaUrl(url) || url;
   const vol = Number.isFinite(Number(volume))
@@ -251,16 +357,6 @@ async function playAudioUrl(url, onEnd, { volume } = {}) {
   try { audio.setAttribute?.('playsinline', ''); } catch {}
   await preferMediaAudioOutput(audio);
   currentAudio = audio;
-  const finish = () => {
-    if (currentAudio === audio) currentAudio = null;
-    unduckMediaAfterSpeech();
-    onEnd?.();
-  };
-  audio.onended = finish;
-  audio.onerror = () => {
-    lastTtsError = '音频播放失败';
-    finish();
-  };
   try {
     await audio.play();
   } catch (e) {
@@ -272,7 +368,36 @@ async function playAudioUrl(url, onEnd, { volume } = {}) {
     onEnd?.();
     throw e;
   }
-  return true;
+  // play() 在开播时就 resolve。必须等到真的播完，否则下一句会把这一句掐掉。
+  return await new Promise((resolve) => {
+    let settled = false;
+    let poll = null;
+    let cap = null;
+    const settle = (ok) => {
+      if (settled) return;
+      settled = true;
+      if (poll) clearInterval(poll);
+      if (cap) clearTimeout(cap);
+      if (htmlPlayAbort === abort) htmlPlayAbort = null;
+      try { if (!ok && !audio.ended) audio.pause(); } catch {}
+      if (currentAudio === audio) currentAudio = null;
+      try { unduckMediaAfterSpeech(); } catch {}
+      if (ok) onEnd?.();
+      resolve(!!ok);
+    };
+    const abort = () => settle(false);
+    htmlPlayAbort = abort;
+    audio.onended = () => settle(true);
+    audio.onerror = () => {
+      lastTtsError = '音频播放失败';
+      settle(false);
+    };
+    poll = setInterval(() => {
+      try { if (audio.ended) settle(true); } catch { settle(false); }
+    }, 200);
+    cap = setTimeout(() => settle(true), 90000);
+    try { if (audio.ended) settle(true); } catch {}
+  });
 }
 
 /** 相册语音条：直接播放已上传的音频文件 */
@@ -282,6 +407,7 @@ export async function playVoiceClipUrl(url, { onStart, onEnd } = {}) {
     return false;
   }
   if (currentAudio) {
+    abortHtmlPlayback();
     currentAudio.pause();
     currentAudio = null;
     resetAllVoicePlayIcons();
@@ -290,8 +416,8 @@ export async function playVoiceClipUrl(url, { onStart, onEnd } = {}) {
   lastTtsError = '';
   try {
     onStart?.();
-    await playAudioUrl(url, onEnd);
-    return true;
+    const played = await playAudioUrl(url, onEnd);
+    return played !== false;
   } catch (e) {
     lastTtsError = e.message || '播放失败';
     onEnd?.();
@@ -312,6 +438,7 @@ export async function playVoiceAudio(text, msgId, { onStart, onEnd, characterId,
   const { key, url } = cached;
 
   if (currentAudio && currentPlayKey !== key) {
+    abortHtmlPlayback();
     currentAudio.pause();
     currentAudio = null;
     resetAllVoicePlayIcons();
@@ -332,8 +459,8 @@ export async function playVoiceAudio(text, msgId, { onStart, onEnd, characterId,
   currentPlayKey = key;
   try {
     onStart?.();
-    await playAudioUrl(url, onEnd);
-    return true;
+    const played = await playAudioUrl(url, onEnd);
+    return played !== false;
   } catch (e) {
     console.error('[tts] play error', e);
     lastTtsError = e.message || '播放失败';
@@ -376,18 +503,18 @@ export async function playReadyTTS(url, onEnd, { volume } = {}) {
     return false;
   }
   if (currentAudio) {
-    currentAudio.pause();
+    abortHtmlPlayback();
+    try { currentAudio.pause(); } catch {}
     currentAudio = null;
     currentPlayKey = null;
     resetAllVoicePlayIcons();
   }
   const gen = _ttsGeneration;
-  // 没有显式 volume 时，按设置里的「通话角色声音」倍率给到 native player，
-  // 默认 1.0；用户调到 130 就是 1.3，能顶过去系统媒体音量被压的环境
+  // 没有显式 volume 时按设置里的「通话角色声音」。100 跟系统媒体音量，只许更轻，不许把系统音量抬回去。
   const mix = sfxMix();
   const finalVolume = Number.isFinite(Number(volume))
-    ? Number(volume)
-    : Math.max(0.05, Math.min(2.0, (mix.callVoice || 1.0) * CALL_VOICE_GAIN_BOOST));
+    ? Math.max(0.05, Math.min(1, Number(volume)))
+    : Math.max(0.05, Math.min(1, (mix.callVoice || 1) * CALL_VOICE_GAIN_BOOST));
   try {
     await unlockAudioPlayback();
     if (_ttsGeneration !== gen) {
@@ -397,12 +524,12 @@ export async function playReadyTTS(url, onEnd, { volume } = {}) {
     // 角色开口不压环境音；播的时候再把垫音叫醒一次（防系统焦点闪避后静音）
     try { duckCallAmbient(false); } catch {}
     try { ensureCallAmbientPlaying(); } catch {}
-    await playAudioUrl(url, () => {
+    const played = await playAudioUrl(url, () => {
       try { ensureCallAmbientPlaying(); } catch {}
       onEnd?.();
     }, { volume: finalVolume });
     // 播放期间若被 stopTTS / 抢播打断，generation 会变——当作失败，别让通话段循环继续往下跳
-    if (_ttsGeneration !== gen) return false;
+    if (!played || _ttsGeneration !== gen) return false;
     return true;
   } catch (e) {
     lastTtsError = e.message || '语音播放失败';
@@ -431,8 +558,9 @@ export function stopTTS() {
   _ttsGeneration++;          // 使所有正在 await fetchTTS 的调用失效
   try { nativeCallStopPlay?.(); } catch {}
   try { stopNativeSpeechPlay(); } catch {}
+  abortHtmlPlayback();
   if (currentAudio) {
-    currentAudio.pause();
+    try { currentAudio.pause(); } catch {}
     currentAudio = null;
   }
   currentPlayKey = null;
@@ -442,7 +570,7 @@ export function stopTTS() {
 }
 
 const AMBIENT_VOL = 0.40;
-const CALL_VOICE_GAIN_BOOST = 1.0; // 通话里角色声音的额外增益（乘到系统音量上）
+const CALL_VOICE_GAIN_BOOST = 1.0; // 不再乘到系统音量上；1 就是当前媒体音量
 
 function clampPct(n, fallback, max = 100) {
   const x = Number(n);
@@ -460,7 +588,7 @@ function sfxMix() {
     oneshot: clampPct(s.sfx_vol_oneshot, 70) / 100,
     close: clampPct(s.sfx_vol_close, 32) / 100,
     duck: clampPct(s.sfx_vol_duck, 88) / 100,
-    callVoice: clampPct(s.sfx_vol_call_voice, 100, 200) / 100, // 通话里角色声音倍率（>100 放大，最大 200）
+    callVoice: clampPct(s.sfx_vol_call_voice, 100, 100) / 100,
   };
 }
 
@@ -1109,14 +1237,18 @@ function createBreathingLayer({ defaultVol = 0.1 } = {}) {
 
 const hangoutBed = createBreathingLayer({ defaultVol: 0.1 });
 
+let _callAmbientGen = 0;
+
 export function playCallAmbient(url, opts) {
   const src = resolveMediaUrl(url) || url;
   const vol = Number.isFinite(Number(opts?.volume)) ? Number(opts.volume) : undefined;
+  const gen = ++_callAmbientGen;
   // App 通话：垫音走原生 MediaPlayer 的媒体流，音量跟系统媒体音量；和角色声分轨，开口时不停
   if (nativeCallBedPlay && src) {
     nativeBedActive = true;
     try { roomAmbient.stop(); } catch {}
     Promise.resolve(nativeCallBedPlay(src, vol)).catch((e) => {
+      if (gen !== _callAmbientGen) return;
       console.warn('[tts] native bed fallback', e?.message || e);
       nativeBedActive = false;
       roomAmbient.play(url, opts);
@@ -1155,6 +1287,7 @@ export function ensureCallAmbientPlaying() {
 }
 
 export function stopCallAmbient() {
+  _callAmbientGen += 1;
   if (nativeCallBedStop) {
     try { nativeCallBedStop(); } catch {}
   }
