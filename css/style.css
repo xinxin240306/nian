@@ -19372,6 +19372,72 @@ html[data-color-scheme="dark"] #tieba-page {
   gap: 12px;
   margin-bottom: 14px;
 }
+.tb-hello-face,
+.tb-me-face {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.tb-contacts {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+}
+.tb-contact {
+  flex: 0 0 68px;
+  width: 68px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.tb-contact-name,
+.tb-contact-id {
+  max-width: 68px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-contact-name { font-size: 12px; }
+.tb-contact-id { font-size: 10px; color: var(--text-secondary); }
+.tb-me { padding: 16px 16px 40px; }
+.tb-me-name {
+  margin-top: 10px;
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  font-weight: 700;
+}
+.tb-me-save { margin-top: 14px; }
+.tb-me-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-top: 1px solid var(--tb-line);
+  background: transparent;
+  padding: 12px 0;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+.tb-me-item-title { font-size: 15px; line-height: 1.45; }
+.tb-me-item-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tb-me-logout { margin-top: 22px; }
 .tb-hello-copy { min-width: 0; }
 .tb-hello-name {
   font-family: 'Noto Serif SC', serif;
@@ -20119,6 +20185,37 @@ html[data-color-scheme="dark"] #tieba-page {
   line-height: 1.75;
   color: var(--text-primary);
   word-break: break-word;
+}
+.tb-media {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  margin-top: 10px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.04);
+}
+.tb-thread-thumb {
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex: none;
+  background: rgba(0, 0, 0, 0.06);
+}
+.tb-thread-thumb.is-video {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+.tb-thread-thumb.is-video::after {
+  content: '';
+  width: 0;
+  height: 0;
+  margin-left: 3px;
+  border-left: 10px solid currentColor;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
 }
 .tb-opener-content .inline-bean-emoji,
 .tb-sub .tb-floor-content .inline-bean-emoji {

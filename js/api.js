@@ -1309,7 +1309,7 @@ export const tiebaListThreads = (barId, { limit = 30, offset = 0, sort = 'live',
   return apiFetch(`/api/tieba/bars/${barId}/threads?${q}`, {
     headers: tiebaHeaders(),
     cache: 'no-store',
-    timeoutMs: refresh ? 80000 : undefined,
+    timeoutMs: refresh ? 110000 : undefined,
   });
 };
 
@@ -1326,7 +1326,7 @@ export const tiebaGetThread = (id, { limit = 50, offset = 0, refresh = false } =
   return apiFetch(`/api/tieba/threads/${id}?${q}`, {
     headers: tiebaHeaders(),
     cache: 'no-store',
-    timeoutMs: refresh ? 80000 : undefined,
+    timeoutMs: refresh ? 110000 : undefined,
   });
 };
 
@@ -1335,7 +1335,17 @@ export const tiebaReply = (threadId, content, replyToFloor = 0) =>
     method: 'POST',
     headers: tiebaHeaders(),
     body: JSON.stringify({ content, replyToFloor: Number(replyToFloor) || 0 }),
+    timeoutMs: 40000,
   });
+
+export const tiebaMyPosts = () =>
+  apiFetch('/api/tieba/me/posts', { headers: tiebaHeaders() });
+
+export const tiebaContacts = () =>
+  apiFetch('/api/tieba/contacts', { headers: tiebaHeaders() });
+
+export const tiebaPerson = (handle) =>
+  apiFetch(`/api/tieba/people/${encodeURIComponent(handle)}`, { headers: tiebaHeaders() });
 
 export const tiebaPinThread = (id, pinned) =>
   apiFetch(`/api/tieba/threads/${id}/pin`, {

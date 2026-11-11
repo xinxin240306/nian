@@ -3,7 +3,7 @@ import * as api from '../api.js';
 import { escapeHtml } from '../memory.js';
 import { formatTextWithInlineEmojis, openSystemEmojiOverlay } from '../inline-emoji.js';
 
-let _view = 'home'; // setup | home | bar | thread | compose | create-bar
+let _view = 'home'; // setup | home | bar | thread | compose | create-bar | me | person
 let _account = null;
 let _bars = [];
 let _bar = null;
@@ -22,6 +22,8 @@ let _pullSuppressClick = 0;
 let _replyTo = null;
 let _barSeq = 0;
 let _threadSeq = 0;
+let _contacts = [];
+let _person = null;
 
 const SNAP_KEY = 'nian_tieba_snap_v1';
 
@@ -143,7 +145,7 @@ function accountButtonHtml() {
   const face = _account?.avatar
     ? `<img src="${escapeHtml(_account.avatar)}" alt="">`
     : avatarLetter(_account?.username || '我');
-  return `<button type="button" class="topbar-action tb-me" title="${name}" onclick="tbAccountMenu()">${face}</button>`;
+  return `<button type="button" class="topbar-action tb-me" title="${name}" onclick="tbOpenProfile()">${face}</button>`;
 }
 
 function ensureShell() {
@@ -431,7 +433,7 @@ window.tbGoBack = function() {
     openBar(_thread?.bar_id || _bar?.id);
     return;
   }
-  if (_view === 'bar') {
+  if (_view === 'bar' || _view === 'me' || _view === 'person') {
     loadHome();
     return;
   }
@@ -513,7 +515,8 @@ window.tbPickSetupAvatar = async function() {
       const result = await pickCropAndUpload(file, { aspect: 1, title: '裁剪头像', confirmText: '完成' });
       if (result?.url) {
         _setupAvatar = result.url;
-        const preview = document.getElementById('tb-setup-avatar-preview');
+        const preview = document.getElementById('tb-setup-avatar-preview')
+          || document.querySelector('#tb-me-face .tb-setup-avatar');
         if (preview) preview.innerHTML = `<img src="${escapeHtml(result.url)}" alt="">`;
       }
     } catch (err) {
@@ -552,6 +555,21 @@ window.tbSubmitSetup = async function() {
   }
 };
 
+function contactRowHtml() {
+  if (_searchQ || !_contacts.length) return '';
+  const chips = _contacts.map((c) => `
+    <button type="button" class="tb-contact" onclick='tbOpenPerson(${JSON.stringify(c.handle)})'>
+      ${userAvatarHtml(c.display_name || c.handle, c.avatar, nameColor(c.handle), 'tb-user-av-sm')}
+      <span class="tb-contact-name">${escapeHtml(c.display_name || c.handle)}</span>
+      <span class="tb-contact-id">${escapeHtml(c.handle)}</span>
+    </button>
+  `).join('');
+  return `
+    <div class="tb-section-label">通讯里的人</div>
+    <div class="tb-contacts">${chips}</div>
+  `;
+}
+
 function homeActionsHtml() {
   return `
     <button type="button" class="topbar-action" title="建吧" onclick="tbOpenCreateBar()">
@@ -576,6 +594,13 @@ async function loadHome(opts = {}) {
   if (!soft) showLoading();
   try {
     const bars = await api.tiebaListBars(q, cityMode());
+    if (!q) {
+      try {
+        _contacts = (await api.tiebaContacts())?.contacts || [];
+      } catch {
+        _contacts = [];
+      }
+    }
     if (seq !== _homeSeq) return;
     _bars = bars;
     renderHome({ animate: !soft });
@@ -748,7 +773,7 @@ function renderHome({ animate = true } = {}) {
   body.innerHTML = `
     <div class="tb-home">
       <div class="tb-hello">
-        ${userAvatarHtml(_account?.username, _account?.avatar, 'var(--theme)', 'tb-user-av-lg')}
+        <button type="button" class="tb-hello-face" onclick="tbOpenProfile()">${userAvatarHtml(_account?.username, _account?.avatar, 'var(--theme)', 'tb-user-av-lg')}</button>
         <div class="tb-hello-copy">
           <div class="tb-hello-name">${escapeHtml(greetLine())}</div>
           <div class="tb-hello-sub">${escapeHtml(sub)}</div>
@@ -758,6 +783,7 @@ function renderHome({ animate = true } = {}) {
         ${SEARCH_ICON}
         <input class="input tb-search" id="tb-search" placeholder="搜索吧名、所在地" value="${escapeHtml(shownQ)}" enterkeyhint="search" autocomplete="off" />
       </div>
+      ${contactRowHtml()}
       ${cityModeHtml()}
       ${stats}
       <div id="tb-home-list">${list}</div>
@@ -929,7 +955,7 @@ function threadFeedChanged(prev, next) {
 }
 
 function threadFaceChanged(prev, next) {
-  const sig = (t) => `${t.id}:${t.author_avatar || ''}:${t.author_name || ''}`;
+  const sig = (t) => `${t.id}:${t.author_avatar || ''}:${t.author_name || ''}:${t.media_url || ''}`;
   return rowSig(prev, sig) !== rowSig(next, sig);
 }
 
@@ -990,6 +1016,22 @@ async function openBar(id, opts = {}) {
   }
 }
 
+function tiebaMediaHtml(url, type) {
+  const src = String(url || '').trim();
+  if (!src) return '';
+  const safe = escapeHtml(src);
+  if (type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(src)) {
+    return `<video class="tb-media" src="${safe}" controls playsinline preload="metadata"></video>`;
+  }
+  return `<img class="tb-media" src="${safe}" alt="">`;
+}
+
+function threadThumbHtml(t) {
+  if (!t?.media_url) return '';
+  if (t.media_type === 'video') return '<span class="tb-thread-thumb is-video" aria-hidden="true"></span>';
+  return `<img class="tb-thread-thumb" src="${escapeHtml(t.media_url)}" alt="">`;
+}
+
 function threadCardHtml(t, i) {
   const blurb = excerpt(t.content);
   return `
@@ -1005,6 +1047,7 @@ function threadCardHtml(t, i) {
         <div class="tb-thread-title">${t.pinned ? '<span class="tb-pin">置顶</span>' : ''}${escapeHtml(t.title)}</div>
         ${blurb ? `<div class="tb-thread-excerpt">${escapeHtml(blurb)}</div>` : ''}
       </div>
+      ${threadThumbHtml(t)}
       <div class="tb-reply-stamp" title="回复"><b>${t.reply_count || 0}</b><span>回复</span></div>
     </button>
   `;
@@ -1149,12 +1192,19 @@ async function revalidateThread(id, seq, key) {
     const prev = _posts.slice();
     const prevIds = new Set(prev.map((p) => p.id));
     const added = next.some((p) => !prevIds.has(p.id));
-    const face = rowSig(prev, (p) => `${p.id}:${p.author_avatar || ''}`)
-      !== rowSig(next, (p) => `${p.id}:${p.author_avatar || ''}`);
+    const face = rowSig(prev, (p) => `${p.id}:${p.author_avatar || ''}:${p.media_url || ''}`)
+      !== rowSig(next, (p) => `${p.id}:${p.author_avatar || ''}:${p.media_url || ''}`);
     const handles = handlesKey(_bar) !== handlesKey(data.bar);
+    const media = `${_thread?.media_url || ''}` !== `${data.thread?.media_url || ''}`;
     snapSave(key, { thread: data.thread, posts: next, bar: data.bar || null });
-    if (!added && !face && !handles && prev.length === next.length) return;
+    if (!added && !face && !handles && !media && prev.length === next.length) return;
+    const scroller = document.getElementById('tb-body');
+    const top = scroller ? scroller.scrollTop : 0;
     applyThread(data);
+    if (!added && scroller) {
+      const again = document.getElementById('tb-body');
+      if (again) again.scrollTop = top;
+    }
     if (added) notePulledPosts(prev, _posts);
   } catch { /* 后台对一下就行 */ }
 }
@@ -1266,6 +1316,7 @@ function subReplyHtml(p, shape) {
           <button type="button" class="tb-floor-act tb-sub-reply" onclick="tbReplyFloor(${p.floor})">回复</button>
         </div>
         <div class="tb-floor-content">${formatTextWithInlineEmojis(p.content || '')}</div>
+        ${tiebaMediaHtml(p.media_url, p.media_type)}
       </div>
     </div>
   `;
@@ -1292,6 +1343,7 @@ function floorHtml(p, i, shape) {
         <div class="tb-floor-num">${no}<small>楼</small></div>
       </div>
       <div class="tb-floor-content">${formatTextWithInlineEmojis(p.content || '')}</div>
+      ${tiebaMediaHtml(p.media_url, p.media_type)}
       ${subs.length ? `<div class="tb-subs">${subs.map((s) => subReplyHtml(s, shape)).join('')}</div>` : ''}
       <div class="tb-floor-actions">
         <button type="button" class="tb-floor-act" onclick="tbReplyFloor(${p.floor})">回复</button>
@@ -1332,6 +1384,7 @@ function renderThread() {
           </div>
         ` : ''}
         ${hostBody ? `<div class="tb-opener-content">${formatTextWithInlineEmojis(hostBody)}</div>` : ''}
+        ${tiebaMediaHtml(host?.media_url || _thread.media_url, host?.media_type || _thread.media_type)}
         <div class="tb-opener-meta"><span>${shape.floors.length} 楼 · ${replyCount} 条回复</span><button type="button" class="tb-floor-act" onclick="tbReplyPost()">盖楼</button></div>
         ${castHandlesHtml(_bar)}
         ${_bar?.is_owner ? `
@@ -1446,17 +1499,20 @@ window.tbSendReply = async function() {
   const btn = document.getElementById('tb-reply-send');
   if (btn) btn.disabled = true;
   try {
-    const post = await api.tiebaReply(_thread.id, content, _replyTo?.floor || 0);
-    _posts.push(post);
-    _thread.reply_count = (_thread.reply_count || 0) + 1;
-    _thread.last_reply_at = post.created_at || _thread.last_reply_at;
+    const data = await api.tiebaReply(_thread.id, content, _replyTo?.floor || 0);
+    const post = data?.post?.id ? data.post : data;
+    const followups = Array.isArray(data?.followups) ? data.followups : [];
+    _posts.push(post, ...followups);
+    _thread.reply_count = (_thread.reply_count || 0) + 1 + followups.length;
+    _thread.last_reply_at = (followups[followups.length - 1] || post)?.created_at || _thread.last_reply_at;
     snapSave(`thread:${_thread.id}`, { thread: _thread, posts: _posts, bar: _bar });
     snapDropPrefix(`bar:${_bar?.id || _thread.bar_id}:`);
     clearComposerDraft();
     renderThread();
     setActions(`<span class="tb-floor-hint">${threadShape().floors.length} 楼</span>`);
+    if (followups.length) window.showToast?.(`有人接了 ${followups.length} 句`);
     requestAnimationFrame(() => {
-      const last = document.querySelector(`[data-post-id="${post.id}"]`);
+      const last = document.querySelector(`[data-post-id="${(followups[followups.length - 1] || post).id}"]`);
       last?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   } catch (e) {
@@ -1540,19 +1596,129 @@ window.tbDeleteThread = async function() {
   }
 };
 
-window.tbAccountMenu = async function() {
+function renderProfile(posts) {
+  const body = document.getElementById('tb-body');
+  if (!body || !_account) return;
+  _setupAvatar = _account.avatar || '';
+  const face = _setupAvatar
+    ? `<img src="${escapeHtml(_setupAvatar)}" alt="">`
+    : `<span>${avatarLetter(_account.username)}</span>`;
+  const mine = (posts || []).map((p) => `
+    <button type="button" class="tb-me-item" onclick="tbOpenThread(${p.thread_id})">
+      <div class="tb-me-item-title">${escapeHtml(p.title || '帖子')}</div>
+      <div class="tb-me-item-sub">${escapeHtml(p.bar_name || '')} · ${p.floor > 1 ? `${p.floor}楼` : '主楼'} · ${escapeHtml(String(p.content || '').slice(0, 42))}</div>
+    </button>
+  `).join('');
+  body.innerHTML = `
+    <div class="tb-me">
+      <button type="button" class="tb-me-face" id="tb-me-face"><div class="tb-setup-avatar">${face}</div></button>
+      <div class="tb-me-name">${escapeHtml(_account.username)}</div>
+      <label class="input-label" for="tb-me-sign">签名</label>
+      <input class="input" id="tb-me-sign" maxlength="40" value="${escapeHtml(_account.signature || '')}" placeholder="一句话介绍自己" />
+      <button type="button" class="btn btn-primary tb-me-save" onclick="tbSaveProfile()">保存</button>
+      <div class="tb-section-label">我的发言</div>
+      <div class="tb-me-list">
+        ${mine || '<div class="tb-floor-empty">还没有发过言</div>'}
+      </div>
+      <button type="button" class="btn btn-ghost tb-me-logout" onclick="tbLogout()">退出这个身份</button>
+    </div>
+  `;
+  document.getElementById('tb-me-face')?.addEventListener('click', () => window.tbPickSetupAvatar());
+}
+
+window.tbOpenProfile = async function() {
   if (!_account) {
     _view = 'setup';
     renderSetup();
     return;
   }
-  const sign = _account.signature ? `\n${_account.signature}\n` : '';
-  const ok = window.confirm(`当前账号：${_account.username}${sign}\n清除本地身份？（下次进入需重新设置）`);
-  if (!ok) return;
+  _view = 'me';
+  setTitle('我的');
+  setActions('');
+  setFab('');
+  setComposerVisible(false);
+  showLoading();
+  let posts = [];
+  try {
+    posts = (await api.tiebaMyPosts())?.posts || [];
+  } catch { /* 发言列表失败仍能改头像 */ }
+  if (_view !== 'me') return;
+  renderProfile(posts);
+};
+
+window.tbSaveProfile = async function() {
+  if (_busy || !_account) return;
+  const signature = document.getElementById('tb-me-sign')?.value || '';
+  _busy = true;
+  try {
+    const data = await api.tiebaUpdateMe({
+      signature,
+      avatar: _setupAvatar || '',
+    });
+    _account = data.account || _account;
+    window.showToast?.('已保存');
+    renderProfile((await api.tiebaMyPosts().catch(() => ({ posts: [] }))).posts || []);
+  } catch (e) {
+    window.showToast?.(e.message || '没保存上');
+  } finally {
+    _busy = false;
+  }
+};
+
+window.tbLogout = async function() {
+  if (!window.confirm('退出后，下次要重新设置贴吧身份。')) return;
   await api.tiebaLogout();
   _account = null;
   _view = 'setup';
   renderSetup();
+};
+
+window.tbOpenPerson = async function(handle) {
+  const name = String(handle || '').trim();
+  if (!name) return;
+  _view = 'person';
+  _person = _contacts.find((c) => c.handle === name) || { handle: name };
+  setTitle(_person.display_name || name);
+  setActions('');
+  setFab('');
+  setComposerVisible(false);
+  showLoading();
+  try {
+    const data = await api.tiebaPerson(name);
+    if (_view !== 'person') return;
+    _person = { ..._person, ...data, handle: name };
+    renderPerson();
+  } catch (e) {
+    if (_view !== 'person') return;
+    document.getElementById('tb-body').innerHTML = `
+      <div class="tb-empty"><div class="tb-empty-title">打不开这个人</div><div class="tb-empty-hint">${escapeHtml(e.message || '')}</div></div>`;
+  }
+};
+
+function renderPerson() {
+  const body = document.getElementById('tb-body');
+  if (!body || !_person) return;
+  const threads = _person.threads || [];
+  body.innerHTML = `
+    <div class="tb-me">
+      <div class="tb-me-face">${userAvatarHtml(_person.display_name || _person.handle, _person.avatar, nameColor(_person.handle), 'tb-user-av-lg')}</div>
+      <div class="tb-me-name">${escapeHtml(_person.display_name || _person.handle)}</div>
+      <div class="tb-hello-sub">贴吧号 ${escapeHtml(_person.handle)}${_person.real ? ' · 实名' : ''}</div>
+      <div class="tb-section-label">发过的帖</div>
+      <div class="tb-me-list">
+        ${threads.length ? threads.map((t) => `
+          <button type="button" class="tb-me-item" onclick="tbOpenThread(${t.id})">
+            <div class="tb-me-item-title">${escapeHtml(t.title || '帖子')}</div>
+            <div class="tb-me-item-sub">${escapeHtml(t.bar_name || '')} · ${t.reply_count || 0} 回复</div>
+          </button>
+        `).join('') : '<div class="tb-floor-empty">还没发过帖，去所在地的吧看看</div>'}
+      </div>
+    </div>
+  `;
+}
+
+window.tbAccountMenu = function() {
+  window.tbOpenProfile();
 };
 
 // 暴露给重试按钮

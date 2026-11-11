@@ -27,6 +27,10 @@ function registerTiebaRoutes(app, { tieba }) {
     refreshThreadNpcReplies,
     barHasNpcThreads,
     tiebaBarHandles,
+    respondToTiebaUser,
+    listMyTiebaPosts,
+    tiebaContactCards,
+    tiebaPerson,
   } = tieba;
 
   function ensure(res) {
@@ -225,14 +229,51 @@ function registerTiebaRoutes(app, { tieba }) {
     }
   });
 
-  app.post('/api/tieba/threads/:id/replies', (req, res) => {
+  app.get('/api/tieba/me/posts', (req, res) => {
+    try {
+      if (!ensure(res)) return;
+      const acc = requireAccount(req, res);
+      if (!acc) return;
+      res.json({ posts: listMyTiebaPosts(acc.id) });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/tieba/contacts', (req, res) => {
+    try {
+      if (!ensure(res)) return;
+      res.json({ contacts: tiebaContactCards() });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/tieba/people/:handle', (req, res) => {
+    try {
+      if (!ensure(res)) return;
+      const person = tiebaPerson(req.params.handle);
+      if (!person) return res.status(404).json({ error: '没有这个吧友' });
+      res.json(person);
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/tieba/threads/:id/replies', async (req, res) => {
     try {
       if (!ensure(res)) return;
       const acc = requireAccount(req, res);
       if (!acc) return;
       const body = req.body || {};
       const post = replyThread(acc, req.params.id, body.content, body.replyToFloor);
-      res.json(post);
+      let followups = [];
+      try {
+        followups = await respondToTiebaUser(req.params.id, post);
+      } catch (e) {
+        console.warn('[tieba] reply npc', e.message);
+      }
+      res.json({ post, followups });
     } catch (e) {
       res.status(400).json({ error: e.message });
     }

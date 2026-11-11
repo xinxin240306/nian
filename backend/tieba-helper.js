@@ -114,6 +114,10 @@ function ensureTiebaTables() {
   try { d.run(`ALTER TABLE tieba_threads ADD COLUMN pinned_at TEXT DEFAULT ''`); } catch {}
   try { d.run(`ALTER TABLE tieba_posts ADD COLUMN reply_to_floor INTEGER DEFAULT 0`); } catch {}
   try { d.run(`ALTER TABLE tieba_bars ADD COLUMN npc_slot TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_threads ADD COLUMN media_url TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_threads ADD COLUMN media_type TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_posts ADD COLUMN media_url TEXT DEFAULT ''`); } catch {}
+  try { d.run(`ALTER TABLE tieba_posts ADD COLUMN media_type TEXT DEFAULT ''`); } catch {}
   d.run(`CREATE INDEX IF NOT EXISTS idx_tieba_bars_city ON tieba_bars(kind, city_key, character_id)`);
   d.run(`
     CREATE TABLE IF NOT EXISTS tieba_npcs (
@@ -503,6 +507,8 @@ function mapThread(row) {
     created_at: row.created_at,
     pinned: Number(row.pinned) === 1,
     pinned_at: row.pinned_at || '',
+    media_url: row.media_url || '',
+    media_type: row.media_type || '',
     bar_name: row.bar_name || undefined,
   };
 }
@@ -571,6 +577,8 @@ function mapPost(row) {
     author_avatar: row.author_avatar || '',
     created_at: row.created_at,
     reply_to_floor: Number(row.reply_to_floor) || 0,
+    media_url: row.media_url || '',
+    media_type: row.media_type || '',
   };
 }
 
@@ -658,12 +666,17 @@ function initTiebaModule() {
 const NPC_REFRESH_GAP_MS = 15000;
 const barNpcJobs = new Map();
 const barNpcDoneAt = new Map();
+const barStockJobs = new Map();
 const threadNpcJobs = new Map();
 const threadNpcDoneAt = new Map();
+let tiebaMediaJob = null;
+let tiebaStockJob = null;
 
 const TIEBA_POST_WANT = 12;
 const TIEBA_REPLY_WANT = 10;
 const TIEBA_NAME_WANT = 16;
+const TIEBA_NPC_POOL = 24;
+const TIEBA_NPC_POOL_MIN = 12;
 
 const NPC_SYSTEM = `你在给一个虚拟贴吧写吧友发言。只输出一个 JSON 对象，不要 markdown，不要解释，不要思考过程。
 网名像真人随手起的，2 到 8 个字，彼此差得很远。性别和脾气都要岔开，不要全是同一类人。
@@ -691,6 +704,61 @@ function normalizeGender(raw) {
   return '不详';
 }
 
+function tryParseJson(src) {
+  try { return JSON.parse(src); } catch { /* 尾逗号 */ }
+  try { return JSON.parse(String(src || '').replace(/,\s*([}\]])/g, '$1')); } catch { return null; }
+}
+
+function closeTruncatedJson(text) {
+  const start = String(text || '').indexOf('{');
+  if (start < 0) return null;
+  let s = String(text).slice(start);
+  const wholeEnd = s.lastIndexOf('}');
+  if (wholeEnd > 0) {
+    const parsed = tryParseJson(s.slice(0, wholeEnd + 1));
+    if (parsed) return parsed;
+  }
+  let inStr = false;
+  let esc = false;
+  const stack = [];
+  let lastSafe = -1;
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{' || c === '[') stack.push(c);
+    else if ((c === '}' || c === ']') && stack.length) {
+      stack.pop();
+      if (stack.length > 0 && stack.length <= 2) lastSafe = i;
+    }
+  }
+  if (lastSafe < 1) return null;
+  s = s.slice(0, lastSafe + 1).replace(/,\s*$/, '');
+  inStr = false;
+  esc = false;
+  const rest = [];
+  for (let i = 0; i < s.length; i += 1) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{') rest.push('}');
+    else if (c === '[') rest.push(']');
+    else if ((c === '}' || c === ']') && rest.length) rest.pop();
+  }
+  if (inStr) return null;
+  return tryParseJson(s + rest.reverse().join(''));
+}
+
 function extractJsonObject(raw) {
   if (raw && typeof raw === 'object') return raw;
   let text = String(raw || '').trim();
@@ -701,18 +769,7 @@ function extractJsonObject(raw) {
     const open = text.match(/^```(?:json)?\s*/i);
     if (open) text = text.slice(open[0].length).replace(/```\s*$/i, '').trim();
   }
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) return null;
-  const slice = text.slice(start, end + 1);
-  try {
-    return JSON.parse(slice);
-  } catch { /* 再修一下尾逗号 */ }
-  try {
-    return JSON.parse(slice.replace(/,\s*([}\]])/g, '$1'));
-  } catch {
-    return null;
-  }
+  return closeTruncatedJson(text);
 }
 
 function asList(v) {
@@ -725,7 +782,7 @@ function asPerson(n) {
 }
 
 function asThreadItem(t) {
-  if (Array.isArray(t)) return { author: t[0], title: t[1], content: t[2], replies: t[3] };
+  if (Array.isArray(t)) return { author: t[0], title: t[1], content: t[2], replies: t[3], scene: t[4] };
   return t && typeof t === 'object' ? t : {};
 }
 
@@ -796,6 +853,60 @@ function paintBarAvatars(barId) {
   }
 }
 
+function rosterFromCtx(ctx, reserved, allowed) {
+  const map = new Map();
+  const names = [];
+  for (const n of asList(ctx.roster)) {
+    const person = asPerson(n);
+    const name = cleanNpcName(person?.name || n);
+    if (!name || map.has(name) || nameBlocked(name, reserved, allowed)) continue;
+    map.set(name, {
+      name,
+      gender: normalizeGender(person?.gender || person?.性别),
+      persona: clipText(person?.persona || person?.性格, 40) || '路过',
+    });
+    names.push(name);
+  }
+  return { map, names };
+}
+
+function bindSpeaker(raw, { reserved, allowed, rosterMap, rosterNames, keep, blocked, stale }) {
+  const name = cleanNpcName(raw);
+  const keepSet = keep || new Set();
+  const blockedSet = blocked || new Set();
+  if (name && !blockedSet.has(name) && (keepSet.has(name) || !nameBlocked(name, reserved, allowed))) {
+    const known = !rosterNames.length || rosterMap.has(name) || allowed.has(name) || keepSet.has(name);
+    const retired = stale && stale.has(name) && !allowed.has(name) && !rosterMap.has(name) && !keepSet.has(name);
+    if (known && !retired) return name;
+  }
+  if (!rosterNames.length) return '';
+  const fresh = rosterNames.find((cand) => !blockedSet.has(cand) && !(stale && stale.has(cand)));
+  if (fresh) return fresh;
+  return rosterNames.find((cand) => !blockedSet.has(cand)) || '';
+}
+
+function shapeTiebaNpcRoster(raw, ctx = {}) {
+  const data = extractJsonObject(raw);
+  if (!data || typeof data !== 'object') return null;
+  const reserved = ctx.reserved instanceof Set ? ctx.reserved : new Set(ctx.reserved || []);
+  const want = Math.min(16, Math.max(1, parseInt(ctx.want, 10) || 12));
+  const out = [];
+  const seen = new Set();
+  for (const rawNpc of asList(data.npcs || data.people || data.users)) {
+    const n = asPerson(rawNpc);
+    const name = cleanNpcName(n?.name || n?.author);
+    if (!name || seen.has(name) || reserved.has(name)) continue;
+    seen.add(name);
+    out.push({
+      name,
+      gender: normalizeGender(n?.gender || n?.性别),
+      persona: clipText(n?.persona || n?.personality || n?.性格, 16) || '路过',
+    });
+    if (out.length >= want) break;
+  }
+  return out.length ? out : null;
+}
+
 function shapeTiebaNpcThreads(raw, ctx = {}) {
   const data = extractJsonObject(raw);
   if (!data || typeof data !== 'object') return null;
@@ -804,6 +915,7 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
   const recentAuthors = new Set((ctx.recentAuthors || []).map((n) => String(n || '').trim()).filter(Boolean));
   const staleAuthors = new Set((ctx.staleAuthors || []).map((n) => String(n || '').trim()).filter(Boolean));
   const titleSeen = new Set((ctx.recentTitles || []).map((t) => clipText(t, 40)).filter(Boolean));
+  const { map: rosterMap, names: rosterNames } = rosterFromCtx(ctx, reserved, allowed);
   const personas = new Map();
   for (const rawNpc of asList(data.npcs || data.people || data.users)) {
     const n = asPerson(rawNpc);
@@ -815,17 +927,22 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
       persona: clipText(n?.persona || n?.personality || n?.性格, 40) || '路过',
     });
   }
-  const npcOf = (name) => personas.get(name) || { name, gender: '不详', persona: '路过' };
+  const npcOf = (name) => rosterMap.get(name) || personas.get(name) || { name, gender: '不详', persona: '路过' };
   const threads = [];
   const usedAuthors = new Set();
   const replyTextSeen = new Set();
   const castReplies = new Map();
   const replyCap = Math.min(15, Math.max(1, parseInt(ctx.replyLimit, 10) || 12));
+  let mediaTaken = false;
+  const speak = { reserved, allowed, rosterMap, rosterNames, stale: staleAuthors };
   for (const rawThread of asList(data.threads || data.posts || data.帖子)) {
     const t = asThreadItem(rawThread);
-    const author = cleanNpcName(t?.author || t?.name || t?.楼主 || t?.author_name);
-    if (!author || nameBlocked(author, reserved, allowed) || usedAuthors.has(author)) continue;
-    if (staleAuthors.has(author) && !allowed.has(author)) continue;
+    let author = bindSpeaker(t?.author || t?.name || t?.楼主 || t?.author_name, { ...speak, blocked: usedAuthors });
+    if (!author) continue;
+    if (rosterNames.length && recentAuthors.has(author) && !allowed.has(author)) {
+      const fresher = rosterNames.find((n) => !usedAuthors.has(n) && !recentAuthors.has(n));
+      if (fresher) author = fresher;
+    }
     const title = clipText(t?.title || t?.标题, 24);
     const content = clipText(t?.content || t?.正文 || t?.body, 48);
     if (title.length < 2 || content.length < 2) continue;
@@ -835,9 +952,8 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
     const replyNames = new Set([author]);
     for (const rawReply of asList(t?.replies || t?.回复).slice(0, replyCap)) {
       const r = asReplyItem(rawReply);
-      const rn = cleanNpcName(r?.author || r?.name);
-      if (!rn || nameBlocked(rn, reserved, allowed) || replyNames.has(rn)) continue;
-      if (staleAuthors.has(rn) && !allowed.has(rn)) continue;
+      const rn = bindSpeaker(r?.author || r?.name, { ...speak, blocked: replyNames });
+      if (!rn) continue;
       const rc = clipText(r?.content || r?.正文 || r?.body, 24);
       if (rc.length < 2 || rc === content || rc === title || replyTextSeen.has(rc)) continue;
       if (allowed.has(rn)) {
@@ -850,11 +966,27 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
       const to = Number(r?.reply_to ?? r?.replyTo ?? r?.reply_to_floor) === 1 ? 1 : 0;
       replies.push({ npc: npcOf(rn), content: rc, replyTo: to });
     }
+    let scene = '';
+    let video = false;
+    if (!mediaTaken) {
+      let rawScene = clipText(t?.scene || t?.image || t?.picture || '', 90);
+      if (/^video\s*[:：]/i.test(rawScene)) {
+        video = true;
+        rawScene = clipText(rawScene.replace(/^video\s*[:：]\s*/i, ''), 90);
+      }
+      if (rawScene.length >= 3) {
+        scene = rawScene;
+        video = video && scene.length >= 3;
+        mediaTaken = true;
+      }
+    }
     threads.push({
       npc: npcOf(author),
       title,
       content,
       replies,
+      scene,
+      video,
       fresh: allowed.has(author) || (!recentAuthors.has(author) && !usedAuthors.has(author)),
     });
     usedAuthors.add(author);
@@ -872,6 +1004,13 @@ function shapeTiebaNpcThreads(raw, ctx = {}) {
   const fresh = others.filter((t) => t.fresh);
   const pool = fresh.length ? fresh : others;
   const picked = [...castFirst, ...pool].slice(0, want);
+  if (picked.length && !picked.some((t) => t.scene)) {
+    const donor = threads.find((t) => t.scene);
+    if (donor) {
+      picked[0].scene = donor.scene;
+      picked[0].video = donor.video;
+    }
+  }
   return picked.length ? picked : null;
 }
 
@@ -883,6 +1022,8 @@ function shapeTiebaNpcReplies(raw, ctx = {}) {
   const staleAuthors = new Set((ctx.staleAuthors || []).map((n) => String(n || '').trim()).filter(Boolean));
   const floors = new Set((ctx.floors || []).map((n) => Number(n)).filter((n) => n > 0));
   const existing = new Set((ctx.existing || []).map((c) => clipText(c, 80)).filter(Boolean));
+  const keep = new Set((ctx.keepNames || []).map((n) => cleanNpcName(n)).filter(Boolean));
+  const { map: rosterMap, names: rosterNames } = rosterFromCtx(ctx, reserved, allowed);
   const personas = new Map();
   for (const rawNpc of asList(data.npcs || data.people)) {
     const n = asPerson(rawNpc);
@@ -897,11 +1038,11 @@ function shapeTiebaNpcReplies(raw, ctx = {}) {
   const replies = [];
   const used = new Set();
   const cap = Math.min(15, Math.max(1, parseInt(ctx.replyLimit, 10) || 12));
+  const speak = { reserved, allowed, rosterMap, rosterNames, keep, stale: staleAuthors };
   for (const rawReply of asList(data.replies || data.回复 || data.posts)) {
     const r = asReplyItem(rawReply);
-    const name = cleanNpcName(r?.author || r?.name);
-    if (!name || nameBlocked(name, reserved, allowed) || used.has(name)) continue;
-    if (staleAuthors.has(name) && !allowed.has(name)) continue;
+    const name = bindSpeaker(r?.author || r?.name, { ...speak, blocked: used });
+    if (!name) continue;
     const content = clipText(r?.content || r?.正文 || r?.body, 24);
     if (content.length < 2 || existing.has(content)) continue;
     let replyTo = parseInt(r?.reply_to_floor ?? r?.reply_to ?? r?.replyTo, 10) || 0;
@@ -909,7 +1050,7 @@ function shapeTiebaNpcReplies(raw, ctx = {}) {
     used.add(name);
     existing.add(content);
     replies.push({
-      npc: personas.get(name) || { name, gender: '不详', persona: '路过' },
+      npc: rosterMap.get(name) || personas.get(name) || { name, gender: '不详', persona: '路过' },
       content,
       replyTo,
     });
@@ -1011,7 +1152,7 @@ async function askTiebaJson(systemPrompt, userContent, opts = {}) {
       json: true,
       maxTokens: opts.maxTokens || 1600,
       temperature: 0.85,
-      timeout: 60000,
+      timeout: opts.timeout || 60000,
     });
   } catch (e) {
     throw new Error(tiebaLlmError(e));
@@ -1071,6 +1212,7 @@ function plusMinutesIso(iso, mins) {
 function insertNpcThreads(barId, threads, at) {
   return withTiebaTx(() => {
     let added = 0;
+    const created = [];
     let cursor = 0;
     const end = at || nowIso();
     const step = 4;
@@ -1108,12 +1250,13 @@ function insertNpcThreads(barId, threads, at) {
       if (lastAt !== posted) {
         db.prepare('UPDATE tieba_threads SET last_reply_at=? WHERE id=?').run(lastAt, threadId);
       }
+      created.push({ id: threadId, scene: t.scene || '', video: !!t.video });
       added += 1;
     }
     if (added) {
       db.prepare('UPDATE tieba_bars SET thread_count = thread_count + ? WHERE id=?').run(added, barId);
     }
-    return added;
+    return { added, created };
   });
 }
 
@@ -1271,9 +1414,9 @@ function batchScore(items) {
 
 function threadsFullEnough(items) {
   const list = items || [];
-  if (list.length < 8) return false;
+  if (list.length < 6) return false;
   const replies = list.reduce((n, t) => n + (t.replies?.length || 0), 0);
-  return replies >= 48;
+  return replies >= 18;
 }
 
 function threadAsk(bar, cast, handles, npcs, briefs, want) {
@@ -1299,17 +1442,21 @@ function threadAsk(bar, cast, handles, npcs, briefs, want) {
   if (cast.length) {
     const known = cast.filter(looksKnown).map((c) => c.name);
     if (known.length) {
-      lines.push(`正文里可以八卦 ${known.join('、')}，态度要不一样：有人粉、有人路人、有人阴阳。不要每帖同一句。发帖人仍然用贴吧号或新网名。`);
+      lines.push(`正文里可以八卦 ${known.join('、')}，态度要不一样：有人粉、有人路人、有人阴阳。不要每帖同一句。发帖人仍然用贴吧号或吧友网名，不要写本名。`);
     } else {
       lines.push('看人设像名人、偶像或传说人物的，正文里可以认出来，态度各不相同。看不出来就当普通邻居，不要每帖点名。');
     }
     lines.push('角色只供你把握他们会聊什么，不要把本名写进 author：');
     lines.push(cast.map(castLine).join('\n'));
   }
-  const shown = npcs.slice(0, 8);
-  if (shown.length) {
-    lines.push('这些旧网名不要再当楼主，也不要再拿来回复：');
-    for (const n of shown) lines.push(`- ${n.name}`);
+  const roster = (npcs || []).filter((n) => n?.name).slice(0, 16);
+  if (roster.length) {
+    lines.push('这些吧友已经在这个吧里。楼主和回复人只能从他们和上面的角色贴吧号里选，不要新造网名：');
+    for (const n of roster) {
+      const bit = [n.gender && n.gender !== '不详' ? n.gender : '', n.persona && n.persona !== '路过' ? n.persona : ''].filter(Boolean).join(' ');
+      lines.push(`- ${n.name}${bit ? ` ${bit}` : ''}`);
+    }
+    lines.push('优先让比较久没发帖的人当楼主。');
   }
   if (briefs.length) {
     lines.push('最近标题，不要再写类似的：');
@@ -1317,10 +1464,12 @@ function threadAsk(bar, cast, handles, npcs, briefs, want) {
   } else {
     lines.push('这个吧还没有帖。写出住在这里、或泡这个主题的人真的会发的帖。');
   }
-  const posts = Math.min(10, Math.max(8, want));
-  lines.push(`请新造 ${TIEBA_NAME_WANT} 个彼此不像的网名。连同角色贴吧号，一共写 ${posts} 个帖，每个帖 ${TIEBA_REPLY_WANT} 条别人的回复。`);
+  if (roster.length) lines.push('连同角色贴吧号，写 8 个帖，每个帖 6 条别人的短回复。不要新造网名，不要输出 npcs。');
+  else lines.push('请新造一批彼此不像的网名。连同角色贴吧号，写 8 个帖，每个帖 6 条别人的短回复。不要输出 npcs。');
   lines.push('楼主各不相同。回复的人不能是该帖楼主，每条回复的用词都不要重复。回复至少 2 个字。');
-  lines.push('只输出紧凑 JSON：{"npcs":[["网名","男或女","脾气"]],"threads":[["楼主","标题","正文",[["回复人","内容"],["回复人","内容"]]]]}');
+  lines.push('8 个帖里正好 1 个带一张随手拍。那个帖的数组最后多一项英文画面，不超过 12 个词，画面里不要文字。想发短视频就在这项开头写 video: 。其他帖不要这项。');
+  lines.push('只输出 {"threads":[["楼主","标题","正文",[["回复人","内容"]],"english scene"]]}');
+  lines.push('标题不超过 8 个字，正文不超过 16 个字，回复不超过 8 个字。');
   return lines.join('\n');
 }
 
@@ -1337,14 +1486,181 @@ function replyAsk(bar, thread, posts, handles, need, staleNames) {
   if (handles.length) {
     lines.push('角色贴吧号，可以拿来回帖，不要写他们的本名：');
     for (const h of handles) lines.push(`- ${h.handle}${h.real ? '（实名）' : ''}`);
-    lines.push('其中 2 到 4 条用这些号，其余用新网名。');
+    lines.push('其中 2 到 4 条用这些号。');
   }
-  const stale = (staleNames || []).slice(0, 8).map((n) => n.name || n).filter(Boolean);
-  if (stale.length) lines.push(`这些旧网名不要再用：${stale.join('、')}`);
-  lines.push(`请新造 ${Math.max(need + 2, 8)} 个没出现过的网名，写 ${need} 条新回复。每条一个不同的人，不要复读，不要自我介绍。`);
-  lines.push('只输出紧凑 JSON：{"npcs":[["网名","男或女","脾气"]],"replies":[["网名","内容",1]]}');
+  const roster = (staleNames || []).filter((n) => n?.name).slice(0, 16);
+  if (roster.length) {
+    lines.push('回复人只能从这些吧友和角色贴吧号里选，不要新造网名：');
+    lines.push(roster.map((n) => n.name).join('、'));
+    lines.push(`写 ${need} 条新回复。每条一个不同的人，不要复读，不要自我介绍。`);
+  } else {
+    lines.push(`请新造 ${Math.max(need + 2, 8)} 个没出现过的网名，写 ${need} 条新回复。每条一个不同的人，不要复读，不要自我介绍。`);
+  }
+  lines.push('不要输出 npcs。只输出 {"replies":[["网名","内容",1]]}');
   lines.push('第三个数是在回第几楼，不针对某一层就写 0。');
   return lines.join('\n');
+}
+
+function tiebaRoster(barId, handles) {
+  const skip = new Set((handles || []).map((h) => h.handle).filter(Boolean));
+  const rows = db.prepare(`
+    SELECT name, gender, persona FROM tieba_npcs
+    WHERE bar_id=?
+    ORDER BY id ASC
+  `).all(barId).filter((n) => n?.name && !skip.has(n.name));
+  const last = new Map();
+  for (const r of db.prepare(`
+    SELECT author_name, MAX(id) AS n FROM tieba_threads WHERE bar_id=? GROUP BY author_name
+  `).all(barId)) {
+    last.set(r.author_name, Number(r.n) || 0);
+  }
+  rows.sort((a, b) => (last.get(a.name) || 0) - (last.get(b.name) || 0));
+  return rows;
+}
+
+async function fillTiebaNpcPool(barId) {
+  const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(barId);
+  if (!bar) return { added: 0 };
+  const cast = barCast(bar);
+  const handles = ensureCharacterHandles(cast);
+  const have = tiebaRoster(bar.id, handles);
+  if (have.length >= TIEBA_NPC_POOL) return { added: 0, skipped: true };
+  const need = Math.min(12, TIEBA_NPC_POOL - have.length);
+  const reserved = reservedSpeakerNames([
+    bar.name,
+    ...cast.map((c) => c.name),
+    ...have.map((n) => n.name),
+    ...handles.map((h) => h.handle),
+  ]);
+  const lines = [
+    `吧名：${bar.name}`,
+    `主题：${clipText(bar.theme || bar.slogan || '日常', 80)}`,
+    have.length ? `这些网名已经有了，不要再用：${have.map((n) => n.name).slice(0, 24).join('、')}` : '这个吧还没有固定吧友。',
+    `请新造 ${need} 个彼此不像的贴吧网名，2 到 8 个字。性别岔开。脾气不超过 8 个字。`,
+    '不要用真人的本名，不要解释。只输出 {"npcs":[["网名","女","爱抬杠"]]}',
+  ];
+  const raw = await askTiebaJson(NPC_SYSTEM, lines.join('\n'), { maxTokens: 700, timeout: 20000 });
+  const people = shapeTiebaNpcRoster(raw, { reserved, want: need });
+  if (!people?.length) {
+    console.warn('[tieba] npc stock unparsed', String(raw).slice(0, 180));
+    return { added: 0 };
+  }
+  let added = 0;
+  for (const person of people) {
+    if (db.prepare('SELECT id FROM tieba_npcs WHERE bar_id=? AND name=?').get(bar.id, person.name)) continue;
+    ensureTiebaNpc(bar.id, person);
+    added += 1;
+  }
+  console.log('[tieba] npc stock', bar.id, bar.name, added);
+  return { added };
+}
+
+function stockTiebaNpcs(barId) {
+  const id = Number(barId);
+  if (!id) return Promise.resolve({ added: 0 });
+  const running = barStockJobs.get(id);
+  if (running) return running;
+  const job = fillTiebaNpcPool(id).finally(() => {
+    if (barStockJobs.get(id) === job) barStockJobs.delete(id);
+  });
+  barStockJobs.set(id, job);
+  return job;
+}
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label || 'timeout')), ms);
+    Promise.resolve(promise).then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    }, (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+function tiebaVideoDue(barId) {
+  const since = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+  const row = db.prepare(`
+    SELECT 1 AS ok FROM tieba_threads
+    WHERE bar_id=? AND media_type='video' AND created_at>=?
+    LIMIT 1
+  `).get(barId, since);
+  return !row;
+}
+
+function queueTiebaMedia(barId, created, opts = {}) {
+  const item = (created || []).find((row) => row?.id && row.scene);
+  if (!item || tiebaMediaJob) return;
+  if (!opts.scheduled) {
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    const recent = db.prepare(`
+      SELECT 1 AS ok FROM tieba_threads
+      WHERE bar_id=? AND IFNULL(media_url,'')!='' AND created_at>=?
+      LIMIT 1
+    `).get(barId, since);
+    if (recent) return;
+  }
+  const job = attachTiebaMedia(barId, item).finally(() => {
+    if (tiebaMediaJob === job) tiebaMediaJob = null;
+  });
+  tiebaMediaJob = job;
+}
+
+async function attachTiebaMedia(barId, item) {
+  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const settings = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  const api = require('./api-helper');
+  const prompt = `Casual phone photo, natural light, no text, no watermark, no logo. ${item.scene}`;
+  let url = '';
+  try {
+    url = await withTimeout(
+      api.generateImage(settings, prompt, null, { aspect: '3:4' }),
+      50000,
+      'image',
+    );
+  } catch (e) {
+    console.warn('[tieba] image', e.message);
+    return;
+  }
+  if (!url) {
+    console.warn('[tieba] image', api.getLastGenerateImageError?.() || 'empty');
+    return;
+  }
+  let type = 'image';
+  if (item.video && tiebaVideoDue(barId) && api.resolveImg2VideoConfig?.(settings)) {
+    try {
+      const videoUrl = await withTimeout(api.generateImageToVideo(settings, {
+        prompt: 'handheld phone video, slight natural movement, no text',
+        referenceImageUrl: url,
+        aspect: '3:4',
+        motionPromptCustom: item.scene,
+      }), 90000, 'video');
+      if (videoUrl) {
+        url = videoUrl;
+        type = 'video';
+      }
+    } catch (e) {
+      console.warn('[tieba] video', e.message);
+    }
+  }
+  db.prepare('UPDATE tieba_threads SET media_url=?, media_type=? WHERE id=?').run(url, type, item.id);
+  db.prepare('UPDATE tieba_posts SET media_url=?, media_type=? WHERE thread_id=? AND floor=1').run(url, type, item.id);
+  console.log('[tieba] media', item.id, type);
+}
+
+async function ensureTiebaRoster(bar) {
+  const handles = ensureCharacterHandles(barCast(bar));
+  let roster = tiebaRoster(bar.id, handles);
+  if (roster.length >= TIEBA_NPC_POOL_MIN) return { handles, roster: roster.slice(0, 16) };
+  try {
+    await stockTiebaNpcs(bar.id);
+  } catch (e) {
+    console.warn('[tieba] npc stock', e.message);
+  }
+  roster = tiebaRoster(bar.id, handles);
+  return { handles, roster: roster.slice(0, 16) };
 }
 
 async function generateBarNpcThreads(barId, opts = {}) {
@@ -1353,28 +1669,33 @@ async function generateBarNpcThreads(barId, opts = {}) {
   if (!bar) return { added: 0 };
   const want = TIEBA_POST_WANT;
   const cast = barCast(bar);
-  const handles = ensureCharacterHandles(cast);
-  const known = recentNpcs(barId, new Set(handles.map((h) => h.handle)));
+  const { handles, roster } = await ensureTiebaRoster(bar);
   const briefs = recentThreadBriefs(barId);
   const reserved = reservedSpeakerNames([bar.name, ...cast.map((c) => c.name)]);
   const allowed = allowHandles(reserved, handles);
+  const prior = roster.length
+    ? []
+    : recentNpcs(bar.id, allowed).map((n) => n.name);
   const ctx = {
     reserved,
     allowed,
     recentAuthors: briefs.map((b) => b.author_name).filter((n) => !allowed.has(n)),
-    staleAuthors: known.map((n) => n.name),
+    staleAuthors: prior,
+    roster,
     recentTitles: briefs.map((b) => b.title),
     want,
     replyLimit: 12,
   };
-  const base = threadAsk(bar, cast, handles, known, briefs, want);
+  const base = threadAsk(bar, cast, handles, roster, briefs, want);
   let best = null;
   let raw = '';
   const started = Date.now();
   for (let i = 0; i < 2; i += 1) {
     if (i > 0 && (Date.now() - started > 20000 || threadsFullEnough(best))) break;
-    const extra = i ? '\n上次太短或不是 JSON。这次只输出紧凑 JSON。楼主用新网名和角色贴吧号，每个帖 10 条不一样的短回复。' : '';
-    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 3600 });
+    const extra = i
+      ? `\n上次太短或不是 JSON。这次只输出紧凑 JSON。楼主用${roster.length ? '给定的吧友网名' : '新网名'}和角色贴吧号，每个帖 6 条不一样的短回复。`
+      : '';
+    raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 1800 });
     const parsed = shapeTiebaNpcThreads(raw, ctx);
     if (!parsed) continue;
     if (!best || batchScore(parsed) > batchScore(best)) best = parsed;
@@ -1385,8 +1706,10 @@ async function generateBarNpcThreads(barId, opts = {}) {
     throw new Error('吧友这会儿没写成，再拉一次');
   }
   const painted = paintHandleNpcs(best, handles);
-  const added = insertNpcThreads(bar.id, painted, opts.at || '');
+  const saved = insertNpcThreads(bar.id, painted, opts.at || '');
+  const added = saved?.added || 0;
   if (!added) throw new Error('吧友这会儿没写成，再拉一次');
+  queueTiebaMedia(bar.id, saved.created, opts);
   const replyN = painted.reduce((n, t) => n + (t.replies?.length || 0), 0);
   console.log('[tieba] npc threads', bar.id, bar.name, added, 'replies', replyN, opts.at || 'now');
   return { added };
@@ -1411,8 +1734,7 @@ async function generateThreadNpcReplies(threadId) {
     LIMIT 8
   `).all(threadId).reverse();
   const cast = barCast(bar);
-  const handles = ensureCharacterHandles(cast);
-  const known = recentNpcs(bar.id, new Set(handles.map((h) => h.handle)));
+  const { handles, roster } = await ensureTiebaRoster(bar);
   const reserved = reservedSpeakerNames([
     bar.name,
     thread.author_name,
@@ -1423,19 +1745,21 @@ async function generateThreadNpcReplies(threadId) {
   const ctx = {
     reserved,
     allowed,
-    staleAuthors: known.map((n) => n.name),
+    staleAuthors: roster.length ? [] : recentNpcs(bar.id, allowed).map((n) => n.name),
+    roster,
+    keepNames: posts.map((p) => p.author_name),
     floors,
     existing: posts.map((p) => p.content),
     replyLimit: need,
   };
-  const base = replyAsk(bar, thread, posts, handles, need, known);
+  const base = replyAsk(bar, thread, posts, handles, need, roster);
   let best = null;
   let raw = '';
   const started = Date.now();
   const enough = (list) => (list?.length || 0) >= Math.min(need, 8);
   for (let i = 0; i < 2; i += 1) {
     if (i > 0 && (Date.now() - started > 20000 || enough(best))) break;
-    const extra = i ? '\n上次太短或不是 JSON。这次只输出紧凑 JSON，回帖人必须是新网名或角色贴吧号。' : '';
+    const extra = i ? `\n上次太短或不是 JSON。这次只输出紧凑 JSON，回帖人必须是${roster.length ? '给定的吧友' : '新网名'}或角色贴吧号。` : '';
     raw = await askTiebaJson(NPC_SYSTEM, base + extra, { maxTokens: 1800 });
     const parsed = shapeTiebaNpcReplies(raw, ctx);
     if (!parsed) continue;
@@ -1455,6 +1779,119 @@ async function generateThreadNpcReplies(threadId) {
   if (!added) throw new Error('这会儿没人接话，再拉一次');
   console.log('[tieba] npc replies', thread.id, added);
   return { added };
+}
+
+async function respondToTiebaUser(threadId, userPost) {
+  if (!userPost?.content) return [];
+  ensureTiebaTables();
+  const thread = db.prepare('SELECT * FROM tieba_threads WHERE id=?').get(Number(threadId));
+  if (!thread) return [];
+  const bar = db.prepare('SELECT * FROM tieba_bars WHERE id=?').get(thread.bar_id);
+  if (!bar) return [];
+  const handles = ensureCharacterHandles(barCast(bar));
+  const parentFloor = Number(userPost.reply_to_floor) > 1 ? Number(userPost.reply_to_floor) : Number(userPost.floor);
+  const parent = parentFloor > 0
+    ? db.prepare('SELECT floor, author_name, content FROM tieba_posts WHERE thread_id=? AND floor=?').get(thread.id, parentFloor)
+    : null;
+  const reserved = reservedSpeakerNames([bar.name, userPost.author_name]);
+  const allowed = allowHandles(reserved, handles);
+  const roster = tiebaRoster(bar.id, handles).slice(0, 12);
+  const lines = [
+    `吧：${bar.name}`,
+    `帖子：${clipText(thread.title, 40)}`,
+    parent ? `这层楼是 ${parent.author_name}：${clipText(parent.content, 60)}` : '',
+    `${userPost.author_name} 刚说：${clipText(userPost.content, 80)}`,
+    handles.length ? `可以拿这些角色贴吧号接话，不要写本名：${handles.map((h) => h.handle).join('、')}` : '',
+    roster.length ? `旁人从这些吧友里选，不要新造网名：${roster.map((n) => n.name).join('、')}` : '',
+    parent && parent.author_name && parent.author_name !== userPost.author_name
+      ? `请让 ${parent.author_name} 先接一句，再加两个旁人。`
+      : '用三个不同的人接话。',
+    `不要用 ${userPost.author_name} 这个名字当回复人。要接住刚才那句话，每条不超过 16 个字。`,
+    '只输出 {"replies":[["网名","内容"]]}',
+  ].filter(Boolean);
+  const raw = await askTiebaJson(NPC_SYSTEM, lines.join('\n'), { maxTokens: 500, timeout: 18000 });
+  const shaped = shapeTiebaNpcReplies(raw, {
+    reserved,
+    allowed,
+    roster,
+    keepNames: [parent?.author_name],
+    staleAuthors: roster.length ? [] : recentNpcs(bar.id, allowed).map((n) => n.name),
+    floors: [parentFloor, 1].filter((n) => n > 0),
+    existing: [userPost.content],
+    replyLimit: 3,
+  });
+  if (!shaped?.length) return [];
+  const painted = shaped.map((r) => {
+    const hit = handles.find((h) => h.handle === r.npc?.name);
+    const npc = hit
+      ? { ...r.npc, characterId: hit.characterId, avatar: hit.avatar, persona: '角色' }
+      : r.npc;
+    return { ...r, npc, replyTo: parentFloor > 1 ? parentFloor : 0 };
+  });
+  const before = Number(db.prepare('SELECT last_floor FROM tieba_threads WHERE id=?').get(thread.id)?.last_floor || 0);
+  const added = insertNpcReplies(thread.id, painted);
+  if (!added) return [];
+  return db.prepare('SELECT * FROM tieba_posts WHERE thread_id=? AND floor>? ORDER BY floor ASC')
+    .all(thread.id, before)
+    .map(mapPost);
+}
+
+function listMyTiebaPosts(accountId) {
+  ensureTiebaTables();
+  return db.prepare(`
+    SELECT p.id, p.thread_id, p.floor, p.content, p.created_at, p.author_name,
+           t.title, b.name AS bar_name
+    FROM tieba_posts p
+    JOIN tieba_threads t ON t.id = p.thread_id
+    LEFT JOIN tieba_bars b ON b.id = t.bar_id
+    WHERE p.author_id=?
+    ORDER BY p.id DESC
+    LIMIT 30
+  `).all(Number(accountId));
+}
+
+function tiebaContactCards() {
+  ensureTiebaTables();
+  let friends = [];
+  try {
+    const contacts = require('./contact-helper');
+    friends = contacts.listFriendCharacters(db)
+      .filter((c) => c.contact_status === 'friend' && !contacts.isCircleNpcCharacter(c))
+      .slice(0, 12);
+  } catch (e) {
+    console.warn('[tieba] contacts', e.message);
+    return [];
+  }
+  if (!friends.length) return [];
+  const byId = new Map(friends.map((f) => [Number(f.id), f]));
+  return ensureCharacterHandles(friends).map((h) => ({
+    character_id: h.id,
+    handle: h.handle,
+    avatar: h.avatar || '',
+    real: !!h.real,
+    display_name: byId.get(Number(h.id))?.display_name || h.name,
+  }));
+}
+
+function tiebaPerson(handle) {
+  ensureTiebaTables();
+  const name = String(handle || '').trim();
+  if (!name) return null;
+  const row = db.prepare('SELECT handle, avatar, real_name FROM tieba_handles WHERE handle=?').get(name);
+  const threads = db.prepare(`
+    SELECT t.*, b.name AS bar_name
+    FROM tieba_threads t
+    LEFT JOIN tieba_bars b ON b.id = t.bar_id
+    WHERE t.author_name=?
+    ORDER BY t.id DESC
+    LIMIT 20
+  `).all(name).map(mapThread);
+  return {
+    handle: name,
+    avatar: row?.avatar || '',
+    real: Number(row?.real_name) === 1,
+    threads,
+  };
 }
 
 function cooldownLeft(doneAt, id) {
@@ -1666,14 +2103,37 @@ async function runDueTiebaNpcSlot(limit = 1) {
   return job;
 }
 
+async function stockOneThinTiebaBar() {
+  if (tiebaStockJob) return tiebaStockJob;
+  const job = (async () => {
+    ensureTiebaTables();
+    const mode = tiebaCityMode();
+    try { syncCityBars(mode); } catch (e) { console.warn('[tieba] npc stock', e.message); }
+    for (const bar of barsForNpcSchedule(mode)) {
+      if (barNpcJobs.has(bar.id) || barStockJobs.has(bar.id)) continue;
+      const n = Number(db.prepare('SELECT COUNT(*) AS n FROM tieba_npcs WHERE bar_id=?').get(bar.id)?.n || 0);
+      if (n >= TIEBA_NPC_POOL_MIN) continue;
+      return stockTiebaNpcs(bar.id);
+    }
+    return { added: 0 };
+  })().finally(() => {
+    if (tiebaStockJob === job) tiebaStockJob = null;
+  });
+  tiebaStockJob = job;
+  return job;
+}
+
 function startTiebaNpcSchedule() {
   if (tiebaSlotTimer) return;
-  tiebaSlotTimer = setInterval(() => {
-    runDueTiebaNpcSlot(1).catch((e) => console.warn('[tieba] npc slot', e.message));
-  }, 15 * 60 * 1000);
-  setTimeout(() => {
-    runDueTiebaNpcSlot(3).catch((e) => console.warn('[tieba] npc slot', e.message));
-  }, 20000);
+  const tick = (limit) => {
+    stockOneThinTiebaBar()
+      .catch((e) => console.warn('[tieba] npc stock', e.message))
+      .finally(() => {
+        runDueTiebaNpcSlot(limit).catch((e) => console.warn('[tieba] npc slot', e.message));
+      });
+  };
+  tiebaSlotTimer = setInterval(() => tick(1), 15 * 60 * 1000);
+  setTimeout(() => tick(3), 8000);
   if (tiebaSlotTimer.unref) tiebaSlotTimer.unref();
 }
 
@@ -1703,9 +2163,14 @@ module.exports = {
   barHasNpcThreads,
   refreshThreadNpcReplies,
   tiebaBarHandles,
+  respondToTiebaUser,
+  listMyTiebaPosts,
+  tiebaContactCards,
+  tiebaPerson,
   runDueTiebaNpcSlot,
   tiebaDueSlot,
   tiebaSlotStamp,
   shapeTiebaNpcThreads,
   shapeTiebaNpcReplies,
+  shapeTiebaNpcRoster,
 };
